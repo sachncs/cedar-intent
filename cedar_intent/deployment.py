@@ -4,6 +4,39 @@ A :class:`BundleExporter` produces a self-contained deployment artifact
 (a Cedar source bundle plus a manifest with a SHA-256 integrity hash).
 A :class:`DeploymentClient` pushes the bundle to either a local directory
 or a remote HTTP endpoint and records the deployment in the workspace.
+
+Bundle format
+-------------
+
+Every deployment produces a two-file artifact:
+
+* ``bundle.cedar`` - concatenated Cedar source for every compiled
+  policy in the domain.
+* ``manifest.json`` - metadata describing the bundle: domain, the
+  SHA-256 of ``bundle.cedar``, policy identifiers, creation timestamp,
+  and any user-supplied metadata.
+
+The bundle hash in the manifest is recomputed on read; a mismatch
+raises :class:`DeploymentError`, which protects against tampering
+during transport or storage.
+
+Network behavior
+----------------
+
+``DeploymentClient.deploy`` dispatches on the URL scheme. ``http://``
+and ``https://`` targets receive a JSON ``POST`` whose body is the
+manifest, with ``X-Cedar-Bundle-Hash`` and ``X-Cedar-Domain`` headers
+for downstream observability. Any 2xx response is treated as success
+and the deployment is recorded; anything else raises
+:class:`DeploymentError` with the response body captured in
+``DeploymentRecord.response``.
+
+Thread safety
+-------------
+
+:class:`BundleExporter` is stateless. :class:`DeploymentClient` holds
+only a timeout and is safe to share across threads provided the
+underlying ``urllib`` calls complete before another deployment starts.
 """
 
 from __future__ import annotations
@@ -26,6 +59,9 @@ from .policies import CompiledPolicy, Policy
 DEPLOYMENT_KIND_LOCAL = "local"
 DEPLOYMENT_KIND_HTTP = "http"
 
+#: Maximum number of bytes of the HTTP response body to capture in the
+#: deployment record. Larger responses are truncated so that the
+#: deployment history stays bounded.
 HTTP_RESPONSE_BODY_LIMIT = 512
 
 
@@ -50,7 +86,12 @@ class DeploymentManifest:
     metadata: Mapping[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> Mapping[str, Any]:
-        """Return a JSON-friendly representation including the Cedar source."""
+        """Return a JSON-friendly representation including the Cedar source.
+
+        The returned mapping is suitable for direct JSON serialization.
+        The full Cedar source is included so consumers do not need to
+        also read ``bundle.cedar`` when reconstructing the bundle.
+        """
         return {
             "domain": self.domain,
             "bundle_hash": self.bundle_hash,
@@ -61,7 +102,12 @@ class DeploymentManifest:
         }
 
     def to_manifest_payload(self) -> Mapping[str, Any]:
-        """Return the manifest payload without the bundled Cedar source."""
+        """Return the manifest payload without the bundled Cedar source.
+
+        Used when writing the manifest to disk so the Cedar source is
+        not duplicated in ``manifest.json`` (it lives in ``bundle.cedar``
+        alongside).
+        """
         return {
             "domain": self.domain,
             "bundle_hash": self.bundle_hash,
@@ -145,7 +191,19 @@ class BundleExporter:
         )
 
     def write_directory(self, manifest: DeploymentManifest, directory: Path) -> Path:
-        """Write ``manifest`` to ``directory`` and return the directory."""
+        """Write ``manifest`` to ``directory`` and return the directory.
+
+        Creates ``bundle.cedar`` and ``manifest.json`` in ``directory``.
+        Existing files in the directory are not removed; only the two
+        bundle artifacts are written.
+
+        Args:
+            manifest: Manifest to write.
+            directory: Target directory. Created if it does not exist.
+
+        Returns:
+            The directory the manifest was written to.
+        """
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "bundle.cedar").write_text(manifest.cedar, encoding="utf-8")
         (directory / "manifest.json").write_text(
@@ -157,8 +215,14 @@ class BundleExporter:
     def read_directory(self, directory: Path) -> DeploymentManifest:
         """Read a previously written manifest back from ``directory``.
 
+        Recomputes the bundle hash from ``bundle.cedar`` and compares
+        it against the manifest's recorded hash. A mismatch raises
+        :class:`DeploymentError`, which is the recommended signal for
+        tamper detection after transport.
+
         Args:
-            directory: Directory containing ``bundle.cedar`` and ``manifest.json``.
+            directory: Directory containing ``bundle.cedar`` and
+                ``manifest.json``.
 
         Returns:
             The reconstructed :class:`DeploymentManifest`.
@@ -218,7 +282,28 @@ class DeploymentClient:
         record_id: str | None = None,
         headers: Mapping[str, str] | None = None,
     ) -> DeploymentRecord:
-        """Push ``manifest`` to ``target`` (local path or http(s) URL)."""
+        """Push ``manifest`` to ``target`` (local path or http(s) URL).
+
+        Dispatches to :meth:`deploy_local` when ``target`` is a path
+        and to :meth:`deploy_http` when it has an ``http://`` or
+        ``https://`` scheme. The caller receives a :class:`DeploymentRecord`
+        describing the outcome.
+
+        Args:
+            manifest: Bundle to push.
+            target: Destination. Either a filesystem path or an
+                ``http(s)://`` URL.
+            record_id: Optional explicit identifier for the deployment
+                record. Auto-generated when omitted.
+            headers: Optional HTTP headers added to the POST request.
+
+        Returns:
+            The deployment record describing the outcome.
+
+        Raises:
+            DeploymentError: If the target is invalid, the HTTP
+                endpoint returns non-2xx, or the request fails.
+        """
         if not target.strip():
             raise DeploymentError("deployment target must be non-empty")
         parsed = urlparse(target)
@@ -235,7 +320,16 @@ class DeploymentClient:
         *,
         record_id: str | None = None,
     ) -> DeploymentRecord:
-        """Write ``manifest`` to ``directory`` and return the deployment record."""
+        """Write ``manifest`` to ``directory`` and return the deployment record.
+
+        Args:
+            manifest: Bundle to write.
+            directory: Target directory. Created if missing.
+            record_id: Optional explicit identifier for the record.
+
+        Returns:
+            The deployment record describing the local write.
+        """
         directory.parent.mkdir(parents=True, exist_ok=True)
         BundleExporter().write_directory(manifest, directory)
         return DeploymentRecord(
@@ -256,7 +350,27 @@ class DeploymentClient:
         record_id: str | None = None,
         headers: Mapping[str, str] | None = None,
     ) -> DeploymentRecord:
-        """POST ``manifest`` to ``url`` and return the deployment record."""
+        """POST ``manifest`` to ``url`` and return the deployment record.
+
+        Sends the full manifest (including the Cedar source) as JSON,
+        with ``X-Cedar-Bundle-Hash`` and ``X-Cedar-Domain`` headers
+        for downstream observability. Any 2xx response is treated as
+        success; any other status code raises :class:`DeploymentError`
+        with the response body captured.
+
+        Args:
+            manifest: Bundle to push.
+            url: HTTP endpoint accepting a JSON POST.
+            record_id: Optional explicit identifier for the record.
+            headers: Optional HTTP headers added to the POST.
+
+        Returns:
+            The deployment record describing the HTTP push.
+
+        Raises:
+            DeploymentError: If the endpoint returns non-2xx, the
+                request times out, or the network fails.
+        """
         payload = json.dumps(manifest.to_dict()).encode("utf-8")
         request = urllib.request.Request(
             url,
@@ -274,6 +388,9 @@ class DeploymentClient:
                 body = response.read().decode("utf-8", errors="replace")
                 status_code = getattr(response, "status", 200)
         except (urllib.error.URLError, TimeoutError, OSError) as error:
+            # ``URLError`` covers DNS, connection refused, and HTTPError;
+            # ``TimeoutError`` covers the configured timeout; ``OSError``
+            # covers network-stack failures on some platforms.
             raise DeploymentError(f"deployment to {url} failed: {error}") from error
         status = "deployed" if 200 <= status_code < 300 else "rejected"
         if status != "deployed":
