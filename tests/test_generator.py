@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import httpx
+import litellm
 import pytest
 
 from cedar_intent import (
@@ -143,7 +145,11 @@ def test_litellm_generator_validates_inputs() -> None:
 def test_litellm_generator_propagates_request_errors(schema: CedarSchema) -> None:
     generator = LiteLLMGenerator(model="provider/model")
     with patch("cedar_intent.generator.litellm.litellm.completion") as completion:
-        completion.side_effect = RuntimeError("network down")
+        completion.side_effect = litellm.exceptions.APIConnectionError(
+            message="network down",
+            llm_provider="provider",
+            model="model",
+        )
         with pytest.raises(GeneratorError):
             generator.generate(make_context(schema))
 

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import litellm
+from openai import APIError
 
 from ..compiler import PolicyIntent
 from ..errors import GeneratorError, ScopeError
@@ -97,8 +98,18 @@ class LiteLLMGenerator:
             options["fallbacks"] = list(self.fallbacks)
         try:
             response = litellm.completion(**options)
-        except Exception as error:
+        except APIError as error:
+            # ``APIError`` is the base class for every litellm-raised failure:
+            # authentication, rate limits, server errors, content policy
+            # violations, bad requests, and provider outages. The original
+            # exception is preserved as the cause so callers can inspect
+            # the upstream status code or message.
             raise GeneratorError(f"LiteLLM request failed: {error}") from error
+        except TimeoutError as error:
+            # ``litellm.completion`` raises the stdlib ``TimeoutError`` when
+            # the configured HTTP timeout elapses; surface it as a generator
+            # failure with a clear message.
+            raise GeneratorError(f"LiteLLM request timed out: {error}") from error
 
         content = self.extract_content(response)
         payload = self.parse_payload(content)
