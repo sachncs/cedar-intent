@@ -2,6 +2,34 @@
 
 Uses only the standard library ``sqlite3`` module. The database schema is
 created on demand and migrations are idempotent.
+
+Schema
+------
+
+Five tables back the five entity types exposed by the Protocol:
+
+* ``requirements`` (id PRIMARY KEY)
+* ``policies`` (id PRIMARY KEY, requirement_id REFERENCES requirements(id)
+  ON DELETE SET NULL)
+* ``drafts`` (id PRIMARY KEY, policy_id REFERENCES policies(id) logical
+  via the policy_id string)
+* ``reports`` (id AUTOINCREMENT PRIMARY KEY, policy_id logical)
+* ``deployments`` (id PRIMARY KEY, domain indexed)
+
+Foreign keys are enforced via ``PRAGMA foreign_keys = ON``. Drafts,
+reports, and deployments reference policies by string identifier
+rather than by SQL foreign key so they can outlive the policy they
+were attached to.
+
+Thread safety
+-------------
+
+``sqlite3.Connection`` serializes access internally. The
+:class:`SqliteRepository` is safe for concurrent use from multiple
+threads in the same process only when callers serialize the calls
+themselves; for parallel use, open one repository per thread. Cross-
+process access to the same database file is supported by SQLite but
+requires a per-process :class:`SqliteRepository` instance.
 """
 
 from __future__ import annotations
@@ -20,6 +48,7 @@ from ..errors import StorageError
 from ..requirements import Requirement
 from ..scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
 from .base import StoredDraft, StoredPolicy, StoredReport
+
 
 SCHEMA_STATEMENTS = (
     """
@@ -89,8 +118,9 @@ class SqliteRepository:
     """SQLite-backed repository.
 
     Attributes:
-        path: Filesystem location of the SQLite database file.
-        connection: Open connection to the database.
+        path: Filesystem location of the SQLite database file. The
+            parent directory is created on construction.
+        connection: Open :class:`sqlite3.Connection` to the database.
     """
 
     path: Path
@@ -100,20 +130,39 @@ class SqliteRepository:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(self.path)
         self.connection.row_factory = sqlite3.Row
+        # Foreign keys are off by default in sqlite3; enable them so the
+        # ON DELETE SET NULL clause on policies.requirement_id fires.
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.migrate()
 
     def migrate(self) -> None:
-        """Create schema objects that do not already exist."""
+        """Create every schema object that does not already exist.
+
+        Idempotent: every statement uses ``IF NOT EXISTS`` so calling
+        ``migrate`` repeatedly is safe and the repository is ready to
+        use as soon as construction completes.
+        """
         with self.connection:
             for statement in SCHEMA_STATEMENTS:
                 self.connection.execute(statement)
 
     def close(self) -> None:
-        """Close the underlying database connection."""
+        """Close the underlying database connection.
+
+        Idempotent: subsequent calls are no-ops because the underlying
+        :class:`sqlite3.Connection.close` is itself idempotent.
+        """
         self.connection.close()
 
     def add_requirement(self, requirement: Requirement) -> None:
+        """Add or replace ``requirement`` in the store.
+
+        Uses ``ON CONFLICT(id) DO UPDATE`` so re-adding the same
+        identifier updates the existing row instead of failing.
+
+        Args:
+            requirement: Requirement to store.
+        """
         with self.connection:
             self.connection.execute(
                 """
@@ -134,6 +183,11 @@ class SqliteRepository:
             )
 
     def get_requirement(self, requirement_id: str) -> Requirement:
+        """Return the requirement with ``requirement_id``.
+
+        Raises:
+            StorageError: If no requirement exists with that id.
+        """
         row = self.connection.execute(
             "SELECT * FROM requirements WHERE id = ?", (requirement_id,)
         ).fetchone()
@@ -142,6 +196,7 @@ class SqliteRepository:
         return requirement_from_row(dict(row))
 
     def list_requirements(self, domain: str | None = None) -> Sequence[Requirement]:
+        """Return all requirements, optionally filtered by ``domain``."""
         if domain is None:
             rows = self.connection.execute(
                 "SELECT * FROM requirements ORDER BY id"
@@ -153,6 +208,11 @@ class SqliteRepository:
         return [requirement_from_row(dict(row)) for row in rows]
 
     def remove_requirement(self, requirement_id: str) -> None:
+        """Remove the requirement with ``requirement_id``.
+
+        Raises:
+            StorageError: If no requirement exists with that id.
+        """
         with self.connection:
             cursor = self.connection.execute(
                 "DELETE FROM requirements WHERE id = ?", (requirement_id,)
@@ -161,6 +221,14 @@ class SqliteRepository:
                 raise StorageError(f"requirement {requirement_id!r} not found")
 
     def upsert_policy(self, policy: StoredPolicy) -> None:
+        """Insert or update ``policy`` in the store.
+
+        The ``intent`` field is serialized to JSON when present; ``None``
+        intents are persisted as SQL ``NULL``.
+
+        Args:
+            policy: Policy row to upsert.
+        """
         intent_payload = serialize_intent(policy.intent)
         with self.connection:
             self.connection.execute(
@@ -189,6 +257,11 @@ class SqliteRepository:
             )
 
     def get_policy(self, policy_id: str) -> StoredPolicy:
+        """Return the policy with ``policy_id``.
+
+        Raises:
+            StorageError: If no policy exists with that id.
+        """
         row = self.connection.execute(
             "SELECT * FROM policies WHERE id = ?", (policy_id,)
         ).fetchone()
@@ -197,6 +270,7 @@ class SqliteRepository:
         return policy_from_row(dict(row))
 
     def list_policies(self, domain: str | None = None) -> Sequence[StoredPolicy]:
+        """Return all policies, optionally filtered by ``domain``."""
         if domain is None:
             rows = self.connection.execute(
                 "SELECT * FROM policies ORDER BY id"
@@ -208,6 +282,11 @@ class SqliteRepository:
         return [policy_from_row(dict(row)) for row in rows]
 
     def remove_policy(self, policy_id: str) -> None:
+        """Remove the policy with ``policy_id``.
+
+        Raises:
+            StorageError: If no policy exists with that id.
+        """
         with self.connection:
             cursor = self.connection.execute(
                 "DELETE FROM policies WHERE id = ?", (policy_id,)
@@ -216,6 +295,7 @@ class SqliteRepository:
                 raise StorageError(f"policy {policy_id!r} not found")
 
     def record_draft(self, draft: StoredDraft) -> None:
+        """Append ``draft`` to the draft history."""
         with self.connection:
             self.connection.execute(
                 """
@@ -236,6 +316,11 @@ class SqliteRepository:
             )
 
     def latest_draft(self, policy_id: str) -> StoredDraft:
+        """Return the most recent draft for ``policy_id``.
+
+        Raises:
+            StorageError: If no drafts exist for ``policy_id``.
+        """
         row = self.connection.execute(
             "SELECT * FROM drafts WHERE policy_id = ? ORDER BY created_at DESC LIMIT 1",
             (policy_id,),
@@ -245,6 +330,7 @@ class SqliteRepository:
         return draft_from_row(dict(row))
 
     def list_drafts(self, policy_id: str | None = None) -> Sequence[StoredDraft]:
+        """Return all drafts, optionally filtered by ``policy_id``."""
         if policy_id is None:
             rows = self.connection.execute(
                 "SELECT * FROM drafts ORDER BY created_at"
@@ -257,6 +343,7 @@ class SqliteRepository:
         return [draft_from_row(dict(row)) for row in rows]
 
     def record_report(self, report: StoredReport) -> None:
+        """Append ``report`` to the report history, stamping ``created_at`` when missing."""
         created_at = report.created_at or datetime.now(UTC)
         with self.connection:
             self.connection.execute(
@@ -274,6 +361,11 @@ class SqliteRepository:
             )
 
     def latest_report(self, policy_id: str, kind: str) -> StoredReport:
+        """Return the most recent report for ``policy_id`` of ``kind``.
+
+        Raises:
+            StorageError: If no matching report exists.
+        """
         row = self.connection.execute(
             "SELECT * FROM reports WHERE policy_id = ? AND kind = ? "
             "ORDER BY created_at DESC LIMIT 1",
@@ -284,6 +376,7 @@ class SqliteRepository:
         return report_from_row(dict(row))
 
     def record_deployment(self, deployment: DeploymentRecord) -> None:
+        """Append ``deployment`` to the deployment history."""
         with self.connection:
             self.connection.execute(
                 """
@@ -307,6 +400,7 @@ class SqliteRepository:
     def list_deployments(
         self, domain: str | None = None
     ) -> Sequence[DeploymentRecord]:
+        """Return all deployments, optionally filtered by ``domain``."""
         if domain is None:
             rows = self.connection.execute(
                 "SELECT * FROM deployments ORDER BY created_at"
@@ -320,7 +414,14 @@ class SqliteRepository:
 
 
 def serialize_intent(intent: PolicyIntent | None) -> str | None:
-    """Serialize a :class:`PolicyIntent` to a JSON string."""
+    """Serialize a :class:`PolicyIntent` to a JSON string for SQLite storage.
+
+    Args:
+        intent: The intent to serialize, or ``None``.
+
+    Returns:
+        The JSON string, or ``None`` if ``intent`` is ``None``.
+    """
     if intent is None:
         return None
     payload = {
@@ -354,7 +455,16 @@ def serialize_intent(intent: PolicyIntent | None) -> str | None:
 
 
 def deserialize_intent(payload: str | None) -> PolicyIntent | None:
-    """Deserialize a :class:`PolicyIntent` from its JSON representation."""
+    """Deserialize a :class:`PolicyIntent` from its JSON representation.
+
+    Args:
+        payload: JSON string previously produced by
+            :func:`serialize_intent`, or ``None``.
+
+    Returns:
+        The reconstructed :class:`PolicyIntent`, or ``None`` if
+        ``payload`` is empty.
+    """
     if not payload:
         return None
     data = json.loads(payload)
@@ -390,7 +500,7 @@ def deserialize_intent(payload: str | None) -> PolicyIntent | None:
 
 
 def requirement_from_row(row: dict[str, Any]) -> Requirement:
-    """Build a :class:`Requirement` from a SQLite row dictionary."""
+    """Build a :class:`Requirement` from a SQLite requirements row."""
     from pathlib import Path
 
     return Requirement(
@@ -403,7 +513,7 @@ def requirement_from_row(row: dict[str, Any]) -> Requirement:
 
 
 def policy_from_row(row: dict[str, Any]) -> StoredPolicy:
-    """Build a :class:`StoredPolicy` from a SQLite row dictionary."""
+    """Build a :class:`StoredPolicy` from a SQLite policies row."""
     return StoredPolicy(
         id=row["id"],
         domain=row["domain"],
@@ -417,7 +527,7 @@ def policy_from_row(row: dict[str, Any]) -> StoredPolicy:
 
 
 def draft_from_row(row: dict[str, Any]) -> StoredDraft:
-    """Build a :class:`StoredDraft` from a SQLite row dictionary."""
+    """Build a :class:`StoredDraft` from a SQLite drafts row."""
     return StoredDraft(
         id=row["id"],
         policy_id=row["policy_id"],
@@ -430,7 +540,7 @@ def draft_from_row(row: dict[str, Any]) -> StoredDraft:
 
 
 def report_from_row(row: dict[str, Any]) -> StoredReport:
-    """Build a :class:`StoredReport` from a SQLite row dictionary."""
+    """Build a :class:`StoredReport` from a SQLite reports row."""
     return StoredReport(
         policy_id=row["policy_id"],
         kind=row["kind"],
@@ -441,7 +551,7 @@ def report_from_row(row: dict[str, Any]) -> StoredReport:
 
 
 def deployment_from_row(row: dict[str, Any]) -> DeploymentRecord:
-    """Build a :class:`DeploymentRecord` from a SQLite row dictionary."""
+    """Build a :class:`DeploymentRecord` from a SQLite deployments row."""
     return DeploymentRecord(
         id=row["id"],
         domain=row["domain"],
