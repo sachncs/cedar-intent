@@ -1,4 +1,37 @@
-"""cedar-intent public API."""
+"""cedar-intent public API.
+
+The package exposes a typed, OOP-first surface for compiling
+organizational authorization intent into validated, deployable
+Cedar policies. Every public symbol in ``__all__`` is documented
+under its own module; the package itself only re-exports.
+
+Architecture at a glance
+------------------------
+
+The pipeline flows:
+
+* :class:`~cedar_intent.requirements.Requirement` - Markdown with
+  stable id and domain.
+* :class:`~cedar_intent.policies.DraftPolicy` - scope-typed draft.
+* :class:`~cedar_intent.generator.Generator` produces a typed
+  :class:`~cedar_intent.compiler.PolicyIntent`; two implementations
+  ship (:class:`~cedar_intent.generator.OfflineGenerator` and
+  :class:`~cedar_intent.generator.LiteLLMGenerator`).
+* :func:`~cedar_intent.compiler.compile_intent` renders the intent to
+  Cedar source text.
+* :func:`~cedar_intent.validation.validate_cedar` runs Cedar parse and
+  schema validation.
+* :func:`~cedar_intent.scenarios.run_scenarios` exercises the policy
+  against authorization scenarios.
+* :func:`~cedar_intent.verification.verify_policies` runs static
+  checks for shadowing, redundancy, and coverage.
+* :class:`~cedar_intent.deployment.BundleExporter` and
+  :class:`~cedar_intent.deployment.DeploymentClient` produce and push
+  the deployment bundle.
+
+The :class:`Workspace` class orchestrates every stage and is the
+recommended entry point for Python users.
+"""
 
 from .compiler import CompiledSource, PolicyIntent, compile_intent
 from .deployment import (

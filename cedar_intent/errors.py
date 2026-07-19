@@ -1,8 +1,36 @@
 """Exception hierarchy for cedar-intent.
 
 Every error raised by the library inherits from :class:`CedarIntentError`,
-which lets callers handle the entire family with a single ``except`` clause.
-More specific categories are exposed as direct subclasses.
+which lets callers handle the entire family with a single ``except``
+clause. More specific categories are exposed as direct subclasses so
+callers can narrow their handling when needed.
+
+Hierarchy
+---------
+
+The hierarchy is organized by responsibility, not by layer:
+
+* :class:`CedarIntentError` - base class. Catch this when you want
+  every cedar-intent error.
+* :class:`ConfigError` - bad configuration (CLI flags, env vars,
+  invalid generator options).
+* :class:`RequirementError` - missing or malformed requirement files.
+* :class:`PolicyError` - policy-level issues, plus four subclasses:
+  :class:`CompilationError`, :class:`ValidationError`,
+  :class:`GeneratorError`, :class:`ScopeError`.
+* :class:`StorageError` - repository-level failures such as missing
+  records.
+* :class:`WorkspaceError` - workspace-level invariants violated.
+* :class:`DeploymentError` - deployment operation failed.
+
+Threading and pickling
+----------------------
+
+All exceptions are plain :class:`Exception` subclasses and are safe
+to propagate across thread boundaries. The :class:`ValidationError`
+adds ``errors`` and ``policy_source`` attributes for downstream
+diagnostic surfaces; other errors keep the default :class:`Exception`
+shape.
 """
 
 from __future__ import annotations
