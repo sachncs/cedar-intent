@@ -4,6 +4,39 @@ A :class:`Workspace` binds every cedar-intent concern together: it owns a
 repository, loads schemas and requirements from disk, drives generators,
 applies drafts, and exports validated policy bundles for embedded Cedar
 applications.
+
+Lifecycle
+---------
+
+A typical session runs through these stages:
+
+1. **Initialize** - :meth:`Workspace.create` or :meth:`Workspace.open`
+   creates or loads the workspace layout and storage.
+2. **Declare domain** - :meth:`Workspace.init_domain` creates the
+   directory layout and an empty schema for a domain.
+3. **Load requirements** - :meth:`Workspace.add_requirement_file` or
+   :meth:`Workspace.add_requirement_directory` registers Markdown
+   requirements.
+4. **Generate draft** - :meth:`Workspace.generate_draft` runs a
+   :class:`~cedar_intent.generator.Generator` against a draft and
+   persists the proposal.
+5. **Apply** - :meth:`Workspace.apply` or
+   :meth:`Workspace.apply_for_requirement` validates, optionally runs
+   scenarios, and persists a :class:`CompiledPolicy`.
+6. **Verify** - :meth:`Workspace.verify_domain` flags shadowing,
+   redundancy, and coverage gaps.
+7. **Deploy** - :meth:`Workspace.build_bundle`,
+   :meth:`Workspace.write_bundle`, and :meth:`Workspace.deploy` produce
+   and push the deployment artifact.
+
+Thread safety
+-------------
+
+A single :class:`Workspace` instance is safe for concurrent use from
+multiple threads only when the underlying :class:`Repository` supports
+it. The default :class:`SqliteRepository` serializes access through
+its connection; for heavy parallel use, prefer one workspace per
+thread.
 """
 
 from __future__ import annotations
@@ -100,14 +133,29 @@ class Workspace:
 
     @classmethod
     def in_memory(cls, path: Path | None = None) -> Workspace:
-        """Build an in-memory workspace for tests or ephemeral sessions."""
+        """Build an in-memory workspace for tests or ephemeral sessions.
+
+        Args:
+            path: Optional filesystem path used as the workspace root.
+                Defaults to the current directory.
+
+        Returns:
+            A :class:`Workspace` backed by an :class:`InMemoryRepository`.
+        """
         root = (path or Path.cwd()).resolve()
         return cls(
             root=root, repository=InMemoryRepository(), storage_path=root / "<memory>"
         )
 
     def requirements_directory(self, domain: str) -> Path:
-        """Return the directory holding requirement files for ``domain``."""
+        """Return the directory holding requirement files for ``domain``.
+
+        Args:
+            domain: Domain identifier.
+
+        Returns:
+            Path under ``<workspace>/<domain>/requirements/``.
+        """
         return self.root / domain / DEFAULT_REQUIREMENTS_DIRNAME
 
     def schema_path(self, domain: str) -> Path:
@@ -123,7 +171,18 @@ class Workspace:
         return self.root / domain / "policies"
 
     def init_domain(self, domain: str) -> Path:
-        """Create the directory layout for ``domain`` if it does not exist."""
+        """Create the directory layout for ``domain`` if it does not exist.
+
+        Creates ``<domain>/requirements/`` and ``<domain>/policies/``.
+        If ``<domain>/schema.json`` is missing, seeds an empty schema
+        with the domain name as the only namespace.
+
+        Args:
+            domain: Domain identifier to initialize.
+
+        Returns:
+            The path of the schema file after initialization.
+        """
         self.requirements_directory(domain).mkdir(parents=True, exist_ok=True)
         self.policies_directory(domain).mkdir(parents=True, exist_ok=True)
         if not self.schema_path(domain).exists():
@@ -134,13 +193,34 @@ class Workspace:
         return self.schema_path(domain)
 
     def load_schema(self, domain: str) -> CedarSchema:
-        """Load the Cedar schema for ``domain``."""
+        """Load and validate the Cedar schema for ``domain``.
+
+        Args:
+            domain: Domain identifier.
+
+        Returns:
+            A fully parsed :class:`CedarSchema`.
+
+        Raises:
+            cedar_intent.errors.ValidationError: If the schema file is
+                missing or invalid.
+        """
         return CedarSchema.from_json_file(self.schema_path(domain))
 
     def load_scenarios(self, domain: str) -> list[Scenario]:
         """Load authorization scenarios for ``domain``.
 
         Returns an empty list when the scenarios file does not exist.
+
+        Args:
+            domain: Domain identifier.
+
+        Returns:
+            A list of :class:`Scenario` objects.
+
+        Raises:
+            WorkspaceError: If the scenarios file exists but is not a
+                JSON list.
         """
         path = self.scenarios_path(domain)
         if not path.exists():
@@ -151,13 +231,30 @@ class Workspace:
         return load_scenarios(data)
 
     def add_requirement_file(self, path: Path) -> Requirement:
-        """Add a requirement from ``path`` and persist it."""
+        """Load a single requirement from ``path`` and persist it.
+
+        Args:
+            path: Markdown file to load.
+
+        Returns:
+            The loaded :class:`Requirement`.
+
+        Raises:
+            RequirementError: If the file is missing or malformed.
+        """
         requirement = load_requirement(path, workspace_root=self.root)
         self.repository.add_requirement(requirement)
         return requirement
 
     def add_requirement_directory(self, domain: str) -> list[Requirement]:
-        """Add every requirement in the domain's requirements directory."""
+        """Add every requirement in the domain's requirements directory.
+
+        Args:
+            domain: Domain identifier.
+
+        Returns:
+            The list of requirements loaded and persisted.
+        """
         added: list[Requirement] = []
         for requirement in load_requirements(
             self.requirements_directory(domain), workspace_root=self.root
@@ -167,19 +264,42 @@ class Workspace:
         return added
 
     def get_requirement(self, requirement_id: str) -> Requirement:
-        """Return the requirement with the given identifier."""
+        """Return the requirement with ``requirement_id``.
+
+        Raises:
+            StorageError: If no requirement exists with that id.
+        """
         return self.repository.get_requirement(requirement_id)
 
     def list_requirements(self, domain: str | None = None) -> list[Requirement]:
-        """Return requirements, optionally filtered by domain."""
+        """Return requirements, optionally filtered by ``domain``."""
         return list(self.repository.list_requirements(domain))
 
     def remove_requirement(self, requirement_id: str) -> None:
-        """Remove the requirement with the given identifier."""
+        """Remove the requirement with ``requirement_id``.
+
+        Raises:
+            StorageError: If no requirement exists with that id.
+        """
         self.repository.remove_requirement(requirement_id)
 
     def import_existing_policies(self, domain: str) -> list[ExistingPolicy]:
-        """Import Cedar files from the domain's policies directory."""
+        """Import Cedar files from the domain's policies directory.
+
+        Each ``*.cedar`` file in ``<domain>/policies/`` becomes a
+        synthetic :class:`Requirement` (named after the file stem) plus
+        an :class:`ExistingPolicy` carrying the Cedar source. The policy
+        is also upserted as a :class:`CompiledPolicy` so it shows up in
+        subsequent verification, test, and deployment runs.
+
+        Args:
+            domain: Domain identifier.
+
+        Returns:
+            The list of imported :class:`ExistingPolicy` objects, in
+            alphabetical order by file name. Empty when the policies
+            directory does not exist.
+        """
         existing: list[ExistingPolicy] = []
         directory = self.policies_directory(domain)
         if not directory.exists():
@@ -237,7 +357,22 @@ class Workspace:
         resource: ResourceScope | None = None,
         policy_id: str | None = None,
     ) -> DraftPolicy:
-        """Create a :class:`DraftPolicy` for the given requirement and scopes."""
+        """Create a :class:`DraftPolicy` for the given requirement and scopes.
+
+        Args:
+            requirement_id: Identifier of the requirement to draft.
+            principal: Optional principal scope. Defaults to ``any``.
+            action: Optional action scope. Defaults to ``any``.
+            resource: Optional resource scope. Defaults to ``any``.
+            policy_id: Optional explicit identifier. Defaults to
+                ``"draft-<requirement_id>"``.
+
+        Returns:
+            The constructed :class:`DraftPolicy`.
+
+        Raises:
+            StorageError: If the requirement does not exist.
+        """
         requirement = self.repository.get_requirement(requirement_id)
         return DraftPolicy.from_requirement(
             requirement,
@@ -248,7 +383,19 @@ class Workspace:
         )
 
     def list_existing_policies(self, domain: str) -> list[ExistingPolicy]:
-        """Return existing policies for ``domain`` as :class:`ExistingPolicy` objects."""
+        """Return existing policies for ``domain`` as :class:`ExistingPolicy` objects.
+
+        Includes both true existing policies and any policy persisted
+        with status ``"existing"``. The synthetic requirements
+        produced by :meth:`import_existing_policies` are looked up by
+        id when present.
+
+        Args:
+            domain: Domain identifier.
+
+        Returns:
+            A list of :class:`ExistingPolicy` in storage order.
+        """
         result: list[ExistingPolicy] = []
         for stored in self.repository.list_policies(domain=domain):
             requirement = self.repository.get_requirement(stored.requirement_id or stored.id)
@@ -263,7 +410,16 @@ class Workspace:
         return result
 
     def list_compiled_policies(self, domain: str) -> list[CompiledPolicy]:
-        """Return the compiled policies for ``domain`` as :class:`CompiledPolicy` objects."""
+        """Return the compiled policies for ``domain`` as :class:`CompiledPolicy` objects.
+
+        Args:
+            domain: Domain identifier.
+
+        Returns:
+            A list of compiled policies whose storage status is
+            ``"compiled"``. Orphan policies (those whose requirement has
+            been deleted) are silently skipped.
+        """
         result: list[CompiledPolicy] = []
         for stored in self.repository.list_policies(domain=domain):
             if stored.status != "compiled":
@@ -294,7 +450,18 @@ class Workspace:
         *,
         existing: Sequence[Policy] = (),
     ) -> tuple[DraftPolicy, GenerationResult]:
-        """Run ``generator`` against ``draft`` and persist the resulting proposal."""
+        """Run ``generator`` against ``draft`` and persist the resulting proposal.
+
+        Args:
+            draft: Draft whose scopes and requirement seed the generator.
+            schema: Cedar schema the draft must conform to.
+            generator: Generator that produces the typed intent.
+            existing: Existing policies the generator should be aware of.
+
+        Returns:
+            A tuple of ``(updated_draft, generation_result)``. The
+            returned draft carries the generator's Cedar and provenance.
+        """
         result = generator.generate(build_generation_context(draft, schema, existing))
         proposal = result.proposal
         qualified_intent = qualify_intent(proposal.intent, schema)
@@ -320,7 +487,16 @@ class Workspace:
         return new_draft, result
 
     def verify_domain(self, domain: str, schema: CedarSchema) -> VerificationReport:
-        """Run static verification on a domain's compiled policies."""
+        """Run static verification on a domain's compiled policies.
+
+        Args:
+            domain: Domain identifier.
+            schema: Cedar schema used to compute coverage.
+
+        Returns:
+            A :class:`VerificationReport` aggregating findings and
+            coverage metrics.
+        """
         policies = self.list_compiled_policies(domain)
         requirement_ids = [
             requirement.id for requirement in self.repository.list_requirements(domain=domain)
@@ -339,12 +515,32 @@ class Workspace:
         *,
         metadata: Mapping[str, str] | None = None,
     ) -> DeploymentManifest:
-        """Build a deployment manifest for ``domain`` from compiled policies."""
+        """Build a deployment manifest for ``domain`` from compiled policies.
+
+        Args:
+            domain: Domain identifier.
+            metadata: Optional deployment metadata included in the
+                manifest.
+
+        Returns:
+            The constructed :class:`DeploymentManifest`.
+
+        Raises:
+            DeploymentError: If no compiled policies are available.
+        """
         policies = self.list_compiled_policies(domain)
         return BundleExporter().build(domain, policies, metadata=metadata)
 
     def write_bundle(self, manifest: DeploymentManifest, directory: Path) -> Path:
-        """Write a manifest to ``directory`` without recording a deployment."""
+        """Write a manifest to ``directory`` without recording a deployment.
+
+        Args:
+            manifest: Manifest to write.
+            directory: Target directory. Created if it does not exist.
+
+        Returns:
+            The directory the manifest was written to.
+        """
         return BundleExporter().write_directory(manifest, directory)
 
     def deploy(
@@ -361,10 +557,14 @@ class Workspace:
             domain: Domain to deploy.
             target: Local directory path or ``http(s)://`` URL.
             timeout: HTTP timeout in seconds.
-            headers: Optional HTTP headers.
+            headers: Optional HTTP headers added to the POST request.
 
         Returns:
             The persisted :class:`DeploymentRecord`.
+
+        Raises:
+            DeploymentError: If no compiled policies are available or
+                the HTTP target returns non-2xx.
         """
         manifest = self.build_bundle(domain)
         client = DeploymentClient(timeout=timeout)
@@ -373,7 +573,7 @@ class Workspace:
         return record
 
     def list_deployments(self, domain: str | None = None) -> list[DeploymentRecord]:
-        """Return deployment records, optionally filtered by domain."""
+        """Return deployment records, optionally filtered by ``domain``."""
         return list(self.repository.list_deployments(domain=domain))
 
     def apply(
@@ -384,7 +584,21 @@ class Workspace:
         scenarios: Sequence[Scenario] = (),
         entities: Sequence[Mapping[str, Any]] = (),
     ) -> CompiledPolicy:
-        """Compile, validate, and persist ``draft`` as a :class:`CompiledPolicy`."""
+        """Compile, validate, and persist ``draft`` as a :class:`CompiledPolicy`.
+
+        Args:
+            draft: Draft to apply.
+            schema: Cedar schema to validate against.
+            scenarios: Optional authorization scenarios to run.
+            entities: Optional entities exposed to the Cedar engine.
+
+        Returns:
+            The persisted :class:`CompiledPolicy`.
+
+        Raises:
+            WorkspaceError: If the draft has no Cedar source, has
+                unresolved items, or any scenario fails.
+        """
         if draft.cedar is None or not draft.cedar.strip():
             raise WorkspaceError(
                 f"draft {draft.id} has no Cedar source; call generate before apply"
@@ -443,8 +657,8 @@ class Workspace:
         Args:
             requirement_id: Identifier of the requirement to apply.
             schema: Cedar schema the draft must validate against.
-            scopes: Optional ``(principal, action, resource)`` scopes to
-                seed the empty draft placeholder.
+            scopes: Optional ``(principal, action, resource)`` scopes
+                used to compute the draft's stable identifier.
             scenarios: Optional scenarios to run during validation.
 
         Returns:
@@ -470,7 +684,18 @@ class Workspace:
         return self.apply(draft, schema, scenarios=scenarios)
 
     def validate_policies(self, domain: str, schema: CedarSchema) -> ValidationReport:
-        """Validate every persisted compiled policy in ``domain``."""
+        """Validate every persisted compiled policy in ``domain``.
+
+        Args:
+            domain: Domain identifier.
+            schema: Cedar schema to validate against.
+
+        Returns:
+            A :class:`ValidationReport` describing the outcome.
+
+        Raises:
+            WorkspaceError: If no compiled policies exist for ``domain``.
+        """
         policies = [
             policy.cedar
             for policy in self.list_compiled_policies(domain)
@@ -487,7 +712,19 @@ class Workspace:
         *,
         entities: Sequence[Mapping[str, Any]] = (),
     ) -> TestReport:
-        """Run every scenario for ``domain`` against its compiled policies."""
+        """Run every scenario for ``domain`` against its compiled policies.
+
+        Args:
+            domain: Domain identifier.
+            schema: Cedar schema for scenario evaluation.
+            entities: Optional entities exposed to the Cedar engine.
+
+        Returns:
+            A :class:`TestReport` summarizing the outcomes.
+
+        Raises:
+            WorkspaceError: If no scenarios or no compiled policies exist.
+        """
         scenarios = self.load_scenarios(domain)
         if not scenarios:
             raise WorkspaceError(f"no scenarios for domain {domain!r}")
@@ -501,7 +738,22 @@ class Workspace:
         return run_scenarios(policies, list(entities), scenarios, schema=schema)
 
     def export_domain(self, domain: str, output: Path) -> Path:
-        """Write a Cedar bundle for ``domain`` to ``output``."""
+        """Write a Cedar bundle for ``domain`` to ``output``.
+
+        Concatenates every compiled policy for ``domain`` into a single
+        file separated by blank lines. Use this when the embedded Cedar
+        engine reads policies from a single file.
+
+        Args:
+            domain: Domain identifier.
+            output: Destination path. Parent directories are created.
+
+        Returns:
+            The path the bundle was written to.
+
+        Raises:
+            WorkspaceError: If no compiled policies exist for ``domain``.
+        """
         policies = self.list_compiled_policies(domain)
         if not policies:
             raise WorkspaceError(f"no policies to export for domain {domain!r}")
@@ -511,7 +763,12 @@ class Workspace:
         return output
 
     def close(self) -> None:
-        """Close any underlying resources owned by the repository."""
+        """Close any underlying resources owned by the repository.
+
+        Idempotent: subsequent calls are no-ops. Backends without a
+        ``close`` attribute are silently ignored (the in-memory
+        repository has nothing to release).
+        """
         if hasattr(self.repository, "close") and callable(self.repository.close):
             self.repository.close()
 
@@ -521,7 +778,16 @@ def build_generation_context(
     schema: CedarSchema,
     existing: Sequence[Policy],
 ) -> GenerationContext:
-    """Build a :class:`GenerationContext` for a draft and existing policies."""
+    """Build a :class:`GenerationContext` for a draft and existing policies.
+
+    Args:
+        draft: Draft whose requirement, schema, and scopes seed the context.
+        schema: Cedar schema for the generation pass.
+        existing: Existing policies to surface to the generator.
+
+    Returns:
+        A :class:`GenerationContext` ready to hand to a :class:`Generator`.
+    """
     existing_intents: list[PolicyIntent] = []
     for policy in existing:
         # Existing policies with no parsed intent are excluded from the
@@ -547,7 +813,18 @@ def build_stored_draft(
     result: GenerationResult,
     cedar: str,
 ) -> StoredDraft:
-    """Build a :class:`StoredDraft` from a draft and a generation result."""
+    """Build a :class:`StoredDraft` from a draft and a generation result.
+
+    Args:
+        draft: Draft whose id, unresolved items, and provenance are
+            preserved in the stored row.
+        result: Generation result carrying the model identifier and
+            request id.
+        cedar: Compiled Cedar source text.
+
+    Returns:
+        A :class:`StoredDraft` ready for insertion.
+    """
     return StoredDraft(
         id=str(uuid.uuid4()),
         policy_id=draft.id,
@@ -564,7 +841,16 @@ def build_stored_report(
     kind: str,
     report: ValidationReport | TestReport,
 ) -> StoredReport:
-    """Build a :class:`StoredReport` from a validation or test report."""
+    """Build a :class:`StoredReport` from a validation or test report.
+
+    Args:
+        policy_id: Identifier of the policy the report belongs to.
+        kind: Report kind (``"validation"`` or ``"test"``).
+        report: Source report whose payload is serialized to JSON.
+
+    Returns:
+        A :class:`StoredReport` with ``created_at`` set to the current time.
+    """
     return StoredReport(
         policy_id=policy_id,
         kind=kind,
@@ -575,7 +861,21 @@ def build_stored_report(
 
 
 def qualify_intent(intent: PolicyIntent, schema: CedarSchema) -> PolicyIntent:
-    """Return a copy of ``intent`` with namespace-qualified type names."""
+    """Return a copy of ``intent`` with namespace-qualified type names.
+
+    The generator emits ``User``, ``Photo``, ``viewPhoto`` and similar
+    names without their namespace prefix. ``qualify_intent`` looks each
+    one up in the schema and rewrites it with its namespace when there
+    is a unique match. Unresolved names pass through unchanged.
+
+    Args:
+        intent: Original intent from the generator.
+        schema: Cedar schema used for namespace lookup.
+
+    Returns:
+        A new :class:`PolicyIntent` with qualified principal, action,
+        and resource scopes.
+    """
     qualified_principal = PrincipalScope(
         kind=intent.principal.kind,
         type_name=schema.qualify_type_name(intent.principal.type_name),
@@ -610,7 +910,23 @@ def qualify_intent(intent: PolicyIntent, schema: CedarSchema) -> PolicyIntent:
 
 
 def find_action_namespace(action: ActionScope, schema: CedarSchema) -> str | None:
-    """Return the namespace that owns the given action, or ``None``."""
+    """Return the namespace that owns the given action, or ``None``.
+
+    Searches every namespace in ``schema.source`` for an action whose
+    identifier matches either ``action.name`` or ``action.group``. When
+    multiple namespaces claim the same action, the first one wins
+    (schemas with that pattern should be normalized before reaching
+    here).
+
+    Args:
+        action: Action scope whose namespace to resolve.
+        schema: Cedar schema used for the lookup.
+
+    Returns:
+        The matching namespace identifier, or ``None`` if the action is
+        not found in any namespace. Falls back to ``action.namespace``
+        when set, allowing the caller to preserve an existing namespace.
+    """
     for namespace, declaration in schema.source.items():
         if not isinstance(namespace, str) or not isinstance(declaration, Mapping):
             continue
