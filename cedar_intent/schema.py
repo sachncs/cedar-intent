@@ -34,14 +34,23 @@ class CedarSchema:
     def __post_init__(self) -> None:
         if not isinstance(self.source, Mapping) or not self.source:
             raise ValidationError(("schema must be a non-empty Cedar JSON object",), "")
+        # Two failure modes are possible when handing the mapping to Cedar:
+        # json.dumps raises TypeError when ``source`` contains non-JSON values
+        # such as bytes, sets, or custom objects; Schema.from_json_str raises
+        # ValueError when the resulting JSON does not match the Cedar schema
+        # grammar. Each mode is reported with a distinct message.
         try:
-            object.__setattr__(
-                self,
-                "handle",
-                Schema.from_json_str(json.dumps(dict(self.source), sort_keys=True)),
-            )
-        except (TypeError, ValueError) as error:
+            serialized = json.dumps(dict(self.source), sort_keys=True)
+        except TypeError as error:
+            raise ValidationError(
+                (f"schema contains values that are not JSON-serializable: {error}",),
+                "",
+            ) from error
+        try:
+            handle = Schema.from_json_str(serialized)
+        except ValueError as error:
             raise ValidationError((f"invalid Cedar JSON schema: {error}",), "") from error
+        object.__setattr__(self, "handle", handle)
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> CedarSchema:
