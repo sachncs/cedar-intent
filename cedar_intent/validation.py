@@ -55,18 +55,28 @@ def validate_cedar(policies: Sequence[str], schema: CedarSchema) -> ValidationRe
     """
     policy_text = tuple(policies)
     combined = "\n\n".join(policy_text)
+    # cedarpy raises TypeError for non-string policies and ValueError for
+    # malformed Cedar syntax; surface each with a distinct message.
     try:
         result = validate_policies(combined, schema.handle)
-    except (TypeError, ValueError) as error:
+    except TypeError as error:
+        raise ValidationError((f"policy input is not a string: {error}",), combined) from error
+    except ValueError as error:
         raise ValidationError((str(error),), combined) from error
     if not result.validation_passed:
         raise ValidationError(tuple(str(error) for error in result.errors), combined)
     formatted: list[str] = []
     for source in policy_text:
+        # ``format_policies`` only raises ValueError on truly unparseable
+        # input that was already accepted by validate_policies; the TypeError
+        # branch is defensive against the rare case where cedarpy tightens
+        # its typing.
         try:
             formatted.append(format_policies(source).strip())
-        except (TypeError, ValueError) as error:
+        except ValueError as error:
             raise ValidationError((f"format failed: {error}",), source) from error
+        except TypeError as error:
+            raise ValidationError((f"format received non-string input: {error}",), source) from error
     return ValidationReport(passed=True, errors=(), formatted=tuple(formatted))
 
 
