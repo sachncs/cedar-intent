@@ -47,7 +47,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .compiler import PolicyIntent, compile_intent
 from .deployment import (
@@ -62,7 +62,7 @@ from .policies import CompiledPolicy, DraftPolicy, ExistingPolicy, Policy
 from .requirements import Requirement, load_requirement, load_requirements
 from .scenarios import Scenario, TestReport, load_scenarios, run_scenarios
 from .schema import CedarSchema
-from .scopes import ActionScope, PrincipalScope, ResourceScope
+from .scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
 from .storage import (
     InMemoryRepository,
     Repository,
@@ -336,6 +336,13 @@ class Workspace:
             intent = policy.to_intent()
         except PolicyError:
             intent = None
+        from .scope_json import action_scope_to_dict
+
+        action_json: str | None = None
+        if intent is not None:
+            action_json = json.dumps(
+                action_scope_to_dict(intent.action), sort_keys=True
+            )
         stored = StoredPolicy(
             id=policy.id,
             domain=policy.requirement.domain,
@@ -345,6 +352,7 @@ class Workspace:
             status=policy.kind(),
             created_at=policy.created_at,
             updated_at=datetime.now(UTC),
+            action_scope_json=action_json,
         )
         self.repository.upsert_policy(stored)
 
@@ -652,7 +660,10 @@ class Workspace:
         """Apply the most recent draft that addresses ``requirement_id``.
 
         Looks up the requirement, finds the latest stored draft for it,
-        and applies that draft.
+        and applies that draft. The reconstructed :class:`DraftPolicy`
+        carries the typed intent and original scopes read from the
+        stored JSON columns, so verification and deployment see exactly
+        what the generator produced.
 
         Args:
             requirement_id: Identifier of the requirement to apply.
@@ -667,6 +678,12 @@ class Workspace:
         Raises:
             WorkspaceError: If no draft exists for the requirement.
         """
+        from .scope_json import (
+            action_scope_from_dict,
+            principal_scope_from_dict,
+            resource_scope_from_dict,
+        )
+
         requirement = self.repository.get_requirement(requirement_id)
         placeholder = DraftPolicy.from_requirement(
             requirement,
@@ -674,12 +691,28 @@ class Workspace:
             action=scopes[1],
             resource=scopes[2],
         )
-        stored_draft = self.repository.latest_draft(placeholder.id)
+        try:
+            stored_draft = self.repository.latest_draft(placeholder.id)
+        except StorageError as error:
+            raise WorkspaceError(
+                f"no draft exists for requirement {requirement_id!r}; "
+                "run 'cedar-intent policy generate' first"
+            ) from error
+        intent = intent_from_draft(stored_draft, placeholder.id, requirement_id)
+        principal_payload = loads_optional_json(stored_draft.principal_scope_json)
+        action_payload = loads_optional_json(stored_draft.action_scope_json)
+        resource_payload = loads_optional_json(stored_draft.resource_scope_json)
         draft = DraftPolicy(
             id=stored_draft.policy_id,
             requirement=requirement,
             cedar=stored_draft.cedar,
             unresolved=stored_draft.unresolved,
+            principal=principal_scope_from_dict(principal_payload)
+            or placeholder.principal,
+            action=action_scope_from_dict(action_payload) or placeholder.action,
+            resource=resource_scope_from_dict(resource_payload) or placeholder.resource,
+            intent=intent,
+            status="proposed",
         )
         return self.apply(draft, schema, scenarios=scenarios)
 
@@ -815,6 +848,13 @@ def build_stored_draft(
 ) -> StoredDraft:
     """Build a :class:`StoredDraft` from a draft and a generation result.
 
+    The returned :class:`StoredDraft` carries the typed intent and the
+    three scope JSON blobs alongside the existing Cedar text. Those
+    fields are required for verification and deployment: when
+    :meth:`Workspace.apply_for_requirement` reads the draft back, the
+    reconstructed :class:`DraftPolicy` carries the original scopes and
+    intent, not a fabricated placeholder.
+
     Args:
         draft: Draft whose id, unresolved items, and provenance are
             preserved in the stored row.
@@ -825,6 +865,44 @@ def build_stored_draft(
     Returns:
         A :class:`StoredDraft` ready for insertion.
     """
+    from .scope_json import (
+        action_scope_to_dict,
+        principal_scope_to_dict,
+        resource_scope_to_dict,
+    )
+
+    intent_json: str | None = None
+    if draft.intent is not None:
+        intent_json = json.dumps(
+            {
+                "id": draft.intent.id,
+                "requirement_id": draft.intent.requirement_id,
+                "effect": draft.intent.effect,
+                "principal": principal_scope_to_dict(draft.intent.principal),
+                "action": action_scope_to_dict(draft.intent.action),
+                "resource": resource_scope_to_dict(draft.intent.resource),
+                "when": [clause.body for clause in draft.intent.when_clauses],
+                "unless": [clause.body for clause in draft.intent.unless_clauses],
+                "notes": dict(draft.intent.notes),
+            },
+            sort_keys=True,
+        )
+    principal_json = (
+        json.dumps(principal_scope_to_dict(draft.principal), sort_keys=True)
+        if draft.principal is not None
+        else None
+    )
+    action_json = (
+        json.dumps(action_scope_to_dict(draft.action), sort_keys=True)
+        if draft.action is not None
+        else None
+    )
+    resource_json = (
+        json.dumps(resource_scope_to_dict(draft.resource), sort_keys=True)
+        if draft.resource is not None
+        else None
+    )
+
     return StoredDraft(
         id=str(uuid.uuid4()),
         policy_id=draft.id,
@@ -833,6 +911,10 @@ def build_stored_draft(
         unresolved=draft.unresolved,
         cedar=cedar,
         created_at=datetime.now(UTC),
+        intent_json=intent_json,
+        principal_scope_json=principal_json,
+        action_scope_json=action_json,
+        resource_scope_json=resource_json,
     )
 
 
@@ -944,6 +1026,73 @@ def resolve_test_entities(
 ) -> list[Mapping[str, Any]]:
     """Normalize test entities for passing into the Cedar engine."""
     return [dict(entity) for entity in entities]
+
+
+def loads_optional_json(payload: str | None) -> dict[str, Any] | None:
+    """Deserialize a JSON string into a dict, returning ``None`` for empty input.
+
+    Args:
+        payload: JSON string to deserialize, or ``None``.
+
+    Returns:
+        The deserialized dict, or ``None`` when ``payload`` is empty or
+        not a JSON object.
+    """
+    if not payload:
+        return None
+    data = json.loads(payload)
+    if not isinstance(data, dict):
+        return None
+    return cast(dict[str, Any], data)
+
+
+def intent_from_draft(
+    draft: StoredDraft, intent_id: str, requirement_id: str
+) -> PolicyIntent | None:
+    """Rebuild the typed intent for a stored draft.
+
+    When the stored draft carries ``intent_json``, that JSON is parsed
+    into a typed :class:`PolicyIntent`. When the JSON is missing (legacy
+    drafts migrated by :func:`migrate_legacy_rows`), a permissive
+    fallback intent is constructed so that downstream callers see a
+    typed object instead of ``None``.
+    """
+    from .scope_json import (
+        action_scope_from_dict,
+        principal_scope_from_dict,
+        resource_scope_from_dict,
+    )
+
+    if draft.intent_json:
+        data = loads_optional_json(draft.intent_json)
+        if data is not None:
+            return PolicyIntent(
+                id=str(data.get("id", intent_id)),
+                requirement_id=str(data.get("requirement_id", requirement_id)),
+                effect=data.get("effect", "permit"),
+                principal=principal_scope_from_dict(data.get("principal"))
+                or PrincipalScope(),
+                action=action_scope_from_dict(data.get("action")) or ActionScope(),
+                resource=resource_scope_from_dict(data.get("resource"))
+                or ResourceScope(),
+                when_clauses=tuple(
+                    ConditionClause(body=body) for body in data.get("when", []) or []
+                ),
+                unless_clauses=tuple(
+                    ConditionClause(body=body) for body in data.get("unless", []) or []
+                ),
+                notes=dict(data.get("notes", {}) or {}),
+            )
+    text = draft.cedar.strip().lower()
+    effect = "forbid" if text.startswith("forbid") else "permit"
+    return PolicyIntent(
+        id=intent_id,
+        requirement_id=requirement_id,
+        effect=effect,  # type: ignore[arg-type]
+        principal=PrincipalScope(),
+        action=ActionScope(),
+        resource=ResourceScope(),
+    )
 
 
 __all__ = [

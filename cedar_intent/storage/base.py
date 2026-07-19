@@ -12,8 +12,9 @@ Every repository covers the same five tables:
 
 * ``requirements`` - one row per loaded :class:`~cedar_intent.requirements.Requirement`.
 * ``policies`` - one row per compiled policy, with the typed intent
-  stored as JSON.
-* ``drafts`` - the full history of generator proposals per policy.
+  and action namespace stored as JSON.
+* ``drafts`` - the full history of generator proposals per policy,
+  including the proposal's typed intent and per-slot scope JSON.
 * ``reports`` - the full history of validation and scenario reports.
 * ``deployments`` - the full audit log of bundle deployments.
 
@@ -31,6 +32,19 @@ single process. The in-memory repository is implicitly thread-safe
 because it uses plain dicts and lists; the SQLite repository relies
 on sqlite3's per-connection serialization, so callers should use a
 single repository instance per process or open one per thread.
+
+Schema migration
+----------------
+
+Starting with cedar-intent 0.6.0, :class:`StoredDraft` carries the
+typed intent and per-slot scope JSON, and :class:`StoredPolicy`
+carries the action namespace. Older databases created before this
+version are upgraded on first open by
+:func:`cedar_intent.migrations.detect_legacy_rows` and
+:func:`cedar_intent.migrations.migrate_legacy_rows`, exposed via the
+``cedar-intent migrate`` CLI subcommand. Until the migration runs,
+:class:`SqliteRepository` raises :class:`StorageError` on open so
+operators cannot accidentally work with a half-migrated store.
 """
 
 from __future__ import annotations
@@ -60,6 +74,9 @@ class StoredPolicy:
         status: Lifecycle status (``"draft"``, ``"existing"``, ``"compiled"``).
         created_at: Timestamp at which the row was first inserted.
         updated_at: Timestamp of the most recent upsert.
+        action_scope_json: Optional JSON-serialized :class:`ActionScope`
+            captured when the policy was compiled, used to keep the
+            action namespace authoritative across reloads.
     """
 
     id: str
@@ -70,6 +87,7 @@ class StoredPolicy:
     status: str
     created_at: datetime
     updated_at: datetime
+    action_scope_json: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +102,15 @@ class StoredDraft:
         unresolved: Items the generator could not safely resolve.
         cedar: Cedar source text produced by the generator.
         created_at: Timestamp at which the draft was recorded.
+        intent_json: JSON-serialized :class:`PolicyIntent` carried by
+            the generator proposal. Required for verification to reason
+            about the proposal without re-parsing.
+        principal_scope_json: JSON-serialized principal scope carried by
+            the proposal.
+        action_scope_json: JSON-serialized action scope carried by the
+            proposal.
+        resource_scope_json: JSON-serialized resource scope carried by
+            the proposal.
     """
 
     id: str
@@ -93,6 +120,10 @@ class StoredDraft:
     unresolved: tuple[str, ...]
     cedar: str
     created_at: datetime
+    intent_json: str | None = None
+    principal_scope_json: str | None = None
+    action_scope_json: str | None = None
+    resource_scope_json: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

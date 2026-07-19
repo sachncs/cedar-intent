@@ -53,6 +53,7 @@ def make_policy(identifier: str, domain: str = "hr") -> StoredPolicy:
         status="compiled",
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
+        action_scope_json='{"kind": "any"}',
     )
 
 

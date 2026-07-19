@@ -31,6 +31,17 @@ The pipeline flows:
 
 The :class:`Workspace` class orchestrates every stage and is the
 recommended entry point for Python users.
+
+Schema migration
+----------------
+
+Starting with cedar-intent 0.6.0, every stored :class:`StoredDraft`
+carries a JSON-serialized typed intent and per-slot scope JSON, and
+every :class:`StoredPolicy` carries the action scope JSON.
+:mod:`cedar_intent.migrations` exposes detection and migration
+helpers; the CLI surfaces them as ``cedar-intent migrate``. SQLite
+workspaces created before this version refuse to open until the
+migration has run, so the new fields are guaranteed to be populated.
 """
 
 from .compiler import CompiledSource, PolicyIntent, compile_intent
@@ -62,10 +73,21 @@ from .generator import (
     LiteLLMGenerator,
     OfflineGenerator,
 )
+from .migrations import detect_legacy_rows, migrate_legacy_rows
 from .policies import CompiledPolicy, DraftPolicy, ExistingPolicy, Policy
 from .requirements import Requirement, load_requirement, load_requirements, render_requirement
 from .scenarios import Scenario, ScenarioResult, TestReport, load_scenarios, run_scenarios
 from .schema import CedarSchema
+from .scope_json import (
+    action_scope_from_dict,
+    action_scope_to_dict,
+    condition_clauses_from_list,
+    condition_clauses_to_list,
+    principal_scope_from_dict,
+    principal_scope_to_dict,
+    resource_scope_from_dict,
+    resource_scope_to_dict,
+)
 from .scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
 from .storage import InMemoryRepository, Repository, SqliteRepository
 from .validation import ValidationReport, validate_cedar
@@ -77,7 +99,7 @@ from .verification import (
 )
 from .workspace import Workspace
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "ActionScope",
@@ -124,13 +146,23 @@ __all__ = [
     "Workspace",
     "WorkspaceError",
     "__version__",
+    "action_scope_from_dict",
+    "action_scope_to_dict",
     "compile_intent",
+    "condition_clauses_from_list",
+    "condition_clauses_to_list",
+    "detect_legacy_rows",
     "extract_entity_types",
     "generate_record_id",
     "load_requirement",
     "load_requirements",
     "load_scenarios",
+    "migrate_legacy_rows",
+    "principal_scope_from_dict",
+    "principal_scope_to_dict",
     "render_requirement",
+    "resource_scope_from_dict",
+    "resource_scope_to_dict",
     "run_scenarios",
     "validate_cedar",
     "verify_policies",

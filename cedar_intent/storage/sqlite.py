@@ -16,10 +16,12 @@ Five tables back the five entity types exposed by the Protocol:
 * ``reports`` (id AUTOINCREMENT PRIMARY KEY, policy_id logical)
 * ``deployments`` (id PRIMARY KEY, domain indexed)
 
-Foreign keys are enforced via ``PRAGMA foreign_keys = ON``. Drafts,
-reports, and deployments reference policies by string identifier
-rather than by SQL foreign key so they can outlive the policy they
-were attached to.
+Starting with cedar-intent 0.6.0, every row in ``policies`` and
+``drafts`` carries additional JSON columns that capture the typed
+intent and per-slot scopes. Older databases are upgraded in place by
+:meth:`SqliteRepository.migrate` followed by a strict-refusal check
+in :meth:`SqliteRepository.__post_init__` that raises
+:class:`StorageError` when any legacy row remains.
 
 Thread safety
 -------------
@@ -45,6 +47,7 @@ from typing import Any
 from ..compiler import PolicyIntent
 from ..deployment import DeploymentRecord
 from ..errors import StorageError
+from ..migrations import detect_legacy_rows
 from ..requirements import Requirement
 from ..scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
 from .base import StoredDraft, StoredPolicy, StoredReport
@@ -69,6 +72,7 @@ SCHEMA_STATEMENTS = (
         status TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
+        action_scope_json TEXT,
         FOREIGN KEY (requirement_id) REFERENCES requirements(id) ON DELETE SET NULL
     )
     """,
@@ -80,7 +84,11 @@ SCHEMA_STATEMENTS = (
         request_id TEXT,
         unresolved_json TEXT NOT NULL,
         cedar TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        intent_json TEXT,
+        principal_scope_json TEXT,
+        action_scope_json TEXT,
+        resource_scope_json TEXT
     )
     """,
     """
@@ -112,6 +120,21 @@ SCHEMA_STATEMENTS = (
 )
 
 
+# ALTER TABLE statements that add the new JSON columns introduced in
+# 0.6.0. Each statement is wrapped in a check against ``sqlite_master``
+# so it is idempotent. ``ALTER TABLE ... ADD COLUMN`` does not accept
+# ``IF NOT EXISTS`` on older SQLite versions, hence the manual guard.
+_ALTER_INTENT_JSON = (
+    "ALTER TABLE policies ADD COLUMN action_scope_json TEXT",
+)
+_ALTER_DRAFT_COLUMNS = (
+    "ALTER TABLE drafts ADD COLUMN intent_json TEXT",
+    "ALTER TABLE drafts ADD COLUMN principal_scope_json TEXT",
+    "ALTER TABLE drafts ADD COLUMN action_scope_json TEXT",
+    "ALTER TABLE drafts ADD COLUMN resource_scope_json TEXT",
+)
+
+
 @dataclass
 class SqliteRepository:
     """SQLite-backed repository.
@@ -133,17 +156,56 @@ class SqliteRepository:
         # ON DELETE SET NULL clause on policies.requirement_id fires.
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.migrate()
+        self.refuse_legacy_rows()
+
+    def column_exists(self, table: str, column: str) -> bool:
+        """Return ``True`` when ``table.column`` exists in the schema.
+
+        Args:
+            table: Table name to inspect.
+            column: Column name to look up.
+        """
+        rows = self.connection.execute(
+            f"PRAGMA table_info({table})"
+        ).fetchall()
+        return any(row["name"] == column for row in rows)
 
     def migrate(self) -> None:
-        """Create every schema object that does not already exist.
+        """Create schema objects and add 0.6.0 columns when missing.
 
-        Idempotent: every statement uses ``IF NOT EXISTS`` so calling
-        ``migrate`` repeatedly is safe and the repository is ready to
-        use as soon as construction completes.
+        Idempotent: every ``CREATE`` uses ``IF NOT EXISTS`` and every
+        ``ALTER`` is guarded by :meth:`column_exists`.
         """
         with self.connection:
             for statement in SCHEMA_STATEMENTS:
                 self.connection.execute(statement)
+            for statement in _ALTER_INTENT_JSON:
+                column = statement.split("ADD COLUMN")[-1].split()[0]
+                if not self.column_exists("policies", column):
+                    self.connection.execute(statement)
+            for statement in _ALTER_DRAFT_COLUMNS:
+                column = statement.split("ADD COLUMN")[-1].split()[0]
+                if not self.column_exists("drafts", column):
+                    self.connection.execute(statement)
+
+    def refuse_legacy_rows(self) -> None:
+        """Refuse to operate on a workspace that still has legacy rows.
+
+        Hard-refuses per the 0.6.0 migration policy: any row whose new
+        JSON columns are NULL is treated as a hard error because the
+        verification and deployment paths rely on those columns being
+        populated. The CLI exposes ``cedar-intent migrate`` to upgrade
+        legacy rows in place.
+
+        Raises:
+            StorageError: When one or more legacy rows remain.
+        """
+        pending = detect_legacy_rows(self)
+        if pending:
+            raise StorageError(
+                f"workspace at {self.path} contains {pending} legacy rows; "
+                "run 'cedar-intent migrate --apply' to upgrade to the 0.6.0 schema"
+            )
 
     def close(self) -> None:
         """Close the underlying database connection.
@@ -222,8 +284,8 @@ class SqliteRepository:
     def upsert_policy(self, policy: StoredPolicy) -> None:
         """Insert or update ``policy`` in the store.
 
-        The ``intent`` field is serialized to JSON when present; ``None``
-        intents are persisted as SQL ``NULL``.
+        The ``intent`` and ``action`` fields are serialized to JSON when
+        present; ``None`` is persisted as SQL ``NULL``.
 
         Args:
             policy: Policy row to upsert.
@@ -233,15 +295,17 @@ class SqliteRepository:
             self.connection.execute(
                 """
                 INSERT INTO policies
-                    (id, domain, requirement_id, intent_json, cedar, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, domain, requirement_id, intent_json, cedar, status,
+                     created_at, updated_at, action_scope_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     domain = excluded.domain,
                     requirement_id = excluded.requirement_id,
                     intent_json = excluded.intent_json,
                     cedar = excluded.cedar,
                     status = excluded.status,
-                    updated_at = excluded.updated_at
+                    updated_at = excluded.updated_at,
+                    action_scope_json = excluded.action_scope_json
                 """,
                 (
                     policy.id,
@@ -252,6 +316,7 @@ class SqliteRepository:
                     policy.status,
                     policy.created_at.isoformat(),
                     policy.updated_at.isoformat(),
+                    policy.action_scope_json,
                 ),
             )
 
@@ -299,9 +364,10 @@ class SqliteRepository:
             self.connection.execute(
                 """
                 INSERT INTO drafts
-                    (id, policy_id, model, request_id,
-                     unresolved_json, cedar, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (id, policy_id, model, request_id, unresolved_json,
+                     cedar, created_at, intent_json, principal_scope_json,
+                     action_scope_json, resource_scope_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     draft.id,
@@ -311,6 +377,10 @@ class SqliteRepository:
                     json.dumps(list(draft.unresolved)),
                     draft.cedar,
                     draft.created_at.isoformat(),
+                    draft.intent_json,
+                    draft.principal_scope_json,
+                    draft.action_scope_json,
+                    draft.resource_scope_json,
                 ),
             )
 
@@ -438,6 +508,7 @@ def serialize_intent(intent: PolicyIntent | None) -> str | None:
             "kind": intent.action.kind,
             "name": intent.action.name,
             "group": intent.action.group,
+            "namespace": intent.action.namespace,
         },
         "resource": {
             "kind": intent.resource.kind,
@@ -482,6 +553,7 @@ def deserialize_intent(payload: str | None) -> PolicyIntent | None:
             kind=data["action"]["kind"],
             name=data["action"].get("name"),
             group=data["action"].get("group"),
+            namespace=data["action"].get("namespace"),
         ),
         resource=ResourceScope(
             kind=data["resource"]["kind"],
@@ -495,6 +567,19 @@ def deserialize_intent(payload: str | None) -> PolicyIntent | None:
             ConditionClause(body=body) for body in data.get("unless_clauses", [])
         ),
         notes=dict(data.get("notes", {})),
+    )
+
+
+def deserialize_action_scope(payload: str | None) -> ActionScope | None:
+    """Deserialize an :class:`ActionScope` from its JSON representation."""
+    if not payload:
+        return None
+    data = json.loads(payload)
+    return ActionScope(
+        kind=data.get("kind", "any"),
+        name=data.get("name"),
+        group=data.get("group"),
+        namespace=data.get("namespace"),
     )
 
 
@@ -522,6 +607,7 @@ def policy_from_row(row: dict[str, Any]) -> StoredPolicy:
         status=row["status"],
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
+        action_scope_json=row["action_scope_json"],
     )
 
 
@@ -535,6 +621,10 @@ def draft_from_row(row: dict[str, Any]) -> StoredDraft:
         unresolved=tuple(json.loads(row["unresolved_json"])),
         cedar=row["cedar"],
         created_at=datetime.fromisoformat(row["created_at"]),
+        intent_json=row["intent_json"],
+        principal_scope_json=row["principal_scope_json"],
+        action_scope_json=row["action_scope_json"],
+        resource_scope_json=row["resource_scope_json"],
     )
 
 

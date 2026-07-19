@@ -42,6 +42,12 @@ class InMemoryRepository:
     reports: list[StoredReport] = field(default_factory=list)
     deployments: list[DeploymentRecord] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        # Legacy detection is a no-op for in-memory repositories; the
+        # schema is always current. Kept here for protocol parity with
+        # the SQLite backend.
+        self._legacy_count: int = 0
+
     def add_requirement(self, requirement: Requirement) -> None:
         """Add or replace ``requirement`` in the store.
 
@@ -70,8 +76,8 @@ class InMemoryRepository:
         """Return all requirements, optionally filtered by ``domain``.
 
         Args:
-            domain: When provided, only requirements whose
-                ``domain`` attribute matches are returned.
+            domain: When provided, only requirements whose ``domain``
+                attribute matches are returned.
 
         Returns:
             A sequence of :class:`Requirement` objects in insertion order.
