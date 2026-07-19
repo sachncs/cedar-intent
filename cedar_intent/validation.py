@@ -2,8 +2,22 @@
 
 Validation is a strict two-step process: every policy statement must
 parse, and the resulting set must validate against the supplied schema.
-We do not check intent or correctness here; those concerns belong to
-:mod:`cedar_intent.scenarios`.
+This module does not check intent or correctness — those concerns
+belong to :mod:`cedar_intent.scenarios` and :mod:`cedar_intent.verification`.
+
+Why a two-step pipeline
+----------------------
+
+Cedar's parse step catches syntactic errors (mismatched parentheses,
+malformed operators, etc.) while the schema-validation step catches
+semantic errors (unknown entity types, wrong-typed attributes,
+inapplicable actions). Reporting both errors separately gives the
+caller enough context to fix the policy without round-tripping
+through cedarpy's internal types.
+
+The Cedar source is also passed through Cedar's formatter after a
+successful parse so the stored and emitted policies use a single
+canonical layout.
 """
 
 from __future__ import annotations

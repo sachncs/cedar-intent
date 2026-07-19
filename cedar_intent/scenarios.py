@@ -1,8 +1,24 @@
 """Authorization scenarios for testing compiled policies.
 
-A :class:`Scenario` represents a single Cedar authorization request and the
-expected decision. Scenarios are executed through :func:`run_scenarios`,
-which returns a structured :class:`TestReport`.
+A :class:`Scenario` represents a single Cedar authorization request
+(principal, action, resource, context) plus the expected decision
+(``"Allow"`` or ``"Deny"``). Scenarios are executed through
+:func:`run_scenarios`, which returns a structured :class:`TestReport`
+with per-scenario outcomes.
+
+Why scenarios as a separate concept
+------------------------------------
+
+Cedar validation only proves that a policy parses and references the
+schema correctly. Scenarios prove that the policy produces the
+expected decision for a concrete request. Without scenarios, a
+``forbid`` shadowing a ``permit`` would still pass schema validation
+even though the ``permit`` never fires; only a scenario test catches
+that.
+
+Scenarios are intentionally JSON-serializable so a CI run can load
+them from a file and compare the output to a recorded expected set
+without running the Python API directly.
 """
 
 from __future__ import annotations
