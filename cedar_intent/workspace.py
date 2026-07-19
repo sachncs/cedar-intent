@@ -207,6 +207,10 @@ class Workspace:
 
     def upsert_compiled(self, policy: Policy) -> None:
         """Persist ``policy`` to the repository."""
+        # ExistingPolicy with no parsed intent raises PolicyError from
+        # to_intent(); that is the expected case, not a failure. The
+        # intent field is stored as None and the workspace falls back
+        # to it at verification time through intent_for_verification.
         intent: PolicyIntent | None = None
         try:
             intent = policy.to_intent()
@@ -265,6 +269,9 @@ class Workspace:
             if stored.status != "compiled":
                 continue
             requirement_id = stored.requirement_id or stored.id
+            # Skip orphan policies whose backing requirement has been
+            # deleted from the store; the foreign key on policies.requirement_id
+            # is ON DELETE SET NULL, so this can happen in practice.
             try:
                 requirement = self.repository.get_requirement(requirement_id)
             except StorageError:
@@ -517,6 +524,10 @@ def build_generation_context(
     """Build a :class:`GenerationContext` for a draft and existing policies."""
     existing_intents: list[PolicyIntent] = []
     for policy in existing:
+        # Existing policies with no parsed intent are excluded from the
+        # generation context; the LLM only sees policies it can reason
+        # about. Failing to parse an existing policy must not block the
+        # entire draft.
         try:
             existing_intents.append(policy.to_intent())
         except PolicyError:
