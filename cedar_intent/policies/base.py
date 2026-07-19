@@ -12,6 +12,7 @@ from ..errors import PolicyError
 from ..requirements import Requirement
 from ..scenarios import Scenario, TestReport, run_scenarios
 from ..schema import CedarSchema
+from ..scopes import ActionScope, PrincipalScope, ResourceScope
 from ..validation import ValidationReport, validate_cedar
 
 
@@ -50,13 +51,14 @@ class Policy(ABC):
         Used by verification routines that must inspect every policy
         without triggering :class:`PolicyError` for unparsed existing
         policies.
+
+        The fallback intent carries no scopes (``any`` everywhere) and a
+        note recording the missing-intent message so verification still
+        has a typed object to consume.
         """
         try:
             return self.to_intent()
         except PolicyError as error:
-            from ..compiler import PolicyIntent
-            from ..scopes import ActionScope, PrincipalScope, ResourceScope
-
             return PolicyIntent(
                 id=self.id,
                 requirement_id=self.requirement.id,
