@@ -1,8 +1,34 @@
 """LiteLLM-backed generator.
 
-Calls :func:`litellm.completion` with a structured JSON response format. The
-JSON shape is enforced strictly: any deviation raises
+Calls :func:`litellm.completion` with a structured JSON response format and
+strict payload validation. The JSON shape is enforced at every stage so
+any deviation from the documented contract raises
 :class:`GeneratorError`.
+
+Prompting contract
+------------------
+
+The system prompt asks the model for an ``intent`` object whose shape
+exactly matches :class:`~cedar_intent.compiler.PolicyIntent`. The
+model is told to:
+
+* use only entity types, actions, and attributes present in the
+  supplied Cedar schema;
+* return ``"permit"`` or ``"forbid"`` for ``effect``;
+* surface unknowns in ``unresolved`` instead of fabricating values.
+
+The generator parses the response strictly: missing fields, wrong
+types, or invalid scope kinds all raise :class:`GeneratorError`. The
+downstream compiler is deterministic and cannot repair missing data,
+so strict parsing is required to avoid silent corruption.
+
+Error handling
+--------------
+
+:class:`openai.APIError` (the openai base class for every litellm-raised
+failure) and the stdlib :class:`TimeoutError` are caught and rewrapped
+as :class:`GeneratorError`. The original exception is preserved as the
+cause so callers can inspect the upstream status code or message.
 """
 
 from __future__ import annotations
@@ -19,11 +45,7 @@ from ..compiler import PolicyIntent
 from ..errors import GeneratorError, ScopeError
 from ..requirements import slugify
 from ..scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
-from .base import (
-    DraftProposal,
-    GenerationContext,
-    GenerationResult,
-)
+from .base import DraftProposal, GenerationContext, GenerationResult
 
 SYSTEM_PROMPT = """You are an authorization engineer producing a typed Cedar policy proposal.
 Use only entity types, actions, attributes, and namespaces from the supplied Cedar JSON schema.
@@ -57,12 +79,17 @@ class LiteLLMGenerator:
     """Generator backed by LiteLLM.
 
     Attributes:
-        model: LiteLLM model identifier (for example ``"provider/model"``).
+        model: LiteLLM model identifier (for example ``"openai/gpt-4o"``).
         name: Generator identifier surfaced in provenance metadata.
         timeout: HTTP timeout in seconds for the LiteLLM call.
         retries: Number of LiteLLM-managed retries.
         max_tokens: Maximum tokens the model may generate.
-        fallbacks: Optional fallback model identifiers.
+        fallbacks: Optional fallback model identifiers. When more than
+            one is supplied, LiteLLM retries on each fallback in order.
+
+    Raises:
+        GeneratorError: If the configuration is invalid (empty model,
+            non-positive timeout or max_tokens, negative retries).
     """
 
     model: str
