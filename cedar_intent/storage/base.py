@@ -4,6 +4,33 @@ The Repository Protocol is the seam between cedar-intent and any backing
 store. Two implementations are shipped: :class:`InMemoryRepository` for
 tests and ephemeral use, and :class:`SqliteRepository` for the default
 on-disk behaviour.
+
+Storage lifecycle
+-----------------
+
+Every repository covers the same five tables:
+
+* ``requirements`` - one row per loaded :class:`~cedar_intent.requirements.Requirement`.
+* ``policies`` - one row per compiled policy, with the typed intent
+  stored as JSON.
+* ``drafts`` - the full history of generator proposals per policy.
+* ``reports`` - the full history of validation and scenario reports.
+* ``deployments`` - the full audit log of bundle deployments.
+
+Drafts and reports reference policies by identifier string, which
+allows them to survive policy deletion. The SQLite foreign key
+between ``policies.requirement_id`` and ``requirements.id`` cascades
+to ``NULL`` on requirement delete, leaving orphan policies that
+:func:`list_compiled_policies` skips gracefully.
+
+Thread safety
+-------------
+
+Implementations are expected to be safe for concurrent use from a
+single process. The in-memory repository is implicitly thread-safe
+because it uses plain dicts and lists; the SQLite repository relies
+on sqlite3's per-connection serialization, so callers should use a
+single repository instance per process or open one per thread.
 """
 
 from __future__ import annotations
@@ -26,7 +53,9 @@ class StoredPolicy:
         id: Policy identifier.
         domain: Domain the policy belongs to.
         requirement_id: Optional identifier of the originating requirement.
-        intent: Optional parsed :class:`PolicyIntent`.
+            ``None`` for orphan policies whose requirement was deleted.
+        intent: Optional parsed :class:`PolicyIntent`. ``None`` for
+            policies imported from raw Cedar source with no parsed intent.
         cedar: Cedar source text for the policy.
         status: Lifecycle status (``"draft"``, ``"existing"``, ``"compiled"``).
         created_at: Timestamp at which the row was first inserted.
@@ -48,7 +77,7 @@ class StoredDraft:
     """Draft proposal row stored in the repository.
 
     Attributes:
-        id: Draft identifier.
+        id: Draft identifier (UUID).
         policy_id: Identifier of the policy this draft belongs to.
         model: Model identifier that produced the draft.
         request_id: Provider-supplied request identifier (if any).
@@ -87,7 +116,13 @@ class StoredReport:
 
 @runtime_checkable
 class Repository(Protocol):
-    """Minimum surface every storage backend must implement."""
+    """Minimum surface every storage backend must implement.
+
+    The Protocol is runtime-checkable so the workspace and tests can
+    verify conformance with ``isinstance``. New backends (for example,
+    a Postgres or DynamoDB implementation) can satisfy the Protocol
+    without inheriting from any base class.
+    """
 
     def add_requirement(self, requirement: Requirement) -> None: ...
     def get_requirement(self, requirement_id: str) -> Requirement: ...
