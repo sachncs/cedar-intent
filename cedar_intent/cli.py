@@ -3,6 +3,32 @@
 Each subcommand is implemented as a small handler that operates on a
 :class:`Workspace`. The :func:`main` entrypoint returns an exit code so
 the process can be wired into CI pipelines without parsing stdout.
+
+Design
+------
+
+The CLI is a thin layer over the public Python API. Every subcommand
+opens the workspace through :meth:`Workspace.open` (or constructs it
+through :meth:`Workspace.create` for ``init``), delegates the actual
+work to a workspace method, and returns a JSON-serializable dict for
+humanize/JSON output.
+
+The CLI is the documented entry-point handler for every
+:class:`~cedar_intent.errors.CedarIntentError` raised below; the
+top-level :func:`main` translates any of those into a single-line
+``cedar-intent: error: ...`` message on stderr and an exit code of 1.
+
+Online and offline modes
+------------------------
+
+Generator selection is controlled by three pieces, in this order:
+
+1. ``--offline`` forces :class:`~cedar_intent.generator.OfflineGenerator`.
+2. ``--model <provider/name>`` forces :class:`~cedar_intent.generator.LiteLLMGenerator`.
+3. Otherwise the environment variables ``CEDAR_INTENT_ONLINE`` and
+   ``CEDAR_INTENT_MODEL`` decide. ``CEDAR_INTENT_ONLINE=1`` enables the
+   LiteLLM generator when ``CEDAR_INTENT_MODEL`` is set; otherwise the
+   offline generator runs.
 """
 
 from __future__ import annotations
@@ -210,7 +236,16 @@ def add_deploy_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the CLI with ``argv`` (defaults to ``sys.argv``)."""
+    """Run the CLI with ``argv`` (defaults to ``sys.argv``).
+
+    Args:
+        argv: Optional argument vector. When ``None``, ``sys.argv`` is used.
+
+    Returns:
+        Process exit code: ``0`` on success, ``1`` when any
+        :class:`~cedar_intent.errors.CedarIntentError` is raised,
+        ``2`` for argparse usage errors.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
@@ -227,7 +262,28 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def run_command(args: Namespace) -> tuple[Any, int]:
-    """Dispatch a parsed CLI invocation to the matching handler."""
+    """Dispatch a parsed CLI invocation to the matching handler.
+
+    The ``init`` subcommand is handled before workspace open because
+    no workspace exists yet. Every other subcommand opens the
+    workspace at ``args.workspace``, dispatches the handler, and
+    closes the workspace before returning. The exit code comes from
+    the handler (``verify`` returns 1 in strict mode; the others
+    return 0).
+
+    Args:
+        args: Parsed CLI namespace.
+
+    Returns:
+        A tuple ``(result, exit_code)`` where ``result`` is the
+        JSON-serializable dict to emit and ``exit_code`` is the process
+        exit code.
+
+    Raises:
+        CedarIntentError: For any workspace, storage, generator, or
+            validation failure. The CLI's :func:`main` translates these
+            into a uniform error message and exit code ``1``.
+    """
     workspace_path = args.workspace.resolve()
     if args.command == "init":
         return command_init(args.path), 0
