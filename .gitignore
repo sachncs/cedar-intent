@@ -25,6 +25,14 @@ env/
 ENV/
 .env/
 
+# Workspace runtime storage: SQLite database plus SQLite write-ahead log
+# files produced by cedar-intent at runtime. The directory is created by
+# ``cedar-intent init`` and must never be committed because it contains
+# deployment history and per-deployment secrets (for example, deployment
+# response bodies captured during HTTP pushes).
+.cedar-intent/
+.cedar-intent/*
+
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
