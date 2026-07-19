@@ -1,9 +1,30 @@
 """Generator Protocol and shared data classes.
 
 A :class:`Generator` turns an authorization intent request into a
-:class:`DraftProposal`. The Protocol is intentionally minimal: any object
-that implements ``generate`` qualifies, which keeps the rest of
+:class:`DraftProposal`. The Protocol is intentionally minimal: any
+object that implements ``generate`` qualifies, which keeps the rest of
 cedar-intent independent of LiteLLM.
+
+Contract
+--------
+
+Every generator must:
+
+1. Receive a :class:`GenerationContext` that bundles the requirement,
+   the schema, the user-supplied principal/action/resource scopes,
+   and the existing policy intents the generator should be aware of.
+2. Return a :class:`GenerationResult` carrying:
+   - a :class:`DraftProposal` whose ``intent`` is a typed
+     :class:`~cedar_intent.compiler.PolicyIntent`,
+   - the model identifier that produced the proposal (so the workspace
+     can record provenance),
+   - optional request-id and token-usage metadata.
+
+Items the generator cannot resolve safely must be reported in
+``DraftProposal.unresolved`` rather than guessed. The deterministic
+compiler downstream has no LLM and cannot fill gaps; the prompt is
+designed to surface unknowns as ``unresolved`` instead of fabricating
+entity types or actions.
 """
 
 from __future__ import annotations
@@ -71,7 +92,15 @@ class DraftProposal:
 
 @dataclass(frozen=True, slots=True)
 class GenerationResult:
-    """Final output of a generator call with provenance."""
+    """Final output of a generator call with provenance.
+
+    Attributes:
+        proposal: The generator's typed proposal.
+        model: Model identifier that produced the proposal (or the
+            generator's static name for offline generators).
+        request_id: Provider-supplied request identifier (if any).
+        usage: Optional token-usage metadata for online generators.
+    """
 
     proposal: DraftProposal
     model: str
@@ -81,7 +110,11 @@ class GenerationResult:
 
 @runtime_checkable
 class Generator(Protocol):
-    """Minimum surface every generator must implement."""
+    """Minimum surface every generator must implement.
+
+    The Protocol is runtime-checkable so workspaces and tests can
+    verify conformance with ``isinstance``.
+    """
 
     name: str
     model: str
@@ -90,7 +123,15 @@ class Generator(Protocol):
 
 
 def merge_unresolved(*sources: Sequence[str]) -> tuple[str, ...]:
-    """Combine unresolved requirement strings, dropping empties and duplicates."""
+    """Combine unresolved requirement strings, dropping empties and duplicates.
+
+    Args:
+        sources: One or more sequences of unresolved item strings. Order
+            is preserved by first occurrence.
+
+    Returns:
+        A tuple of unique, non-empty strings.
+    """
     seen: dict[str, None] = {}
     for source in sources:
         for item in source:
