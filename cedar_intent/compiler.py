@@ -1,9 +1,17 @@
 """Deterministic Cedar compiler.
 
 A :class:`PolicyIntent` is the typed intermediate representation produced
-by a generator. The compiler walks the intent and emits Cedar source text
-without any LLM involvement. The result is the only place Cedar syntax is
-constructed.
+by a generator. The compiler walks the intent and emits Cedar source
+text without any LLM involvement. It is the only code in cedar-intent
+that constructs Cedar syntax.
+
+The output is deterministic: calling :func:`compile_intent` twice with
+the same intent returns identical Cedar source. Every renderer routes
+through :func:`json.dumps` for value escaping so any value can be
+embedded in a Cedar string literal without manual quote or backslash
+handling. Scope rendering is one branch per ``kind`` value with no
+shared fallbacks, so a malformed scope raises
+:class:`CompilationError` instead of producing silent garbage.
 """
 
 from __future__ import annotations
@@ -24,15 +32,20 @@ Effect = Literal["permit", "forbid"]
 class PolicyIntent:
     """Typed authorization intent for one policy.
 
+    An intent is the contract between a generator (human or LLM) and the
+    deterministic compiler. A valid intent must round-trip through
+    :func:`compile_intent` to produce Cedar that validates against the
+    supplied schema.
+
     Attributes:
-        id: Stable intent identifier.
-        requirement_id: Identifier of the originating requirement.
-        effect: ``"permit"`` or ``"forbid"``.
+        id: Stable intent identifier (for example ``"hr-hr-042"``).
+        requirement_id: Identifier of the originating :class:`Requirement`.
+        effect: Either ``"permit"`` or ``"forbid"``.
         principal: Scope applied to the principal slot.
         action: Scope applied to the action slot.
         resource: Scope applied to the resource slot.
-        when_clauses: Optional list of ``when`` clauses.
-        unless_clauses: Optional list of ``unless`` clauses.
+        when_clauses: Optional list of ``when`` clauses joined with ``&&``.
+        unless_clauses: Optional list of ``unless`` clauses joined with ``||``.
         notes: Free-form metadata recorded for downstream consumers.
     """
 
@@ -79,6 +92,10 @@ class CompiledSource:
 def compile_intent(intent: PolicyIntent) -> CompiledSource:
     """Compile a single :class:`PolicyIntent` to Cedar source.
 
+    The compiler assembles the slot clauses, appends ``when`` and
+    ``unless`` blocks when present, and terminates the statement with
+    a semicolon. Whitespace is normalized to a single space.
+
     Args:
         intent: The intent to compile.
 
@@ -111,10 +128,28 @@ def compile_intent(intent: PolicyIntent) -> CompiledSource:
 
 
 def render_principal(scope: PrincipalScope) -> str:
-    """Render a :class:`PrincipalScope` to its Cedar source representation."""
+    """Render a :class:`PrincipalScope` to its Cedar source representation.
+
+    Args:
+        scope: Principal scope to render.
+
+    Returns:
+        A Cedar source fragment suitable for the principal slot of a
+        policy statement.
+
+    Raises:
+        CompilationError: If ``scope.kind`` is not a recognized kind.
+    """
     if scope.kind == "any":
         return "principal"
     if scope.kind == "type":
+        # The "type" branch renders ``principal == X::"*"`` to match any
+        # entity of type ``X`` whose id matches the Cedar ``*`` glob.
+        # The ``"*"`` literal is a Cedar-side idiom, not a Python string
+        # we have to interpret: Cedar treats ``"*"`` inside a string
+        # literal as a wildcard match. ``json.dumps`` quotes and escapes
+        # the value safely so any user-supplied entity id (including
+        # quotes or backslashes) is embedded without injection risk.
         identifier = scope.entity_id or "*"
         return f"principal == {scope.type_name}::{json.dumps(identifier)}"
     if scope.kind == "is_type":
@@ -127,7 +162,17 @@ def render_principal(scope: PrincipalScope) -> str:
 
 
 def render_action(scope: ActionScope) -> str:
-    """Render an :class:`ActionScope` to its Cedar source representation."""
+    """Render an :class:`ActionScope` to its Cedar source representation.
+
+    Args:
+        scope: Action scope to render.
+
+    Returns:
+        A Cedar source fragment suitable for the action slot.
+
+    Raises:
+        CompilationError: If ``scope.kind`` is not a recognized kind.
+    """
     if scope.kind == "any":
         return "action"
     namespace_prefix = f"{scope.namespace}::" if scope.namespace else ""
@@ -139,10 +184,22 @@ def render_action(scope: ActionScope) -> str:
 
 
 def render_resource(scope: ResourceScope) -> str:
-    """Render a :class:`ResourceScope` to its Cedar source representation."""
+    """Render a :class:`ResourceScope` to its Cedar source representation.
+
+    Args:
+        scope: Resource scope to render.
+
+    Returns:
+        A Cedar source fragment suitable for the resource slot.
+
+    Raises:
+        CompilationError: If ``scope.kind`` is not a recognized kind.
+    """
     if scope.kind == "any":
         return "resource"
     if scope.kind == "type":
+        # See ``render_principal`` for the rationale on the ``"*"``
+        # literal and the use of ``json.dumps`` for safe escaping.
         identifier = scope.entity_id or "*"
         return f"resource == {scope.type_name}::{json.dumps(identifier)}"
     if scope.kind == "is_type":
