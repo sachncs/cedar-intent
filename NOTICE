@@ -1,0 +1,12 @@
+cedar-intent
+Copyright 2026 The cedar-intent Authors
+
+This product includes software developed by the cedar-intent Authors.
+It is released under the Apache License, Version 2.0 (see LICENSE).
+
+This product depends on:
+- cedarpy, an Apache 2.0 licensed Python binding to the Cedar policy engine.
+- litellm, which carries its own license terms.
+
+Cedar itself is a policy language developed by AWS; see https://www.cedarpolicy.com
+for the upstream language specification and reference implementation.
