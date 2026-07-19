@@ -1,0 +1,47 @@
+{
+    "TodoApp": {
+        "entityTypes": {
+            "User": {
+                "shape": {
+                    "type": "Record",
+                    "attributes": {}
+                }
+            },
+            "Task": {
+                "shape": {
+                    "type": "Record",
+                    "attributes": {
+                        "owner": {"type": "String"},
+                        "completed": {"type": "Boolean"}
+                    }
+                }
+            }
+        },
+        "actions": {
+            "viewTask": {
+                "appliesTo": {
+                    "principalTypes": ["User"],
+                    "resourceTypes": ["Task"]
+                }
+            },
+            "createTask": {
+                "appliesTo": {
+                    "principalTypes": ["User"],
+                    "resourceTypes": ["Task"]
+                }
+            },
+            "completeTask": {
+                "appliesTo": {
+                    "principalTypes": ["User"],
+                    "resourceTypes": ["Task"]
+                }
+            },
+            "deleteTask": {
+                "appliesTo": {
+                    "principalTypes": ["User"],
+                    "resourceTypes": ["Task"]
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,18 @@
+[
+    {
+        "name": "alice-can-view-public",
+        "principal": "PhotoFlash::User::\"alice\"",
+        "action": "PhotoFlash::Action::\"viewPhoto\"",
+        "resource": "PhotoFlash::Photo::\"p1\"",
+        "context": {},
+        "expected": "Allow"
+    },
+    {
+        "name": "bob-can-view-public",
+        "principal": "PhotoFlash::User::\"bob\"",
+        "action": "PhotoFlash::Action::\"viewPhoto\"",
+        "resource": "PhotoFlash::Photo::\"p2\"",
+        "context": {},
+        "expected": "Allow"
+    }
+]

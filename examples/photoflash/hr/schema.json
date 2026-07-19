@@ -1,0 +1,39 @@
+{
+    "PhotoFlash": {
+        "entityTypes": {
+            "User": {
+                "shape": {
+                    "type": "Record",
+                    "attributes": {
+                        "role": {"type": "String"}
+                    }
+                }
+            },
+            "Photo": {
+                "memberOfTypes": ["Album"],
+                "shape": {
+                    "type": "Record",
+                    "attributes": {
+                        "private": {"type": "Boolean"}
+                    }
+                }
+            },
+            "Album": {
+                "shape": {
+                    "type": "Record",
+                    "attributes": {
+                        "owner": {"type": "String"}
+                    }
+                }
+            }
+        },
+        "actions": {
+            "viewPhoto": {
+                "appliesTo": {
+                    "principalTypes": ["User"],
+                    "resourceTypes": ["Photo"]
+                }
+            }
+        }
+    }
+}
