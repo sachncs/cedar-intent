@@ -49,7 +49,6 @@ from ..requirements import Requirement
 from ..scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
 from .base import StoredDraft, StoredPolicy, StoredReport
 
-
 SCHEMA_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS requirements (

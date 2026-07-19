@@ -46,7 +46,6 @@ from typing import Any
 from .policies import CompiledPolicy, Policy
 from .scopes import ActionScope, PrincipalScope, ResourceScope
 
-
 VerificationSeverity = str  # "warning" | "info"
 
 

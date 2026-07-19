@@ -90,7 +90,9 @@ def validate_cedar(policies: Sequence[str], schema: CedarSchema) -> ValidationRe
         except ValueError as error:
             raise ValidationError((f"format failed: {error}",), source) from error
         except TypeError as error:
-            raise ValidationError((f"format received non-string input: {error}",), source) from error
+            raise ValidationError(
+                (f"format received non-string input: {error}",), source
+            ) from error
     return ValidationReport(passed=True, errors=(), formatted=tuple(formatted))
 
 

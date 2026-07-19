@@ -34,7 +34,6 @@ from cedar_intent import (
     verify_policies,
 )
 
-
 PHOTOFLASH_SCHEMA = {
     "PhotoFlash": {
         "entityTypes": {
@@ -184,7 +183,6 @@ def recipe_verify_policies(workspace: Workspace) -> VerificationReport:
 
 def recipe_deployment(workspace: Workspace) -> None:
     """Build a deployment bundle and write it to a local directory."""
-    schema = make_schema()
     workspace.init_domain("hr")
     manifest = workspace.build_bundle("hr", metadata={"channel": "staging"})
     target = Path("/tmp/cedar-intent-example/dist")
