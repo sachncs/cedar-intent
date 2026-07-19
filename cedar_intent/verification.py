@@ -3,20 +3,38 @@
 The :func:`verify_policies` function performs a static analysis of a
 domain's policy set and reports:
 
-* **shadowing** - a ``forbid`` whose scope dominates a ``permit``, making
-  the permit unreachable in practice;
+* **shadowing** - a ``forbid`` whose scope dominates a ``permit``,
+  making the permit unreachable in practice;
 * **redundancy** - two policies with equivalent scopes and the same
   effect (one is implied by the other);
 * **requirement coverage** - whether every loaded requirement has at
   least one compiled policy;
-* **action coverage** - whether every action declared in the schema has
-  at least one policy that references it;
-* **entity-type coverage** - whether every entity type in the schema is
-  referenced by at least one policy.
+* **action coverage** - whether every action declared in the schema
+  has at least one policy that references it;
+* **entity-type coverage** - whether every entity type in the schema
+  is referenced by at least one policy.
 
-The checks are conservative approximations based on scope dominance. Full
-formal equivalence proofs require cedar-policy-symcc; this module ships
-practical checks that run without extra dependencies.
+The checks are conservative approximations based on scope-signature
+equality. Full formal equivalence proofs require cedar-policy-symcc;
+this module ships practical checks that run without extra dependencies.
+
+Algorithm notes
+----------------
+
+Scope dominance is approximated by comparing the *signature* of a
+scope: a tuple of (kind, type_name, entity_id, parent_type, parent_id)
+for resources, with an analogous tuple for principals and actions. Two
+scopes are considered equivalent when their signatures are equal on
+the same concrete scope class. This is intentionally conservative:
+``permit(principal == User::\"alice\", ...)`` and ``permit(principal
+== User::\"bob\", ...)`` are not flagged as redundant because the
+signatures differ.
+
+Complexity is O(n^2) for shadowing/redundancy across n policies and
+O(n*m) for coverage across n policies and m schema entries. That is
+acceptable for typical domain sizes (dozens to low hundreds of
+policies). A full SMT-backed equivalence check via cedar-policy-symcc
+would replace these approximations when needed.
 """
 
 from __future__ import annotations
@@ -27,6 +45,7 @@ from typing import Any
 
 from .policies import CompiledPolicy, Policy
 from .scopes import ActionScope, PrincipalScope, ResourceScope
+
 
 VerificationSeverity = str  # "warning" | "info"
 
@@ -164,7 +183,19 @@ def verify_policies(
 
 
 def detect_shadowing(policies: Sequence[Policy]) -> list[VerificationFinding]:
-    """Detect ``forbid`` policies that shadow ``permit`` policies."""
+    """Detect ``forbid`` policies that shadow ``permit`` policies.
+
+    A forbid shadows a permit when the forbid's scope signature equals
+    the permit's scope signature in every slot (principal, action,
+    resource). This is conservative: only exact signature equality is
+    considered dominance; partial subsumption is not analyzed.
+
+    Args:
+        policies: Compiled policies to inspect.
+
+    Returns:
+        A list of shadowing findings. Empty if no shadowing is found.
+    """
     findings: list[VerificationFinding] = []
     permits = [
         policy for policy in policies if policy.intent_for_verification().effect == "permit"
@@ -199,7 +230,18 @@ def detect_shadowing(policies: Sequence[Policy]) -> list[VerificationFinding]:
 
 
 def detect_redundancy(policies: Sequence[Policy]) -> list[VerificationFinding]:
-    """Detect policies that duplicate the scope and effect of another policy."""
+    """Detect policies that duplicate the scope and effect of another policy.
+
+    Two policies are redundant when they share the same effect and the
+    same scope signature across principal, action, and resource. Only
+    strict duplication is detected; partial subsumption is not.
+
+    Args:
+        policies: Compiled policies to inspect.
+
+    Returns:
+        A list of redundancy findings. Empty if no duplication is found.
+    """
     findings: list[VerificationFinding] = []
     seen: dict[
         tuple[str, tuple[str, ...], tuple[str, ...], tuple[str, ...]], str
@@ -235,7 +277,18 @@ def action_coverage(
     policies: Sequence[Policy],
     action_names: Sequence[str],
 ) -> tuple[set[str], set[str]]:
-    """Return ``(covered, uncovered)`` action identifiers."""
+    """Return ``(covered, uncovered)`` action identifiers.
+
+    An action is considered covered when at least one policy references
+    its name or its action group via a non-``any`` :class:`ActionScope`.
+
+    Args:
+        policies: Compiled policies to scan.
+        action_names: All known action identifiers.
+
+    Returns:
+        A tuple ``(covered, uncovered)`` of disjoint sets.
+    """
     covered: set[str] = set()
     referenced: set[str] = set()
     for policy in policies:
@@ -254,13 +307,31 @@ def requirement_coverage(
     policies: Sequence[Policy],
     requirement_ids: Sequence[str],
 ) -> tuple[set[str], set[str]]:
-    """Return ``(covered, uncovered)`` requirement identifiers."""
+    """Return ``(covered, uncovered)`` requirement identifiers.
+
+    Args:
+        policies: Compiled policies to scan.
+        requirement_ids: All known requirement identifiers.
+
+    Returns:
+        A tuple ``(covered, uncovered)`` of disjoint sets.
+    """
     covered = {policy.requirement.id for policy in policies}
     return covered & set(requirement_ids), set(requirement_ids) - covered
 
 
 def extract_entity_types(policies: Sequence[Policy]) -> set[str]:
-    """Return the set of entity type names referenced by ``policies``."""
+    """Return the set of entity type names referenced by ``policies``.
+
+    Scans the principal and resource slots of every policy and
+    collects type-name, group-type, and parent-type fields.
+
+    Args:
+        policies: Compiled policies to scan.
+
+    Returns:
+        The set of entity type names referenced by any policy.
+    """
     types: set[str] = set()
     for policy in policies:
         intent = policy.intent_for_verification()
@@ -274,7 +345,18 @@ def extract_entity_types(policies: Sequence[Policy]) -> set[str]:
 def scope_entity_type_names(
     scope: PrincipalScope | ActionScope | ResourceScope,
 ) -> tuple[str | None, ...]:
-    """Return the type-name fields from a scope, regardless of its concrete type."""
+    """Return the type-name fields from a scope, regardless of its concrete type.
+
+    Args:
+        scope: Any scope instance.
+
+    Returns:
+        A tuple of type-name strings (or ``None`` placeholders). For
+        :class:`PrincipalScope` the tuple contains ``type_name`` and
+        ``group_type``. For :class:`ActionScope` the tuple is empty. For
+        :class:`ResourceScope` the tuple contains ``type_name`` and
+        ``parent_type``.
+    """
     if isinstance(scope, PrincipalScope):
         return (scope.type_name, scope.group_type)
     if isinstance(scope, ActionScope):
@@ -288,7 +370,20 @@ def missing_coverage_finding(
     items: list[str],
     template: str,
 ) -> list[VerificationFinding]:
-    """Emit a single coverage finding when ``items`` is non-empty."""
+    """Emit a single coverage finding when ``items`` is non-empty.
+
+    Args:
+        kind: Finding kind (``"uncovered-action"``,
+            ``"uncovered-requirement"``, ``"uncovered-entity-type"``).
+        domain: Domain the finding is attributed to.
+        items: Sorted items missing from coverage.
+        template: Message template with ``{items}`` or ``{actions}``
+            placeholder.
+
+    Returns:
+        A list containing the finding, or an empty list if ``items`` is
+        empty.
+    """
     if not items:
         return []
     joined = ", ".join(items)
@@ -306,7 +401,20 @@ def scopes_match_and_subsume(
     outer: PrincipalScope | ActionScope | ResourceScope,
     inner: PrincipalScope | ActionScope | ResourceScope,
 ) -> bool:
-    """Return True when ``outer`` and ``inner`` are compatible and ``outer`` subsumes ``inner``."""
+    """Return True when ``outer`` and ``inner`` are compatible and ``outer`` subsumes ``inner``.
+
+    For the conservative dominance check, both scopes must be of the same
+    concrete scope class and share the same signature, or ``outer`` is
+    ``any``. This avoids the complexity of partial subsumption analysis
+    while still detecting the most common shadowing pattern.
+
+    Args:
+        outer: The candidate dominating scope.
+        inner: The candidate dominated scope.
+
+    Returns:
+        ``True`` when ``outer`` dominates ``inner``.
+    """
     if outer.kind == "any":
         return True
     if inner.kind == "any":
@@ -317,7 +425,18 @@ def scopes_match_and_subsume(
 
 
 def scope_signature(scope: PrincipalScope | ActionScope | ResourceScope) -> tuple[str, ...]:
-    """Return a tuple that uniquely identifies the scope."""
+    """Return a tuple that uniquely identifies the scope.
+
+    Tuples are used (not strings) so they are cheap to hash and compare
+    during the O(n^2) redundancy and shadowing passes.
+
+    Args:
+        scope: Any scope instance.
+
+    Returns:
+        A tuple whose equality implies the two scopes would compile to
+        equivalent Cedar source fragments.
+    """
     if isinstance(scope, PrincipalScope):
         return (
             scope.kind,
