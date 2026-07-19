@@ -39,5 +39,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   generator, SQLite-backed workspace, and CLI for end-to-end
   requirement-to-Cedar drafting.
 
-[Unreleased]: https://github.com/<your-org>/cedar-intent/compare/v0.4.0...HEAD
-[0.4.0]: https://github.com/<your-org>/cedar-intent/releases/tag/v0.4.0
+[Unreleased]: https://github.com/sachin/cedar-intent/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/sachin/cedar-intent/releases/tag/v0.4.0

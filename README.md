@@ -48,7 +48,7 @@ Cedar policy engine) and `litellm` (the LLM provider abstraction).
 For local development:
 
 ```bash
-git clone https://github.com/<your-org>/cedar-intent.git
+git clone https://github.com/sachin/cedar-intent.git
 cd cedar-intent
 python -m venv .venv
 source .venv/bin/activate
