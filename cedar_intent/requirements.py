@@ -2,8 +2,17 @@
 
 A :class:`Requirement` is the source-of-truth unit that ties a natural
 language description to a stable identifier. Identifiers are read from
-YAML-style front matter at the top of a Markdown file, with the filename
-stem as a fallback.
+YAML-style front matter at the top of a Markdown file, with the
+filename stem as a fallback.
+
+Why a custom loader instead of PyYAML
+------------------------------------
+
+Front matter is intentionally limited to ``key: value`` pairs. This
+keeps the parser dependency-free, makes Markdown requirements diff-
+friendly in pull requests, and forces the schema to be flat. Nested
+structures (lists, maps) belong in the Cedar schema, not in the
+requirement front matter.
 """
 
 from __future__ import annotations

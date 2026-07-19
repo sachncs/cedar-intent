@@ -1,7 +1,21 @@
 """Scope definitions for policy principal, action, and resource triples.
 
 Scopes are explicit objects so the LLM proposal and the deterministic
-compiler agree on the exact shape of an authorization request.
+compiler agree on the exact shape of an authorization request. Each
+slot of a Cedar policy (``principal``, ``action``, ``resource``) is
+backed by a corresponding scope class, and ``when``/``unless`` clauses
+are carried as :class:`ConditionClause` instances.
+
+Why a class hierarchy and not a string union
+--------------------------------------------
+
+Cedar's syntax for principal, action, and resource is rich: each
+slot accepts ``any``, a fully qualified entity reference, an ``is``
+membership test, an ``in`` group/parent reference, and a small set
+of named kinds. Encoding these as strings makes validation, linting,
+and namespace resolution difficult; encoding them as objects makes
+each kind a discrete, type-checked branch in the compiler and the
+generator.
 """
 
 from __future__ import annotations

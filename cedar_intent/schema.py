@@ -1,9 +1,19 @@
 """Cedar schema wrapper.
 
-The schema is the authority over entity types, actions, attributes, and
-context. It is required both at compile time (to validate a proposal) and
-at runtime (for authorization decisions). cedar-intent wraps ``cedarpy`` to
-provide a single, typed entrypoint.
+The schema is the authority over entity types, actions, attributes,
+and context. It is required both at compile time (to validate a
+proposal) and at runtime (for authorization decisions). cedar-intent
+wraps ``cedarpy`` to provide a single, typed entrypoint.
+
+Why an eager handle
+------------------
+
+The cedarpy :class:`Schema` handle is constructed eagerly in
+``__post_init__`` so any malformed schema raises :class:`ValidationError`
+the moment the :class:`CedarSchema` is built, rather than at the
+first downstream call. This makes schema errors surface at the CLI or
+API boundary and prevents a half-constructed :class:`CedarSchema`
+from leaking into the rest of the pipeline.
 """
 
 from __future__ import annotations
