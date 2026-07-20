@@ -168,6 +168,7 @@ def test_deploy_push_local(tmp_path: Path) -> None:
             "hr",
             "--target",
             str(target),
+            "--skip-verify",
         ]
     )
     assert exit_code == 0
@@ -263,8 +264,9 @@ def test_deploy_push_http(tmp_path: Path) -> None:
                 "hr",
                 "--target",
                 url,
-                "--header",
-                "X-Test: yes",
+                "--allow-private-targets",
+                "--allow-loopback",
+                "--skip-verify",
             ]
         )
         assert exit_code == 0

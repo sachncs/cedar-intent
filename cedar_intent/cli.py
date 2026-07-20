@@ -222,6 +222,21 @@ def add_deploy_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
         default=[],
         help="HTTP header in 'Name: Value' form (repeatable).",
     )
+    push.add_argument(
+        "--allow-private-targets",
+        action="store_true",
+        help="Allow HTTP targets in RFC1918 private network ranges.",
+    )
+    push.add_argument(
+        "--allow-loopback",
+        action="store_true",
+        help="Allow HTTP targets on loopback addresses (test use only).",
+    )
+    push.add_argument(
+        "--skip-verify",
+        action="store_true",
+        help="Skip the verify-domain gate before deployment.",
+    )
 
     bundle = sub_deploy.add_parser(
         "bundle", help="Write a deployment bundle to a local directory."
@@ -450,6 +465,9 @@ def command_deploy(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
             args.target,
             timeout=getattr(args, "timeout", 30),
             headers=headers,
+            skip_verify=getattr(args, "skip_verify", False),
+            allow_private_targets=getattr(args, "allow_private_targets", False),
+            allow_loopback=getattr(args, "allow_loopback", False),
         )
         return {"deployment": deployment_to_dict(record)}, 0
     if args.deploy_command == "bundle":

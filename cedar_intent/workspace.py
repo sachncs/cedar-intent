@@ -564,14 +564,31 @@ class Workspace:
         *,
         timeout: float = 30,
         headers: Mapping[str, str] | None = None,
+        skip_verify: bool = False,
+        allow_private_targets: bool = False,
+        allow_loopback: bool = False,
     ) -> DeploymentRecord:
-        """Build a manifest and push it to ``target``.
+        """Build a manifest, verify it, and push it to ``target``.
+
+        The verifier runs first; the deployment refuses to ship when
+        warnings are reported. Set ``skip_verify=True`` to bypass the
+        check (for example, when re-deploying a previously approved
+        bundle after an emergency rollback).
 
         Args:
             domain: Domain to deploy.
             target: Local directory path or ``http(s)://`` URL.
             timeout: HTTP timeout in seconds.
             headers: Optional HTTP headers added to the POST request.
+            skip_verify: When ``True``, bypass the verification gate.
+            allow_private_targets: When ``True``, the deployment
+                client's SSRF guard permits HTTP targets in RFC1918
+                private network ranges. Defaults to ``False`` so the
+                guard rejects loopback, link-local, and private
+                networks.
+            allow_loopback: When ``True``, permits loopback and
+                link-local targets. Intended for tests that bind to
+                ``127.0.0.1``; never enable in production.
 
         Returns:
             The persisted :class:`DeploymentRecord`.
@@ -579,9 +596,24 @@ class Workspace:
         Raises:
             DeploymentError: If no compiled policies are available or
                 the HTTP target returns non-2xx.
+            WorkspaceError: If the verifier reports warnings and
+                ``skip_verify`` is ``False``.
         """
+        schema = self.load_schema(domain)
+        if not skip_verify:
+            report = self.verify_domain(domain, schema)
+            if not report.passed:
+                issues = ", ".join(finding.message for finding in report.findings)
+                raise WorkspaceError(
+                    f"verifier rejected domain {domain!r}: {issues}; "
+                    "pass skip_verify=True to bypass"
+                )
         manifest = self.build_bundle(domain)
-        client = DeploymentClient(timeout=timeout)
+        client = DeploymentClient(
+            timeout=timeout,
+            allow_private_targets=allow_private_targets,
+            allow_loopback=allow_loopback,
+        )
         record = client.deploy(manifest, target, headers=headers)
         self.repository.record_deployment(record)
         return record

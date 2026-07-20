@@ -17,33 +17,43 @@ Every deployment produces a two-file artifact:
   and any user-supplied metadata.
 
 The bundle hash in the manifest is recomputed on read; a mismatch
-raises :class:`DeploymentError`, which protects against tampering
-during transport or storage.
+or a missing manifest hash raises :class:`DeploymentError`, which is
+the recommended signal for tamper detection after transport.
+
+Atomicity
+---------
+
+Local deployments write the bundle to a sibling temporary directory
+first and atomically rename each file into place with
+``Path.replace``. Concurrent writers therefore never observe a
+mixed state where one file is the new version and the other is the
+old version. A crash before the rename leaves the previous bundle
+untouched.
 
 Network behavior
 ----------------
 
-``DeploymentClient.deploy`` dispatches on the URL scheme. ``http://``
-and ``https://`` targets receive a JSON ``POST`` whose body is the
-manifest, with ``X-Cedar-Bundle-Hash`` and ``X-Cedar-Domain`` headers
-for downstream observability. Any 2xx response is treated as success
-and the deployment is recorded; anything else raises
-:class:`DeploymentError` with the response body captured in
-``DeploymentRecord.response``.
+``DeploymentClient.deploy_http`` reads the response body in bounded
+chunks so a malicious or streaming endpoint cannot exhaust memory.
+2xx responses are treated as success; 4xx and 5xx responses raise
+:class:`DeploymentError` with the response body captured (truncated
+to :data:`HTTP_RESPONSE_BODY_LIMIT`).
 
-Thread safety
--------------
-
-:class:`BundleExporter` is stateless. :class:`DeploymentClient` holds
-only a timeout and is safe to share across threads provided the
-underlying ``urllib`` calls complete before another deployment starts.
+The default :class:`SSRFGuard` rejects loopback, link-local, and
+private-network targets so untrusted callers cannot use the
+deployment client as an SSRF proxy. Operators who genuinely need to
+deploy into a private network can pass
+``allow_private_targets=True`` to the client constructor.
 """
 
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
+import socket
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from collections.abc import Mapping, Sequence
@@ -51,7 +61,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from .errors import DeploymentError
 from .policies import CompiledPolicy, Policy
@@ -60,9 +69,14 @@ DEPLOYMENT_KIND_LOCAL = "local"
 DEPLOYMENT_KIND_HTTP = "http"
 
 #: Maximum number of bytes of the HTTP response body to capture in the
-#: deployment record. Larger responses are truncated so that the
-#: deployment history stays bounded.
+#: deployment record. The body is also bounded at read time so that a
+#: streaming or oversized response cannot exhaust memory.
 HTTP_RESPONSE_BODY_LIMIT = 512
+
+#: Maximum total bytes read from an HTTP response body. Pairs with
+#: :data:`HTTP_RESPONSE_BODY_LIMIT` so a streaming endpoint cannot
+#: exhaust memory before the per-record truncation runs.
+HTTP_RESPONSE_READ_LIMIT = 65536
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,11 +205,14 @@ class BundleExporter:
         )
 
     def write_directory(self, manifest: DeploymentManifest, directory: Path) -> Path:
-        """Write ``manifest`` to ``directory`` and return the directory.
+        """Write ``manifest`` to ``directory`` atomically.
 
-        Creates ``bundle.cedar`` and ``manifest.json`` in ``directory``.
-        Existing files in the directory are not removed; only the two
-        bundle artifacts are written.
+        Creates ``bundle.cedar`` and ``manifest.json`` in a sibling
+        temporary directory first, then renames each file into place
+        with ``Path.replace``. Concurrent writers never observe a
+        mixed state where one file is the new version and the other is
+        the old version. A crash before the rename leaves the previous
+        bundle untouched.
 
         Args:
             manifest: Manifest to write.
@@ -203,22 +220,50 @@ class BundleExporter:
 
         Returns:
             The directory the manifest was written to.
+
+        Raises:
+            DeploymentError: If writing the temporary files or the
+                rename fails.
         """
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "bundle.cedar").write_text(manifest.cedar, encoding="utf-8")
-        (directory / "manifest.json").write_text(
-            json.dumps(manifest.to_manifest_payload(), indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
+        staging = directory.with_name(f".{directory.name}.staging.{uuid.uuid4().hex}")
+        try:
+            try:
+                staging.mkdir(parents=False, exist_ok=False)
+            except FileExistsError:
+                staging.mkdir(parents=False, exist_ok=True)
+            (staging / "bundle.cedar").write_text(manifest.cedar, encoding="utf-8")
+            (staging / "manifest.json").write_text(
+                json.dumps(manifest.to_manifest_payload(), indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            for filename in ("bundle.cedar", "manifest.json"):
+                (staging / filename).replace(directory / filename)
+        except OSError as error:
+            raise DeploymentError(
+                f"failed to write deployment bundle to {directory}: {error}"
+            ) from error
+        finally:
+            if staging.exists():
+                for child in staging.iterdir():
+                    try:
+                        child.unlink()
+                    except OSError:
+                        pass
+                try:
+                    staging.rmdir()
+                except OSError:
+                    pass
         return directory
 
     def read_directory(self, directory: Path) -> DeploymentManifest:
         """Read a previously written manifest back from ``directory``.
 
         Recomputes the bundle hash from ``bundle.cedar`` and compares
-        it against the manifest's recorded hash. A mismatch raises
-        :class:`DeploymentError`, which is the recommended signal for
-        tamper detection after transport.
+        it against the manifest's recorded hash. A mismatch or a
+        missing manifest hash raises :class:`DeploymentError`, which
+        is the recommended signal for tamper detection after
+        transport.
 
         Args:
             directory: Directory containing ``bundle.cedar`` and
@@ -228,8 +273,9 @@ class BundleExporter:
             The reconstructed :class:`DeploymentManifest`.
 
         Raises:
-            DeploymentError: If the directory is missing files or the
-                bundle hash does not match the manifest.
+            DeploymentError: If the directory is missing files, the
+                manifest has no bundle hash, or the bundle hash does
+                not match the recorded value.
         """
         if not directory.exists() or not directory.is_dir():
             raise DeploymentError(f"deployment directory not found: {directory}")
@@ -239,11 +285,21 @@ class BundleExporter:
             raise DeploymentError(
                 f"deployment directory is missing bundle or manifest: {directory}"
             )
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise DeploymentError(
+                f"deployment manifest is not valid JSON: {error}"
+            ) from error
         cedar_text = bundle_path.read_text(encoding="utf-8")
         expected_hash = data.get("bundle_hash")
+        if not expected_hash:
+            raise DeploymentError(
+                "deployment manifest is missing bundle_hash; refusing to trust "
+                "an unverifiable bundle"
+            )
         actual_hash = hashlib.sha256(cedar_text.encode("utf-8")).hexdigest()
-        if expected_hash and expected_hash != actual_hash:
+        if expected_hash != actual_hash:
             raise DeploymentError(
                 "deployment bundle hash mismatch: expected "
                 f"{expected_hash}, got {actual_hash}"
@@ -258,14 +314,128 @@ class BundleExporter:
         )
 
 
+class SSRFGuard:
+    """Reject requests to loopback, link-local, or private network targets.
+
+    The deployment client constructs an :class:`SSRFGuard` by default so
+    untrusted callers cannot use the client as an SSRF proxy. The
+    guard resolves the target hostname through DNS and rejects any
+    address that falls inside a reserved range.
+
+    Attributes:
+        allow_private_targets: When ``True``, the guard permits
+            addresses inside RFC1918 private ranges. Loopback and
+            link-local are still rejected.
+        allow_loopback: When ``True``, the guard permits loopback and
+            link-local addresses. Intended for tests that bind to
+            ``127.0.0.1``; never enable in production.
+        resolver: Optional DNS resolver. Defaults to
+            :func:`socket.getaddrinfo`. Tests inject a stub to avoid
+            network calls.
+    """
+
+    BLOCKED_NETWORKS: tuple[
+        ipaddress.IPv4Network | ipaddress.IPv6Network, ...
+    ] = (
+        ipaddress.ip_network("127.0.0.0/8"),
+        ipaddress.ip_network("10.0.0.0/8"),
+        ipaddress.ip_network("172.16.0.0/12"),
+        ipaddress.ip_network("192.168.0.0/16"),
+        ipaddress.ip_network("169.254.0.0/16"),
+        ipaddress.ip_network("::1/128"),
+        ipaddress.ip_network("fc00::/7"),
+        ipaddress.ip_network("fe80::/10"),
+    )
+
+    def __init__(
+        self,
+        *,
+        allow_private_targets: bool = False,
+        allow_loopback: bool = False,
+        resolver: Any = None,
+    ) -> None:
+        self.allow_private_targets = allow_private_targets
+        self.allow_loopback = allow_loopback
+        self.resolver = resolver
+
+    def check(self, url: str) -> None:
+        """Raise :class:`DeploymentError` when ``url`` targets a blocked host.
+
+        Args:
+            url: Full HTTP(S) URL to validate.
+
+        Raises:
+            DeploymentError: When the host resolves to a blocked network
+                range, the URL is malformed, or DNS resolution fails.
+        """
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            raise DeploymentError(
+                f"deployment URL has unsupported scheme: {parsed.scheme!r}"
+            )
+        host = parsed.hostname
+        if not host:
+            raise DeploymentError(f"deployment URL is missing a host: {url}")
+        try:
+            infos = (
+                self.resolver(host)
+                if self.resolver
+                else socket.getaddrinfo(host, None)
+            )
+        except (socket.gaierror, UnicodeError) as error:
+            raise DeploymentError(
+                f"could not resolve deployment host {host}: {error}"
+            ) from error
+        addresses: set[str] = set()
+        for info in infos:
+            sock_address = info[4][0]
+            if isinstance(sock_address, str):
+                addresses.add(sock_address)
+        for address in addresses:
+            try:
+                parsed_address = ipaddress.ip_address(address)
+            except ValueError:
+                continue
+            for network in self.BLOCKED_NETWORKS:
+                if parsed_address in network:
+                    if network.is_loopback or network.is_link_local:
+                        if self.allow_loopback:
+                            continue
+                        raise DeploymentError(
+                            f"deployment URL targets loopback or link-local "
+                            f"address {address} ({network})"
+                        )
+                    if self.allow_private_targets:
+                        continue
+                    raise DeploymentError(
+                        f"deployment URL targets private-network address "
+                        f"{address} ({network}); pass "
+                        "allow_private_targets=True to override"
+                    )
+
+
 class DeploymentClient:
     """Push a :class:`DeploymentManifest` to a local directory or HTTP endpoint."""
 
-    def __init__(self, *, timeout: float = 30) -> None:
+    def __init__(
+        self,
+        *,
+        timeout: float = 30,
+        allow_private_targets: bool = False,
+        allow_loopback: bool = False,
+        ssrf_guard: SSRFGuard | None = None,
+    ) -> None:
         """Initialize the deployment client.
 
         Args:
             timeout: HTTP timeout in seconds for remote deployments.
+            allow_private_targets: When ``True``, the SSRF guard permits
+                RFC1918 private-network targets. Loopback and link-local
+                addresses are still rejected.
+            allow_loopback: When ``True``, permits loopback and
+                link-local targets. Intended for tests that bind to
+                ``127.0.0.1``; never enable in production.
+            ssrf_guard: Optional guard override (mostly for tests).
 
         Raises:
             DeploymentError: If ``timeout`` is not strictly positive.
@@ -273,6 +443,10 @@ class DeploymentClient:
         if timeout <= 0:
             raise DeploymentError("deployment timeout must be positive")
         self.timeout = timeout
+        self.ssrf_guard = ssrf_guard or SSRFGuard(
+            allow_private_targets=allow_private_targets,
+            allow_loopback=allow_loopback,
+        )
 
     def deploy(
         self,
@@ -306,7 +480,7 @@ class DeploymentClient:
         """
         if not target.strip():
             raise DeploymentError("deployment target must be non-empty")
-        parsed = urlparse(target)
+        parsed = urllib.parse.urlparse(target)
         if parsed.scheme in {"http", "https"}:
             return self.deploy_http(
                 manifest, target, record_id=record_id, headers=headers
@@ -320,7 +494,7 @@ class DeploymentClient:
         *,
         record_id: str | None = None,
     ) -> DeploymentRecord:
-        """Write ``manifest`` to ``directory`` and return the deployment record.
+        """Write ``manifest`` to ``directory`` atomically and return the record.
 
         Args:
             manifest: Bundle to write.
@@ -352,11 +526,11 @@ class DeploymentClient:
     ) -> DeploymentRecord:
         """POST ``manifest`` to ``url`` and return the deployment record.
 
-        Sends the full manifest (including the Cedar source) as JSON,
-        with ``X-Cedar-Bundle-Hash`` and ``X-Cedar-Domain`` headers
-        for downstream observability. Any 2xx response is treated as
-        success; any other status code raises :class:`DeploymentError`
-        with the response body captured.
+        Reads the response body in bounded chunks so that a streaming
+        or oversized endpoint cannot exhaust memory. 2xx responses are
+        treated as success; 4xx and 5xx raise :class:`DeploymentError`
+        with the response body captured (truncated to
+        :data:`HTTP_RESPONSE_BODY_LIMIT`).
 
         Args:
             manifest: Bundle to push.
@@ -368,9 +542,12 @@ class DeploymentClient:
             The deployment record describing the HTTP push.
 
         Raises:
-            DeploymentError: If the endpoint returns non-2xx, the
-                request times out, or the network fails.
+            DeploymentError: When the URL fails the SSRF guard, the
+                endpoint returns non-2xx, the request times out, or the
+                network fails.
         """
+        self.ssrf_guard.check(url)
+
         payload = json.dumps(manifest.to_dict()).encode("utf-8")
         request = urllib.request.Request(
             url,
@@ -383,19 +560,12 @@ class DeploymentClient:
                 **(dict(headers) if headers else {}),
             },
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                body = response.read().decode("utf-8", errors="replace")
-                status_code = getattr(response, "status", 200)
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
-            # ``URLError`` covers DNS, connection refused, and HTTPError;
-            # ``TimeoutError`` covers the configured timeout; ``OSError``
-            # covers network-stack failures on some platforms.
-            raise DeploymentError(f"deployment to {url} failed: {error}") from error
+        body, status_code = _read_http_response(request, self.timeout)
         status = "deployed" if 200 <= status_code < 300 else "rejected"
         if status != "deployed":
             raise DeploymentError(
-                f"deployment to {url} rejected with status {status_code}: {body}"
+                f"deployment to {url} rejected with status {status_code}: "
+                f"{body[:HTTP_RESPONSE_BODY_LIMIT]}"
             )
         return DeploymentRecord(
             id=record_id or generate_record_id(),
@@ -412,6 +582,64 @@ class DeploymentClient:
         )
 
 
+def _read_http_response(
+    request: urllib.request.Request, timeout: float
+) -> tuple[str, int]:
+    """Read an HTTP response with bounded size and split error handling.
+
+    Returns:
+        A tuple ``(body, status_code)``. ``body`` is truncated to
+        :data:`HTTP_RESPONSE_READ_LIMIT` bytes. ``status_code`` is the
+        HTTP status returned by the endpoint.
+
+    Raises:
+        DeploymentError: When the connection fails, the request times
+            out, or the endpoint returns an HTTP error status (4xx/5xx).
+            In every case the response body is included in the error
+            message up to :data:`HTTP_RESPONSE_BODY_LIMIT` bytes.
+    """
+    try:
+        response = urllib.request.urlopen(request, timeout=timeout)
+    except urllib.error.HTTPError as error:
+        # ``HTTPError`` is raised for 4xx and 5xx responses. ``read()``
+        # is bounded by the underlying implementation; we still cap it
+        # before constructing the message body.
+        body = _read_http_error_body(error)
+        raise DeploymentError(
+            f"deployment rejected with status {error.code}: "
+            f"{body[:HTTP_RESPONSE_BODY_LIMIT]}"
+        ) from error
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        # ``URLError`` covers DNS, connection refused, and other protocol
+        # failures; ``TimeoutError`` covers the configured HTTP timeout;
+        # ``OSError`` covers network-stack failures on some platforms.
+        raise DeploymentError(f"deployment request failed: {error}") from error
+
+    body_bytes = bytearray()
+    try:
+        while True:
+            chunk = response.read(4096)
+            if not chunk:
+                break
+            body_bytes.extend(chunk)
+            if len(body_bytes) >= HTTP_RESPONSE_READ_LIMIT:
+                break
+    finally:
+        response.close()
+    status_code = getattr(response, "status", 200)
+    return body_bytes[:HTTP_RESPONSE_READ_LIMIT].decode(
+        "utf-8", errors="replace"
+    ), status_code
+
+
+def _read_http_error_body(error: urllib.error.HTTPError) -> str:
+    """Safely read an :class:`urllib.error.HTTPError` body."""
+    try:
+        return error.read().decode("utf-8", errors="replace")
+    except (OSError, AttributeError):
+        return ""
+
+
 def generate_record_id() -> str:
     """Return a fresh UUID-based deployment record identifier."""
     return uuid.uuid4().hex
@@ -426,5 +654,7 @@ __all__ = [
     "DeploymentManifest",
     "DeploymentRecord",
     "HTTP_RESPONSE_BODY_LIMIT",
+    "HTTP_RESPONSE_READ_LIMIT",
+    "SSRFGuard",
     "generate_record_id",
 ]

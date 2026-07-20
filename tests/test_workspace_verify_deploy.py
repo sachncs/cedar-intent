@@ -162,9 +162,9 @@ def test_workspace_deploy_local_persists_record(tmp_path: Path) -> None:
 def test_workspace_deploy_empty_domain_raises(tmp_path: Path) -> None:
     workspace = make_workspace_with_domain(tmp_path)
     try:
-        from cedar_intent import DeploymentError
+        from cedar_intent import WorkspaceError
 
-        with pytest.raises(DeploymentError):
+        with pytest.raises(WorkspaceError):
             workspace.deploy("hr", str(tmp_path / "out"))
     finally:
         workspace.close()

@@ -128,7 +128,7 @@ def test_bundle_exporter_read_incomplete_directory(tmp_path: Path) -> None:
 
 def test_deployment_client_local_deploy(tmp_path: Path) -> None:
     manifest = BundleExporter().build("hr", [make_policy("HR-001")])
-    client = DeploymentClient()
+    client = DeploymentClient(allow_private_targets=True, allow_loopback=True)
     record = client.deploy_local(manifest, tmp_path / "out")
     assert isinstance(record, DeploymentRecord)
     assert record.target_kind == "local"
@@ -136,7 +136,7 @@ def test_deployment_client_local_deploy(tmp_path: Path) -> None:
 
 
 def test_deployment_client_rejects_empty_target() -> None:
-    client = DeploymentClient()
+    client = DeploymentClient(allow_private_targets=True, allow_loopback=True)
     manifest = BundleExporter().build("hr", [make_policy("HR-001")])
     with pytest.raises(DeploymentError):
         client.deploy(manifest, "")
@@ -149,14 +149,14 @@ def test_deployment_client_rejects_non_positive_timeout() -> None:
 
 def test_deployment_client_dispatches_based_on_scheme() -> None:
     manifest = BundleExporter().build("hr", [make_policy("HR-001")])
-    client = DeploymentClient()
+    client = DeploymentClient(allow_private_targets=True, allow_loopback=True)
     with pytest.raises(DeploymentError):
         client.deploy(manifest, "http://127.0.0.1:1/cedar", record_id="x")
 
 
 def test_deployment_client_local_record_id_default() -> None:
     manifest = BundleExporter().build("hr", [make_policy("HR-001")])
-    client = DeploymentClient()
+    client = DeploymentClient(allow_private_targets=True, allow_loopback=True)
     record = client.deploy_local(manifest, Path("/tmp/nonexistent-cedar-bundle"))
     assert record.id
     assert record.status == "deployed"
@@ -208,7 +208,7 @@ def test_deployment_client_http_push(tmp_path: Path) -> None:
     try:
         url = f"http://127.0.0.1:{server.server_address[1]}/cedar"
         manifest = BundleExporter().build("hr", [make_policy("HR-001")])
-        client = DeploymentClient()
+        client = DeploymentClient(allow_private_targets=True, allow_loopback=True)
         record = client.deploy_http(
             manifest, url, record_id="x", headers={"X-Test": "yes"}
         )
@@ -236,7 +236,7 @@ def test_deployment_client_http_push_failure(tmp_path: Path) -> None:
     try:
         url = f"http://127.0.0.1:{server.server_address[1]}/cedar"
         manifest = BundleExporter().build("hr", [make_policy("HR-001")])
-        client = DeploymentClient()
+        client = DeploymentClient(allow_private_targets=True, allow_loopback=True)
         with pytest.raises(DeploymentError):
             client.deploy_http(manifest, url)
         assert received
