@@ -44,23 +44,14 @@ class CedarSchema:
     def __post_init__(self) -> None:
         if not isinstance(self.source, Mapping) or not self.source:
             raise ValidationError(("schema must be a non-empty Cedar JSON object",), "")
-        # Two failure modes are possible when handing the mapping to Cedar:
-        # json.dumps raises TypeError when ``source`` contains non-JSON values
-        # such as bytes, sets, or custom objects; Schema.from_json_str raises
-        # ValueError when the resulting JSON does not match the Cedar schema
-        # grammar. Each mode is reported with a distinct message.
         try:
-            serialized = json.dumps(dict(self.source), sort_keys=True)
-        except TypeError as error:
-            raise ValidationError(
-                (f"schema contains values that are not JSON-serializable: {error}",),
-                "",
-            ) from error
-        try:
-            handle = Schema.from_json_str(serialized)
-        except ValueError as error:
+            object.__setattr__(
+                self,
+                "handle",
+                Schema.from_json_str(json.dumps(dict(self.source), sort_keys=True)),
+            )
+        except (TypeError, ValueError) as error:
             raise ValidationError((f"invalid Cedar JSON schema: {error}",), "") from error
-        object.__setattr__(self, "handle", handle)
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> CedarSchema:
@@ -115,9 +106,13 @@ class CedarSchema:
                     names.add(_qualify(namespace, type_name))
         return names
 
-    def action_names(self) -> set[str]:
-        """Return the set of action identifiers declared in the schema."""
-        names: set[str] = set()
+    def action_names(self) -> set[tuple[str, str]]:
+        """Return the set of ``(namespace, action_id)`` pairs declared in the schema.
+
+        Namespace and action identifier are returned as a tuple so the
+        verifier can distinguish ``hr::view`` from ``finance::view``.
+        """
+        names: set[tuple[str, str]] = set()
         for namespace, declaration in self.source.items():
             if not isinstance(namespace, str) or not isinstance(declaration, Mapping):
                 continue
@@ -126,8 +121,65 @@ class CedarSchema:
                 continue
             for action_name in actions:
                 if isinstance(action_name, str):
-                    names.add(action_name)
+                    names.add((namespace, action_name))
         return names
+
+    def action_members(
+        self, namespace: str, action_id: str
+    ) -> tuple[str, ...]:
+        """Return the member action identifiers of the named action group.
+
+        Action groups are themselves Cedar actions of kind ``Action``
+        that contain a ``members`` array of action identifiers. This
+        helper extracts that array when present; an empty tuple is
+        returned when the action is not a group or has no members.
+
+        Args:
+            namespace: Namespace owning the action.
+            action_id: Action identifier (group name).
+
+        Returns:
+            Tuple of member action identifiers (unqualified).
+        """
+        declaration = self.source.get(namespace, {})
+        if not isinstance(declaration, Mapping):
+            return ()
+        actions = declaration.get("actions", {})
+        if not isinstance(actions, Mapping):
+            return ()
+        group = actions.get(action_id)
+        if not isinstance(group, Mapping):
+            return ()
+        members = group.get("members")
+        if not isinstance(members, list):
+            return ()
+        return tuple(str(member) for member in members)
+
+    def actions_by_namespace(
+        self,
+    ) -> Mapping[str, Mapping[str, tuple[str, ...]]]:
+        """Return a mapping ``{namespace: {action_id: (member_ids)}}``.
+
+        Built once per call. The verifier uses this to expand
+        ``action in Action::"group"`` into the group's member actions
+        during coverage analysis.
+        """
+        result: dict[str, dict[str, tuple[str, ...]]] = {}
+        for namespace, declaration in self.source.items():
+            if not isinstance(namespace, str) or not isinstance(declaration, Mapping):
+                continue
+            actions = declaration.get("actions", {})
+            if not isinstance(actions, Mapping):
+                continue
+            inner: dict[str, tuple[str, ...]] = {}
+            for action_name, action_def in actions.items():
+                if isinstance(action_name, str) and isinstance(action_def, Mapping):
+                    members = action_def.get("members")
+                    if isinstance(members, list):
+                        inner[action_name] = tuple(str(m) for m in members)
+            if inner:
+                result[namespace] = inner
+        return result
 
     def namespace_of(self, type_name: str) -> str | None:
         """Return the namespace prefix for a fully qualified type name."""

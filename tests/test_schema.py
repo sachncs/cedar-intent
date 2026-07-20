@@ -16,7 +16,7 @@ def test_schema_from_mapping_exposes_types_and_actions() -> None:
         {"PhotoFlash": {"entityTypes": {"User": {}, "Photo": {}}, "actions": {"viewPhoto": {}}}}
     )
     assert schema.entity_type_names() == {"PhotoFlash::User", "PhotoFlash::Photo"}
-    assert schema.action_names() == {"viewPhoto"}
+    assert schema.action_names() == {("PhotoFlash", "viewPhoto")}
     assert schema.namespace_of("PhotoFlash::User") == "PhotoFlash"
 
 

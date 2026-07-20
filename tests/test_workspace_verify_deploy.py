@@ -89,7 +89,7 @@ def test_workspace_verify_domain_reports_missing(tmp_path: Path) -> None:
         report = workspace.verify_domain("hr", schema)
         assert not report.passed
         assert report.requirements_uncovered == ()
-        assert report.actions_uncovered == ("viewPhoto",)
+        assert report.actions_uncovered == (("PhotoFlash", "viewPhoto"),)
     finally:
         workspace.close()
 

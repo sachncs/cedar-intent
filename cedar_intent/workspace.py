@@ -497,6 +497,11 @@ class Workspace:
     def verify_domain(self, domain: str, schema: CedarSchema) -> VerificationReport:
         """Run static verification on a domain's compiled policies.
 
+        The verifier analyzes the deployed Cedar source of every
+        compiled policy, so coverage and shadowing reflect what will
+        actually run. Action groups are expanded through the schema so
+        ``action in Action::"group"`` covers every member action.
+
         Args:
             domain: Domain identifier.
             schema: Cedar schema used to compute coverage.
@@ -515,6 +520,7 @@ class Workspace:
             requirement_ids=requirement_ids,
             action_names=sorted(schema.action_names()),
             entity_type_names=sorted(schema.entity_type_names()),
+            actions_by_namespace=schema.actions_by_namespace(),
         )
 
     def build_bundle(
