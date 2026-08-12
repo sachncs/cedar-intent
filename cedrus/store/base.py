@@ -62,13 +62,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from cedrus.compile import Intent
 from cedrus.data import Payload
 from cedrus.deploy import Record
 from cedrus.need import Need
 from cedrus.scope import Action, Principal, Resource
+
+if TYPE_CHECKING:
+    from .sqlite import Backend
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +162,65 @@ class Stored:
             rows.update(intent_data)
         return rows
 
+    def upsert(self, repo: Backend) -> None:
+        """Persist this policy (insert or replace by ``id``).
+
+        Writes the main ``policies`` row plus the full intent graph
+        (principals / actions / resources / when_clauses /
+        unless_clauses / notes) in one transaction.
+
+        Args:
+            repo: Storage backend to write through.
+        """
+        rows = self.to_rows()
+        with repo.transaction():
+            repo.execute(
+                "INSERT OR REPLACE INTO policies "
+                "(id, domain, requirement_id, cedar, status, "
+                "created_at, updated_at, intent_id) "
+                "VALUES (:id, :domain, :requirement_id, :cedar, :status, "
+                ":created_at, :updated_at, :intent_id)",
+                {**rows["policies"], "intent_id": rows["policies"].get("intent_id")},
+            )
+            if self.intent is not None:
+                write_intent(repo, rows)
+
+    def latest_draft(self, repo: Backend) -> DraftStored | None:
+        """Most recent draft for this policy's id, or ``None``.
+
+        Args:
+            repo: Storage backend to read from.
+
+        Returns:
+            The most recent :class:`DraftStored` for ``self.id``, or
+            ``None`` when there are no drafts.
+        """
+        rows = repo.fetch(
+            "SELECT * FROM drafts WHERE policy_id = ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (self.id,),
+        )
+        if not rows:
+            return None
+        return DraftStored.parse(fetch_draft_data(repo, rows[0]))
+
+    def list_drafts(self, repo: Backend) -> list[DraftStored]:
+        """All drafts for this policy's id, in chronological order.
+
+        Args:
+            repo: Storage backend to read from.
+
+        Returns:
+            A list of :class:`DraftStored` (empty when no drafts exist).
+        """
+        rows = repo.fetch(
+            "SELECT * FROM drafts WHERE policy_id = ? ORDER BY created_at",
+            (self.id,),
+        )
+        return [
+            DraftStored.parse(fetch_draft_data(repo, row)) for row in rows
+        ]
+
 
 @dataclass(frozen=True, slots=True)
 class DraftStored:
@@ -248,6 +310,143 @@ class DraftStored:
             ],
         }
 
+    def save(self, repo: Backend) -> None:
+        """Persist this draft (insert by id, full intent graph).
+
+        Writes the main ``drafts`` row plus the intent + 3 scopes +
+        unresolved items in one transaction. Uses :func:`write_intent`
+        so the schema shape matches ``Stored.upsert`` exactly.
+
+        Args:
+            repo: Storage backend to write through.
+        """
+        rows = self.to_rows()
+        with repo.transaction():
+            repo.execute(
+                "INSERT OR REPLACE INTO drafts "
+                "(id, policy_id, model, request_id, cedar, created_at, "
+                "intent_id, principal_id, action_id, resource_id) "
+                "VALUES (:id, :policy_id, :model, :request_id, :cedar, "
+                ":created_at, :intent_id, :principal_id, :action_id, "
+                ":resource_id)",
+                rows["drafts"],
+            )
+            write_intent(repo, rows)
+            repo.execute(
+                "DELETE FROM draft_unresolved WHERE draft_id = :id",
+                {"id": self.id},
+            )
+            for u in rows.get("unresolved", ()):
+                repo.execute(
+                    "INSERT INTO draft_unresolved (draft_id, position, item) "
+                    "VALUES (:draft_id, :position, :item)",
+                    {**u, "draft_id": self.id},
+                )
+
+    def update(
+        self,
+        repo: Backend,
+        *,
+        intent: Intent | None = None,
+        principal: Principal | None = None,
+        action: Action | None = None,
+        resource: Resource | None = None,
+    ) -> None:
+        """Update one or more typed-scope fields on this stored draft.
+
+        Each typed-object keyword is optional; passing ``None`` (the
+        default) leaves the corresponding FK column (and the typed
+        sub-table row) untouched.
+
+        Args:
+            repo: Storage backend to write through.
+            intent: Replacement :class:`Intent`, or ``None`` to leave
+                the existing value in place.
+            principal: Replacement :class:`Principal`, or ``None`` to
+                leave the existing value in place.
+            action: Replacement :class:`Action`, or ``None`` to leave
+                the existing value in place.
+            resource: Replacement :class:`Resource`, or ``None`` to
+                leave the existing value in place.
+        """
+        assignments: list[str] = []
+        if intent is not None:
+            assignments.append("intent_id = :intent_id")
+        if principal is not None:
+            assignments.append("principal_id = :principal_id")
+        if action is not None:
+            assignments.append("action_id = :action_id")
+        if resource is not None:
+            assignments.append("resource_id = :resource_id")
+        if not assignments:
+            return
+        params: dict[str, Any] = {"id": self.id}
+        if intent is not None:
+            rows = self.to_rows()
+            with repo.transaction():
+                write_intent(repo, rows)
+            params["intent_id"] = intent.id
+        if principal is not None:
+            params["principal_id"] = principal.id
+        if action is not None:
+            params["action_id"] = action.id
+        if resource is not None:
+            params["resource_id"] = resource.id
+        with repo.transaction():
+            repo.execute(
+                f"UPDATE drafts SET {', '.join(assignments)} WHERE id = :id",
+                params,
+            )
+
+    @classmethod
+    def latest(cls, repo: Backend, policy_id: str) -> DraftStored:
+        """Most recent draft for ``policy_id``.
+
+        Args:
+            repo: Storage backend to read from.
+            policy_id: Identifier of the policy to query.
+
+        Returns:
+            The most recent :class:`DraftStored` for ``policy_id``.
+
+        Raises:
+            Store: If no drafts exist for ``policy_id``.
+        """
+        rows = repo.fetch(
+            "SELECT * FROM drafts WHERE policy_id = ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (policy_id,),
+        )
+        if not rows:
+            raise Store(f"no drafts for policy {policy_id!r}")
+        return cls.parse(fetch_draft_data(repo, rows[0]))
+
+    @classmethod
+    def list(
+        cls,
+        repo: Backend,
+        *,
+        policy_id: str | None = None,
+    ) -> list[DraftStored]:
+        """All drafts, optionally filtered by ``policy_id``.
+
+        Args:
+            repo: Storage backend to read from.
+            policy_id: When provided, only drafts whose ``policy_id``
+                matches are returned.
+
+        Returns:
+            A list of :class:`DraftStored` in chronological order.
+        """
+        if policy_id is None:
+            rows = repo.fetch("SELECT * FROM drafts ORDER BY created_at")
+        else:
+            rows = repo.fetch(
+                "SELECT * FROM drafts WHERE policy_id = ? ORDER BY created_at",
+                (policy_id,),
+            )
+        return [cls.parse(fetch_draft_data(repo, row)) for row in rows]
+
 
 @dataclass(frozen=True, slots=True)
 class ReportStored:
@@ -309,6 +508,290 @@ class ReportStored:
             **payload_data,
         }
 
+    def save(self, repo: Backend) -> None:
+        """Persist this report (insert + payload rows).
+
+        Args:
+            repo: Storage backend to write through.
+        """
+        rows = self.to_rows()
+        with repo.transaction():
+            repo.execute(
+                "INSERT INTO reports (policy_id, kind, passed, created_at) "
+                "VALUES (:policy_id, :kind, :passed, :created_at)",
+                rows["reports"],
+            )
+            last_id_row = repo.fetch("SELECT last_insert_rowid() AS id")
+            report_id = last_id_row[0]["id"]
+            repo.execute(
+                "DELETE FROM report_payload WHERE report_id = :id",
+                {"id": report_id},
+            )
+            for payload_row in rows.get("report_payload", ()):
+                repo.execute(
+                    "INSERT INTO report_payload (report_id, position, key, value) "
+                    "VALUES (:report_id, :position, :key, :value)",
+                    {**payload_row, "report_id": report_id},
+                )
+
+    @classmethod
+    def latest(cls, repo: Backend, policy_id: str, kind: str) -> ReportStored:
+        """Most recent report for ``(policy_id, kind)``.
+
+        Args:
+            repo: Storage backend to read from.
+            policy_id: Identifier of the policy to query.
+            kind: Report kind (``"validation"`` or ``"test"``).
+
+        Returns:
+            The most recent matching :class:`ReportStored`.
+
+        Raises:
+            Store: If no matching report exists.
+        """
+        rows = repo.fetch(
+            "SELECT * FROM reports WHERE policy_id = ? AND kind = ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (policy_id, kind),
+        )
+        if not rows:
+            raise Store(f"no {kind} report for policy {policy_id!r}")
+        report = cls.parse({"reports": rows[0]})
+        payload_rows = repo.fetch(
+            "SELECT key, value FROM report_payload WHERE report_id = ? "
+            "ORDER BY position",
+            (rows[0]["id"],),
+        )
+        return cls(
+            policy_id=report.policy_id,
+            kind=report.kind,
+            passed=report.passed,
+            payload=Payload(data=tuple((r["key"], r["value"]) for r in payload_rows)),
+            created_at=report.created_at,
+        )
+
+
+def write_intent(repo: Backend, rows: dict[str, Any]) -> None:
+    """Persist the typed intent graph from a multi-row dict.
+
+    Public module-level function shared by ``Stored.upsert`` and
+    ``DraftStored.save`` so the clauses / notes / scope rows are
+    written identically from both callers. Must be called inside a
+    ``repo.transaction()`` block.
+
+    Args:
+        repo: Storage backend to write through.
+        rows: Multi-row dict from :meth:`Intent.to_data`. Must contain
+            ``"intents"`` and the typed-object row lists.
+    """
+    for principal in rows.get("principals", ()):
+        repo.execute(
+            "INSERT OR REPLACE INTO principals "
+            "(id, kind, type_name, entity_id, group_type, group_id) "
+            "VALUES (:id, :kind, :type_name, :entity_id, :group_type, :group_id)",
+            principal,
+        )
+    for action in rows.get("actions", ()):
+        repo.execute(
+            "INSERT OR REPLACE INTO actions "
+            "(id, kind, name, group) "
+            "VALUES (:id, :kind, :name, :group)",
+            action,
+        )
+    for resource in rows.get("resources", ()):
+        repo.execute(
+            "INSERT OR REPLACE INTO resources "
+            "(id, kind, type_name, entity_id, parent_type, parent_id) "
+            "VALUES (:id, :kind, :type_name, :entity_id, :parent_type, :parent_id)",
+            resource,
+        )
+    for clause_data in rows.get("when_clause_rows", ()):
+        repo.execute(
+            "INSERT OR REPLACE INTO clauses (id, body) "
+            "VALUES (:id, :body)",
+            clause_data["clauses"],
+        )
+        repo.execute(
+            "DELETE FROM clause_attributes WHERE clause_id = :id",
+            {"id": clause_data["clauses"]["id"]},
+        )
+        for attr in clause_data["clause_attributes"]:
+            repo.execute(
+                "INSERT INTO clause_attributes (clause_id, key, value) "
+                "VALUES (:clause_id, :key, :value)",
+                attr,
+            )
+    for clause_data in rows.get("unless_clause_rows", ()):
+        repo.execute(
+            "INSERT OR REPLACE INTO clauses (id, body) "
+            "VALUES (:id, :body)",
+            clause_data["clauses"],
+        )
+        repo.execute(
+            "DELETE FROM clause_attributes WHERE clause_id = :id",
+            {"id": clause_data["clauses"]["id"]},
+        )
+        for attr in clause_data["clause_attributes"]:
+            repo.execute(
+                "INSERT INTO clause_attributes (clause_id, key, value) "
+                "VALUES (:clause_id, :key, :value)",
+                attr,
+            )
+    repo.execute(
+        "INSERT OR REPLACE INTO intents "
+        "(id, effect, requirement_id, principal_id, action_id, resource_id) "
+        "VALUES (:id, :effect, :requirement_id, :principal_id, :action_id, :resource_id)",
+        rows["intents"],
+    )
+    intent_id = rows["intents"]["id"]
+    repo.execute(
+        "DELETE FROM intent_when_clauses WHERE intent_id = :id",
+        {"id": intent_id},
+    )
+    repo.execute(
+        "DELETE FROM intent_unless_clauses WHERE intent_id = :id",
+        {"id": intent_id},
+    )
+    repo.execute(
+        "DELETE FROM intent_notes WHERE intent_id = :id",
+        {"id": intent_id},
+    )
+    for w in rows.get("intent_when_clauses", ()):
+        repo.execute(
+            "INSERT INTO intent_when_clauses (intent_id, position, clause_id) "
+            "VALUES (:intent_id, :position, :clause_id)",
+            w,
+        )
+    for u in rows.get("intent_unless_clauses", ()):
+        repo.execute(
+            "INSERT INTO intent_unless_clauses (intent_id, position, clause_id) "
+            "VALUES (:intent_id, :position, :clause_id)",
+            u,
+        )
+    for n in rows.get("intent_notes", ()):
+        repo.execute(
+            "INSERT INTO intent_notes (intent_id, key, value) "
+            "VALUES (:intent_id, :key, :value)",
+            n,
+        )
+
+
+def load_intent_data(repo: Backend, intent_id: str) -> dict[str, Any]:
+    """Load the typed intent graph for ``intent_id``.
+
+    Public module-level function used by
+    :func:`fetch_draft_data` and other typed-object reads that need
+    to rehydrate a complete intent from its FK.
+
+    Args:
+        repo: Storage backend to read from.
+        intent_id: Identifier of the intent row to load.
+
+    Returns:
+        A dict with the ``"intents"`` main row plus the
+        ``principals`` / ``actions`` / ``resources`` /
+        ``when_clauses`` / ``unless_clauses`` / ``notes`` row lists,
+        ready to feed into :meth:`Intent._parse_sql_shape`.
+    """
+    intent_row = repo.fetch(
+        "SELECT * FROM intents WHERE id = ?", (intent_id,),
+    )[0]
+    principal_row = repo.fetch(
+        "SELECT * FROM principals WHERE id = ?", (intent_row["principal_id"],),
+    )[0]
+    action_row = repo.fetch(
+        "SELECT * FROM actions WHERE id = ?", (intent_row["action_id"],),
+    )[0]
+    resource_row = repo.fetch(
+        "SELECT * FROM resources WHERE id = ?", (intent_row["resource_id"],),
+    )[0]
+    when_rows = repo.fetch(
+        "SELECT c.*, iwc.position AS _position FROM clauses c "
+        "JOIN intent_when_clauses iwc ON iwc.clause_id = c.id "
+        "WHERE iwc.intent_id = ? ORDER BY iwc.position",
+        (intent_id,),
+    )
+    unless_rows = repo.fetch(
+        "SELECT c.*, iuc.position AS _position FROM clauses c "
+        "JOIN intent_unless_clauses iuc ON iuc.clause_id = c.id "
+        "WHERE iuc.intent_id = ? ORDER BY iuc.position",
+        (intent_id,),
+    )
+    note_rows = repo.fetch(
+        "SELECT key, value FROM intent_notes WHERE intent_id = ?",
+        (intent_id,),
+    )
+    return {
+        "intents": intent_row,
+        "principals": principal_row,
+        "actions": action_row,
+        "resources": resource_row,
+        "when_clauses": [
+            {"clauses": {k: v for k, v in r.items() if k != "_position"},
+             "clause_attributes": []}
+            for r in when_rows
+        ],
+        "unless_clauses": [
+            {"clauses": {k: v for k, v in r.items() if k != "_position"},
+             "clause_attributes": []}
+            for r in unless_rows
+        ],
+        "notes": note_rows,
+    }
+
+
+def fetch_draft_data(repo: Backend, row: dict[str, Any]) -> dict[str, Any]:
+    """Assemble the multi-row dict for one ``drafts`` row.
+
+    Public module-level function used by
+    :meth:`Stored.latest_draft` / :meth:`Stored.list_drafts` /
+    :meth:`DraftStored.latest` / :meth:`DraftStored.list` to share
+    the typed-object JOIN + fetch logic.
+
+    Args:
+        repo: Storage backend to read from.
+        row: Main ``drafts`` row dict.
+
+    Returns:
+        Dict with ``"drafts"`` + the typed-object / composition
+        row lists, ready to feed into :meth:`DraftStored.parse`.
+    """
+    draft_id = row["id"]
+    intent_data = (
+        load_intent_data(repo, row["intent_id"])
+        if row.get("intent_id")
+        else None
+    )
+    principal = (
+        Principal.parse(repo.fetch(
+            "SELECT * FROM principals WHERE id = ?", (row["principal_id"],),
+        )[0]) if row.get("principal_id") else Principal()
+    )
+    action = (
+        Action.parse(repo.fetch(
+            "SELECT * FROM actions WHERE id = ?", (row["action_id"],),
+        )[0]) if row.get("action_id") else Action()
+    )
+    resource = (
+        Resource.parse(repo.fetch(
+            "SELECT * FROM resources WHERE id = ?", (row["resource_id"],),
+        )[0]) if row.get("resource_id") else Resource()
+    )
+    unresolved_rows = repo.fetch(
+        "SELECT item FROM draft_unresolved WHERE draft_id = ? ORDER BY position",
+        (draft_id,),
+    )
+    unresolved = tuple(r["item"] for r in unresolved_rows)
+    return {
+        "drafts": row,
+        "intents": intent_data["intents"] if intent_data else None,
+        "principals": principal.to_data(),
+        "actions": action.to_data(),
+        "resources": resource.to_data(),
+        "unresolved": [{"position": i, "item": item}
+                       for i, item in enumerate(unresolved)],
+    }
+
 
 @runtime_checkable
 class Repository(Protocol):
@@ -334,6 +817,15 @@ class Repository(Protocol):
         Single general row fetcher. Every typed-object CRUD method
         builds its own SQL (with whatever JOINs it needs) and calls
         ``fetch`` once or as many times as it needs.
+        """
+        ...
+
+    def execute(self, query: str, params: dict[str, Any] | tuple = ()) -> None:
+        """Execute a write statement (``INSERT`` / ``UPDATE`` / ``DELETE``).
+
+        Used by typed-object ``save`` / ``update`` methods inside a
+        ``transaction()`` block. Use named (``:key``) placeholders with
+        a dict, or positional (``?``) placeholders with a tuple.
         """
         ...
 

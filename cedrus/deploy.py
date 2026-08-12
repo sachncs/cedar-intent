@@ -75,12 +75,15 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from .error import Deploy
 from .policies import Compiled, Kind
+
+if TYPE_CHECKING:
+    from .store.sqlite import Backend
 
 DEPLOYMENT_KIND_LOCAL = "local"
 DEPLOYMENT_KIND_HTTP = "http"
@@ -230,27 +233,90 @@ class Record:
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
-    def to_data(self) -> dict[str, Any]:
-        """Return the multi-row dict for this :class:`Record`.
+def to_data(self) -> dict[str, Any]:
+    """Return the multi-row dict for this :class:`Record`.
 
-        Returns:
-            A dict with ``"deployments"`` (main row) and
-            ``"deployment_responses"`` (one row per response key/value).
-        """
-        return {
-            "deployments": {
-                "id": self.id,
-                "domain": self.domain,
-                "target": self.target,
-                "target_kind": self.target_kind,
-                "bundle_hash": self.bundle_hash,
-                "status": self.status,
-                "created_at": self.created_at.isoformat(),
-            },
-            "deployment_responses": [
-                {"key": k, "value": v} for k, v in self.response.items()
-            ],
-        }
+    Returns:
+        A dict with ``"deployments"`` (main row) and
+        ``"deployment_responses"`` (one row per response key/value).
+    """
+    return {
+        "deployments": {
+            "id": self.id,
+            "domain": self.domain,
+            "target": self.target,
+            "target_kind": self.target_kind,
+            "bundle_hash": self.bundle_hash,
+            "status": self.status,
+            "created_at": self.created_at.isoformat(),
+        },
+        "deployment_responses": [
+            {"key": k, "value": v} for k, v in self.response.items()
+        ],
+    }
+
+def save(self, repo: Backend) -> None:
+    """Persist this deployment (insert + response rows).
+
+    Args:
+        repo: Storage backend to write through.
+    """
+    rows = self.to_data()
+    with repo.transaction():
+        repo.execute(
+            "INSERT OR REPLACE INTO deployments "
+            "(id, domain, target, target_kind, bundle_hash, status, created_at) "
+            "VALUES (:id, :domain, :target, :target_kind, :bundle_hash, "
+            ":status, :created_at)",
+            rows["deployments"],
+        )
+        repo.execute(
+            "DELETE FROM deployment_responses WHERE deployment_id = :id",
+            {"id": self.id},
+        )
+        for resp in rows["deployment_responses"]:
+            repo.execute(
+                "INSERT INTO deployment_responses (deployment_id, key, value) "
+                "VALUES (:deployment_id, :key, :value)",
+                {**resp, "deployment_id": self.id},
+            )
+
+@classmethod
+def list(
+    cls,
+    repo: Backend,
+    *,
+    domain: str | None = None,
+) -> list[Record]:
+    """All deployments, optionally filtered by ``domain``.
+
+    Args:
+        repo: Storage backend to read from.
+        domain: When provided, only deployments whose ``domain``
+            matches are returned.
+
+    Returns:
+        A list of :class:`Record` in insertion order.
+    """
+    if domain is None:
+        rows = repo.fetch("SELECT * FROM deployments ORDER BY created_at")
+    else:
+        rows = repo.fetch(
+            "SELECT * FROM deployments WHERE domain = ? ORDER BY created_at",
+            (domain,),
+        )
+    result: list[Record] = []
+    for row in rows:
+        resp_rows = repo.fetch(
+            "SELECT key, value FROM deployment_responses "
+            "WHERE deployment_id = ? ORDER BY key",
+            (row["id"],),
+        )
+        result.append(cls.parse({
+            "deployments": row,
+            "deployment_responses": resp_rows,
+        }))
+    return result
 
 
 class Bundler:

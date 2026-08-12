@@ -17,13 +17,16 @@ requirement front matter.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .error import Require
+
+if TYPE_CHECKING:
+    from .store.sqlite import Backend
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +86,70 @@ class Need:
             "source_path": str(self.source_path),
             "created_at": self.created_at.isoformat(),
         }
+
+    def save(self, repo: Backend) -> None:
+        """Persist this :class:`Need` (insert or replace by ``id``).
+
+        Args:
+            repo: Storage backend to write through.
+        """
+        with repo.transaction():
+            repo.execute(
+                """
+                INSERT OR REPLACE INTO requirements
+                    (id, domain, text, source_path, created_at)
+                VALUES (:id, :domain, :text, :source_path, :created_at)
+                """,
+                self.to_data(),
+            )
+
+    @classmethod
+    def get(cls, repo: Backend, requirement_id: str) -> Need:
+        """Load the requirement with ``requirement_id``.
+
+        Args:
+            repo: Storage backend to read from.
+            requirement_id: Identifier of the requirement to fetch.
+
+        Returns:
+            The stored :class:`Need`.
+
+        Raises:
+            Require: If no requirement exists with that id.
+        """
+        rows = repo.fetch(
+            "SELECT * FROM requirements WHERE id = ?",
+            (requirement_id,),
+        )
+        if not rows:
+            raise Require(f"requirement {requirement_id!r} not found")
+        return cls.parse(rows[0])
+
+    @classmethod
+    def list(
+        cls,
+        repo: Backend,
+        *,
+        domain: str | None = None,
+    ) -> Sequence[Need]:
+        """Load all requirements, optionally filtered by ``domain``.
+
+        Args:
+            repo: Storage backend to read from.
+            domain: When provided, only requirements whose ``domain``
+                attribute matches are returned.
+
+        Returns:
+            A sequence of :class:`Need` objects in id order.
+        """
+        if domain is None:
+            rows = repo.fetch("SELECT * FROM requirements ORDER BY id")
+        else:
+            rows = repo.fetch(
+                "SELECT * FROM requirements WHERE domain = ? ORDER BY id",
+                (domain,),
+            )
+        return [cls.parse(row) for row in rows]
 
 
 def parse_front_matter(source: str) -> tuple[Mapping[str, str], str]:
