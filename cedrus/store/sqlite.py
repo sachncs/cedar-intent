@@ -56,17 +56,12 @@ See Also:
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import threading
-from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from cedrus.compile import Intent
-from cedrus.data import Payload
 from cedrus.deploy import Record
 from cedrus.error import Store
 from cedrus.need import Need
@@ -377,74 +372,49 @@ class Backend:
         except sqlite3.ProgrammingError:
             pass
 
-    def add_requirement(self, requirement: Need) -> None:
-        """Add or replace ``requirement`` in the store.
+    def fetch(
+        self,
+        query: str,
+        params: tuple = (),
+    ) -> list[dict[str, Any]]:
+        """Execute ``query`` and return rows as dicts.
 
-        Uses ``ON CONFLICT(id) DO UPDATE`` so re-adding the same
-        identifier updates the existing row instead of failing.
-
-        Args:
-            requirement: Need to store.
-        """
-        with self.connection:
-            self.connection.execute(
-                """
-                INSERT INTO requirements (id, domain, text, source_path, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    domain = excluded.domain,
-                    text = excluded.text,
-                    source_path = excluded.source_path
-                """,
-                (
-                    requirement.id,
-                    requirement.domain,
-                    requirement.text,
-                    str(requirement.source_path),
-                    requirement.created_at.isoformat(),
-                ),
-            )
-
-    def get_requirement(self, requirement_id: str) -> Need:
-        """Return the requirement with ``requirement_id``.
+        General-purpose SQL row fetcher. The caller configures what to
+        fetch via the query and bound parameters; ``fetch`` just handles
+        execution and row-dict conversion. This is the only row-reading
+        primitive the typed objects build on; there is no
+        ``fetch_intent_data`` / ``fetch_policy_data`` / etc. — every
+        read shapes its own query and calls ``fetch`` once or as many
+        times as it needs.
 
         Args:
-            requirement_id: Identifier of the requirement to fetch.
+            query: SQL ``SELECT`` statement. Use ``?`` placeholders for
+                bound values to keep the call site safe; ``fetch`` itself
+                does not do SQL parsing or table-name validation.
+            params: Parameters bound to the ``?`` placeholders.
 
         Returns:
-            The stored :class:`Need`.
-
-        Raises:
-            Store: If no requirement exists with that id.
+            A list of row dicts (empty when the query returns no rows).
         """
-        row = self.connection.execute(
-            "SELECT * FROM requirements WHERE id = ?", (requirement_id,)
-        ).fetchone()
-        if row is None:
-            raise Store(f"requirement {requirement_id!r} not found")
+        return [dict(row) for row in self.connection.execute(query, params).fetchall()]
 
-        return Need.from_row(dict(row))
+    def execute(
+        self,
+        query: str,
+        params: dict[str, Any] | tuple = (),
+    ) -> None:
+        """Execute a write statement and discard the result.
 
-    def list_requirements(self, domain: str | None = None) -> Sequence[Need]:
-        """Return all requirements, optionally filtered by ``domain``.
+        Used by typed-object ``save`` / ``update`` methods inside a
+        :meth:`transaction` block. Accepts either a ``dict`` (bound to
+        ``:key`` named placeholders) or a ``tuple`` (bound to ``?``
+        positional placeholders).
 
         Args:
-            domain: When provided, only requirements whose ``domain``
-                matches are returned.
-
-        Returns:
-            A sequence of :class:`Need` objects in id order.
+            query: SQL ``INSERT`` / ``UPDATE`` / ``DELETE`` statement.
+            params: Named (dict) or positional (tuple) placeholders.
         """
-        if domain is None:
-            rows = self.connection.execute(
-                "SELECT * FROM requirements ORDER BY id"
-            ).fetchall()
-        else:
-            rows = self.connection.execute(
-                "SELECT * FROM requirements WHERE domain = ? ORDER BY id", (domain,)
-            ).fetchall()
-
-        return [Need.from_row(dict(row)) for row in rows]
+        self.connection.execute(query, params)
 
     def remove_requirement(self, requirement_id: str) -> None:
         """Remove the requirement with ``requirement_id``.
@@ -462,87 +432,6 @@ class Backend:
             if cursor.rowcount == 0:
                 raise Store(f"requirement {requirement_id!r} not found")
 
-    def upsert_policy(self, policy: Stored) -> None:
-        """Insert or update ``policy`` in the store.
-
-        The ``intent`` and ``action`` fields are serialized to JSON
-        when present; ``None`` is persisted as SQL ``NULL``.
-
-        Args:
-            policy: Policy row to upsert.
-        """
-        with self.connection:
-            self.connection.execute(
-                """
-                INSERT INTO policies
-                    (id, domain, requirement_id, intent_json, cedar, status,
-                     created_at, updated_at, action_scope_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    domain = excluded.domain,
-                    requirement_id = excluded.requirement_id,
-                    intent_json = excluded.intent_json,
-                    cedar = excluded.cedar,
-                    status = excluded.status,
-                    updated_at = excluded.updated_at,
-                    action_scope_json = excluded.action_scope_json
-                """,
-                (
-                    policy.id,
-                    policy.domain,
-                    policy.requirement_id,
-                    json.dumps(policy.intent.to_dict(), sort_keys=True)
-                    if policy.intent is not None
-                    else None,
-                    policy.cedar,
-                    policy.status,
-                    policy.created_at.isoformat(),
-                    policy.updated_at.isoformat(),
-                    json.dumps(policy.action.to_dict(), sort_keys=True)
-                    if policy.action is not None
-                    else None,
-                ),
-            )
-
-    def get_policy(self, policy_id: str) -> Stored:
-        """Return the policy with ``policy_id``.
-
-        Args:
-            policy_id: Identifier of the policy to fetch.
-
-        Returns:
-            The stored :class:`Stored`.
-
-        Raises:
-            Store: If no policy exists with that id.
-        """
-        row = self.connection.execute(
-            "SELECT * FROM policies WHERE id = ?", (policy_id,)
-        ).fetchone()
-        if row is None:
-            raise Store(f"policy {policy_id!r} not found")
-        return Stored.from_row(dict(row))
-
-    def list_policies(self, domain: str | None = None) -> Sequence[Stored]:
-        """Return all policies, optionally filtered by ``domain``.
-
-        Args:
-            domain: When provided, only policies whose ``domain``
-                matches are returned.
-
-        Returns:
-            A sequence of :class:`Stored` in id order.
-        """
-        if domain is None:
-            rows = self.connection.execute(
-                "SELECT * FROM policies ORDER BY id"
-            ).fetchall()
-        else:
-            rows = self.connection.execute(
-                "SELECT * FROM policies WHERE domain = ? ORDER BY id", (domain,)
-            ).fetchall()
-        return [Stored.from_row(dict(row)) for row in rows]
-
     def remove_policy(self, policy_id: str) -> None:
         """Remove the policy with ``policy_id``.
 
@@ -558,205 +447,6 @@ class Backend:
             )
             if cursor.rowcount == 0:
                 raise Store(f"policy {policy_id!r} not found")
-
-    def record_draft(self, draft: DraftStored) -> None:
-        """Append ``draft`` to the draft history.
-
-        The intent and per-slot scopes are serialized to JSON for
-        storage and rehydrated inline in :meth:`latest_draft` /
-        :meth:`list_drafts` on read.
-
-        Args:
-            draft: Draft row to record.
-        """
-        with self.connection:
-            self.connection.execute(
-                """
-                INSERT INTO drafts
-                    (id, policy_id, model, request_id, unresolved_json,
-                     cedar, created_at, intent_json, principal_scope_json,
-                     action_scope_json, resource_scope_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    draft.id,
-                    draft.policy_id,
-                    draft.model,
-                    draft.request_id,
-                    json.dumps(list(draft.unresolved)),
-                    draft.cedar,
-                    draft.created_at.isoformat(),
-                    json.dumps(draft.intent.to_dict(), sort_keys=True),
-                    json.dumps(draft.principal.to_dict(), sort_keys=True),
-                    json.dumps(draft.action.to_dict(), sort_keys=True),
-                    json.dumps(draft.resource.to_dict(), sort_keys=True),
-                ),
-            )
-
-    def update_draft_scopes(
-        self,
-        draft_id: str,
-        *,
-        intent: Intent | None = None,
-        principal: Principal | None = None,
-        action: Action | None = None,
-        resource: Resource | None = None,
-    ) -> None:
-        """Update one or more typed-scope columns on a stored draft.
-
-        Mirrors :meth:`Memory.update_draft_scopes`. Each typed-object
-        keyword is optional; passing ``None`` (the default) leaves the
-        corresponding ``*_json`` column untouched. Used by the 0.6.0
-        migration to populate legacy rows in place.
-
-        Args:
-            draft_id: Identifier of the draft to update.
-            intent: Replacement :class:`Intent`, or ``None`` to leave
-                the existing value in place.
-            principal: Replacement :class:`Principal`, or ``None`` to
-                leave the existing value in place.
-            action: Replacement :class:`Action`, or ``None`` to leave
-                the existing value in place.
-            resource: Replacement :class:`Resource`, or ``None`` to
-                leave the existing value in place.
-        """
-        assignments: list[str] = []
-        values: list[str] = []
-        if intent is not None:
-            assignments.append("intent_json = ?")
-            values.append(json.dumps(intent.to_dict(), sort_keys=True))
-        if principal is not None:
-            assignments.append("principal_scope_json = ?")
-            values.append(json.dumps(principal.to_dict(), sort_keys=True))
-        if action is not None:
-            assignments.append("action_scope_json = ?")
-            values.append(json.dumps(action.to_dict(), sort_keys=True))
-        if resource is not None:
-            assignments.append("resource_scope_json = ?")
-            values.append(json.dumps(resource.to_dict(), sort_keys=True))
-        if not assignments:
-            return
-        with self.connection:
-            self.connection.execute(
-                f"UPDATE drafts SET {', '.join(assignments)} WHERE id = ?",
-                [*values, draft_id],
-            )
-
-    def latest_draft(self, policy_id: str) -> DraftStored:
-        """Return the most recent draft for ``policy_id``.
-
-        Args:
-            policy_id: Identifier of the policy to query.
-
-        Returns:
-            The most recent :class:`DraftStored` for ``policy_id``.
-
-        Raises:
-            Store: If no drafts exist for ``policy_id``.
-        """
-        row = self.connection.execute(
-            "SELECT * FROM drafts WHERE policy_id = ? ORDER BY created_at DESC LIMIT 1",
-            (policy_id,),
-        ).fetchone()
-        if row is None:
-            raise Store(f"no drafts for policy {policy_id!r}")
-        return DraftStored.from_row(dict(row))
-
-    def list_drafts(self, policy_id: str | None = None) -> Sequence[DraftStored]:
-        """Return all drafts, optionally filtered by ``policy_id``.
-
-        Args:
-            policy_id: When provided, only drafts whose ``policy_id``
-                matches are returned.
-
-        Returns:
-            A sequence of :class:`DraftStored` in insertion order.
-        """
-        if policy_id is None:
-            rows = self.connection.execute(
-                "SELECT * FROM drafts ORDER BY created_at"
-            ).fetchall()
-        else:
-            rows = self.connection.execute(
-                "SELECT * FROM drafts WHERE policy_id = ? ORDER BY created_at",
-                (policy_id,),
-            ).fetchall()
-        return [DraftStored.from_row(dict(row)) for row in rows]
-
-    def record_report(self, report: ReportStored) -> None:
-        """Append ``report`` to the report history.
-
-        The typed :class:`Payload` is serialized to JSON for storage
-        and rehydrated inline in :meth:`latest_report` on read.
-        ``passed`` is persisted as ``0``/``1`` to match the column type.
-
-        Args:
-            report: Report row to record. ``created_at`` is required;
-                callers should stamp it explicitly when constructing
-                the row.
-        """
-        with self.connection:
-            self.connection.execute(
-                """
-                INSERT INTO reports (policy_id, kind, passed, payload_json, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    report.policy_id,
-                    report.kind,
-                    1 if report.passed else 0,
-                    json.dumps(report.payload.to_dict(), sort_keys=True),
-                    report.created_at.isoformat(),
-                ),
-            )
-
-    def latest_report(self, policy_id: str, kind: str) -> ReportStored:
-        """Return the most recent report for ``policy_id`` of ``kind``.
-
-        Args:
-            policy_id: Identifier of the policy to query.
-            kind: Report kind (``"validation"`` or ``"test"``).
-
-        Returns:
-            The most recent matching :class:`ReportStored`.
-
-        Raises:
-            Store: If no matching report exists.
-        """
-        row = self.connection.execute(
-            "SELECT * FROM reports WHERE policy_id = ? AND kind = ? "
-            "ORDER BY created_at DESC LIMIT 1",
-            (policy_id, kind),
-        ).fetchone()
-        if row is None:
-            raise Store(f"no {kind} report for policy {policy_id!r}")
-        return ReportStored.from_row(dict(row))
-
-    def record_deployment(self, deployment: Record) -> None:
-        """Append ``deployment`` to the deployment history.
-
-        Args:
-            deployment: Deployment record to store.
-        """
-        with self.connection:
-            self.connection.execute(
-                """
-                INSERT INTO deployments
-                    (id, domain, target, target_kind,
-                     bundle_hash, status, response_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    deployment.id,
-                    deployment.domain,
-                    deployment.target,
-                    deployment.target_kind,
-                    deployment.bundle_hash,
-                    deployment.status,
-                    json.dumps(dict(deployment.response)),
-                    deployment.created_at.isoformat(),
-                ),
-            )
 
     def transaction(self) -> Any:
         """Return a context manager that wraps the body in one SQL transaction.
@@ -776,29 +466,6 @@ class Backend:
                 yield None
 
         return _cm()
-
-    def list_deployments(
-        self, domain: str | None = None
-    ) -> Sequence[Record]:
-        """Return all deployments, optionally filtered by ``domain``.
-
-        Args:
-            domain: When provided, only deployments whose ``domain``
-                matches are returned.
-
-        Returns:
-            A sequence of :class:`Record` in insertion order.
-        """
-        if domain is None:
-            rows = self.connection.execute(
-                "SELECT * FROM deployments ORDER BY created_at"
-            ).fetchall()
-        else:
-            rows = self.connection.execute(
-                "SELECT * FROM deployments WHERE domain = ? ORDER BY created_at",
-                (domain,),
-            ).fetchall()
-        return [Record.from_row(dict(row)) for row in rows]
 
 
 __all__ = ["Backend"]
