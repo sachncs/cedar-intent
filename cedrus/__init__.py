@@ -81,8 +81,6 @@ Attributes:
     Verifier: Static symbolic verifier.
     Vreport: Outcome of a validation pass.
     Workspace: Top-level cedrus orchestrator.
-    read_bounded: Read an httpx response body with a hard byte cap.
-    validate_headers: Reject empty / reserved / CR-LF-bearing HTTP headers.
 
 See Also:
     :mod:`cedrus.case`: Authorization scenarios.
@@ -113,8 +111,6 @@ from cedrus.deploy import (
     Pin,
     Record,
     Transport,
-    read_bounded,
-    validate_headers,
 )
 from cedrus.domain import Domain
 from cedrus.error import (
@@ -201,6 +197,4 @@ __all__ = [
     "Vreport",
     "Workspace",
     "__version__",
-    "read_bounded",
-    "validate_headers",
 ]

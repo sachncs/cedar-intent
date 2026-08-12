@@ -902,7 +902,7 @@ class Transport(httpx.BaseTransport):
         )
 
 
-def validate_headers(headers: Mapping[str, str] | None) -> None:
+def _validate_headers(headers: Mapping[str, str] | None) -> None:
     """Reject empty, reserved, or carriage-return-bearing HTTP headers.
 
     Args:
@@ -939,7 +939,7 @@ def validate_headers(headers: Mapping[str, str] | None) -> None:
             )
 
 
-def read_bounded(response: httpx.Response) -> str:
+def _read_bounded(response: httpx.Response) -> str:
     """Read the response body with a hard upper bound on bytes consumed."""
     body_bytes = bytearray()
     for chunk in response.iter_bytes(chunk_size=4096):
@@ -1143,7 +1143,7 @@ class Client:
                 returns non-2xx, the request times out, or the network
                 fails.
         """
-        validate_headers(headers)
+        _validate_headers(headers)
         pinned = self.ssrf_guard.check(url)
         idem = idempotency_key or id()
         payload = json.dumps(manifest.to_dict()).encode("utf-8")
@@ -1173,7 +1173,7 @@ class Client:
                     follow_redirects=self.follow_redirects,
                 ) as client:
                     response = client.send(request)
-                    body = read_bounded(response)
+                    body = _read_bounded(response)
                     response_sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
                     if 200 <= response.status_code < 300:
                         return Record(
@@ -1230,6 +1230,4 @@ __all__ = [
     "Record",
     "RESERVED_HEADERS",
     "Transport",
-    "read_bounded",
-    "validate_headers",
 ]
