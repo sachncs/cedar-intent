@@ -182,6 +182,27 @@ class Record:
     created_at: datetime
     response: Mapping[str, str] = field(default_factory=dict)
 
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> Record:
+        """Build a :class:`Record` from a SQLite ``deployments`` row dict.
+
+        Args:
+            row: Dict produced by ``SELECT * FROM deployments``.
+
+        Returns:
+            The reconstructed :class:`Record`.
+        """
+        return cls(
+            id=row["id"],
+            domain=row["domain"],
+            target=row["target"],
+            target_kind=row["target_kind"],
+            bundle_hash=row["bundle_hash"],
+            status=row["status"],
+            response=dict(json.loads(row["response_json"])),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
 
 class Bundler:
     """Build, write, and read :class:`Manifest` objects.

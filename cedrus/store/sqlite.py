@@ -68,7 +68,7 @@ from cedrus.data import Payload
 from cedrus.deploy import Record
 from cedrus.error import Store
 from cedrus.need import Need
-from cedrus.scope import Action, Principal, Resource, Scope
+from cedrus.scope import Action, Principal, Resource
 from cedrus.store.base import DraftStored, ReportStored, Stored
 
 #: Current schema version. Bump whenever the SQLite schema changes in
@@ -382,13 +382,7 @@ class Backend:
         if row is None:
             raise Store(f"requirement {requirement_id!r} not found")
 
-        return Need(
-            id=row["id"],
-            text=row["text"],
-            domain=row["domain"],
-            source_path=Path(row["source_path"]),
-            created_at=datetime.fromisoformat(row["created_at"]),
-        )
+        return Need.from_row(dict(row))
 
     def list_requirements(self, domain: str | None = None) -> Sequence[Need]:
         """Return all requirements, optionally filtered by ``domain``.
@@ -409,16 +403,7 @@ class Backend:
                 "SELECT * FROM requirements WHERE domain = ? ORDER BY id", (domain,)
             ).fetchall()
 
-        return [
-            Need(
-                id=row["id"],
-                text=row["text"],
-                domain=row["domain"],
-                source_path=Path(row["source_path"]),
-                created_at=datetime.fromisoformat(row["created_at"]),
-            )
-            for row in rows
-        ]
+        return [Need.from_row(dict(row)) for row in rows]
 
     def remove_requirement(self, requirement_id: str) -> None:
         """Remove the requirement with ``requirement_id``.
@@ -495,25 +480,7 @@ class Backend:
         ).fetchone()
         if row is None:
             raise Store(f"policy {policy_id!r} not found")
-        return Stored(
-            id=row["id"],
-            domain=row["domain"],
-            requirement_id=row["requirement_id"],
-            intent=(
-                Intent.from_dict(json.loads(row["intent_json"]))
-                if row["intent_json"]
-                else None
-            ),
-            cedar=row["cedar"],
-            status=row["status"],
-            created_at=datetime.fromisoformat(row["created_at"]),
-            updated_at=datetime.fromisoformat(row["updated_at"]),
-            action=(
-                Action.from_dict(json.loads(row["action_scope_json"]))
-                if row["action_scope_json"]
-                else None
-            ),
-        )
+        return Stored.from_row(dict(row))
 
     def list_policies(self, domain: str | None = None) -> Sequence[Stored]:
         """Return all policies, optionally filtered by ``domain``.
@@ -533,28 +500,7 @@ class Backend:
             rows = self.connection.execute(
                 "SELECT * FROM policies WHERE domain = ? ORDER BY id", (domain,)
             ).fetchall()
-        return [
-            Stored(
-                id=row["id"],
-                domain=row["domain"],
-                requirement_id=row["requirement_id"],
-                intent=(
-                    Intent.from_dict(json.loads(row["intent_json"]))
-                    if row["intent_json"]
-                    else None
-                ),
-                cedar=row["cedar"],
-                status=row["status"],
-                created_at=datetime.fromisoformat(row["created_at"]),
-                updated_at=datetime.fromisoformat(row["updated_at"]),
-                action=(
-                    Action.from_dict(json.loads(row["action_scope_json"]))
-                    if row["action_scope_json"]
-                    else None
-                ),
-            )
-            for row in rows
-        ]
+        return [Stored.from_row(dict(row)) for row in rows]
 
     def remove_policy(self, policy_id: str) -> None:
         """Remove the policy with ``policy_id``.
@@ -673,46 +619,7 @@ class Backend:
         ).fetchone()
         if row is None:
             raise Store(f"no drafts for policy {policy_id!r}")
-        intent_payload = row["intent_json"]
-        principal_payload = row["principal_scope_json"]
-        action_payload = row["action_scope_json"]
-        resource_payload = row["resource_scope_json"]
-        return DraftStored(
-            id=row["id"],
-            policy_id=row["policy_id"],
-            model=row["model"],
-            request_id=row["request_id"],
-            unresolved=tuple(json.loads(row["unresolved_json"])),
-            cedar=row["cedar"],
-            created_at=datetime.fromisoformat(row["created_at"]),
-            intent=(
-                Intent.from_dict(json.loads(intent_payload))
-                if intent_payload
-                else Intent(
-                    id=row["id"],
-                    requirement_id=row["policy_id"] or "",
-                    effect="permit",
-                    principal=Principal(),
-                    action=Action(),
-                    resource=Resource(),
-                )
-            ),
-            principal=(
-                Principal.from_dict(json.loads(principal_payload))
-                if principal_payload
-                else Principal()
-            ),
-            action=(
-                Action.from_dict(json.loads(action_payload))
-                if action_payload
-                else Action()
-            ),
-            resource=(
-                Resource.from_dict(json.loads(resource_payload))
-                if resource_payload
-                else Resource()
-            ),
-        )
+        return DraftStored.from_row(dict(row))
 
     def list_drafts(self, policy_id: str | None = None) -> Sequence[DraftStored]:
         """Return all drafts, optionally filtered by ``policy_id``.
@@ -733,51 +640,7 @@ class Backend:
                 "SELECT * FROM drafts WHERE policy_id = ? ORDER BY created_at",
                 (policy_id,),
             ).fetchall()
-        result = []
-        for row in rows:
-            intent_payload = row["intent_json"]
-            principal_payload = row["principal_scope_json"]
-            action_payload = row["action_scope_json"]
-            resource_payload = row["resource_scope_json"]
-            result.append(
-                DraftStored(
-                    id=row["id"],
-                    policy_id=row["policy_id"],
-                    model=row["model"],
-                    request_id=row["request_id"],
-                    unresolved=tuple(json.loads(row["unresolved_json"])),
-                    cedar=row["cedar"],
-                    created_at=datetime.fromisoformat(row["created_at"]),
-                    intent=(
-                        Intent.from_dict(json.loads(intent_payload))
-                        if intent_payload
-                        else Intent(
-                            id=row["id"],
-                            requirement_id=row["policy_id"] or "",
-                            effect="permit",
-                            principal=Principal(),
-                            action=Action(),
-                            resource=Resource(),
-                        )
-                    ),
-                    principal=(
-                        Principal.from_dict(json.loads(principal_payload))
-                        if principal_payload
-                        else Principal()
-                    ),
-                    action=(
-                        Action.from_dict(json.loads(action_payload))
-                        if action_payload
-                        else Action()
-                    ),
-                    resource=(
-                        Resource.from_dict(json.loads(resource_payload))
-                        if resource_payload
-                        else Resource()
-                    ),
-                )
-            )
-        return result
+        return [DraftStored.from_row(dict(row)) for row in rows]
 
     def record_report(self, report: ReportStored) -> None:
         """Append ``report`` to the report history.
@@ -826,13 +689,7 @@ class Backend:
         ).fetchone()
         if row is None:
             raise Store(f"no {kind} report for policy {policy_id!r}")
-        return ReportStored(
-            policy_id=row["policy_id"],
-            kind=row["kind"],
-            passed=bool(row["passed"]),
-            payload=Payload.from_dict(json.loads(row["payload_json"])),
-            created_at=datetime.fromisoformat(row["created_at"]),
-        )
+        return ReportStored.from_row(dict(row))
 
     def record_deployment(self, deployment: Record) -> None:
         """Append ``deployment`` to the deployment history.
@@ -900,19 +757,7 @@ class Backend:
                 "SELECT * FROM deployments WHERE domain = ? ORDER BY created_at",
                 (domain,),
             ).fetchall()
-        return [
-            Record(
-                id=row["id"],
-                domain=row["domain"],
-                target=row["target"],
-                target_kind=row["target_kind"],
-                bundle_hash=row["bundle_hash"],
-                status=row["status"],
-                response=dict(json.loads(row["response_json"])),
-                created_at=datetime.fromisoformat(row["created_at"]),
-            )
-            for row in rows
-        ]
+        return [Record.from_row(dict(row)) for row in rows]
 
 
 __all__ = ["Backend"]

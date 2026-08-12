@@ -21,6 +21,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from .error import Require
 
@@ -50,6 +51,24 @@ class Need:
             raise Require(f"requirement {self.id} has no body text")
         if not self.domain or not self.domain.strip():
             raise Require(f"requirement {self.id} has no domain")
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> Need:
+        """Build a :class:`Need` from a SQLite ``requirements`` row dict.
+
+        Args:
+            row: Dict produced by ``SELECT * FROM requirements``.
+
+        Returns:
+            The reconstructed :class:`Need`.
+        """
+        return cls(
+            id=row["id"],
+            text=row["text"],
+            domain=row["domain"],
+            source_path=Path(row["source_path"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
 
 
 def parse_front_matter(source: str) -> tuple[Mapping[str, str], str]:

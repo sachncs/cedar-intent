@@ -60,6 +60,7 @@ See Also:
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -69,7 +70,7 @@ from cedrus.compile import Intent
 from cedrus.data import Payload
 from cedrus.deploy import Record
 from cedrus.need import Need
-from cedrus.scope import Action, Principal, Resource
+from cedrus.scope import Action, Principal, Resource, Scope
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +104,40 @@ class Stored:
     updated_at: datetime
     action: Action | None = None
 
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> Stored:
+        """Build a :class:`Stored` from a SQLite ``policies`` row dict.
+
+        Rehydrates the typed :class:`Intent` and :class:`Action`
+        scope from their JSON columns. Both default to ``None`` when
+        the corresponding column is ``NULL``.
+
+        Args:
+            row: Dict produced by ``SELECT * FROM policies``.
+
+        Returns:
+            The reconstructed :class:`Stored`.
+        """
+        return cls(
+            id=row["id"],
+            domain=row["domain"],
+            requirement_id=row["requirement_id"],
+            intent=(
+                Intent.from_dict(json.loads(row["intent_json"]))
+                if row["intent_json"]
+                else None
+            ),
+            cedar=row["cedar"],
+            status=row["status"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            action=(
+                Action.from_dict(json.loads(row["action_scope_json"]))
+                if row["action_scope_json"]
+                else None
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class DraftStored:
@@ -134,6 +169,63 @@ class DraftStored:
     action: Action
     resource: Resource
 
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> DraftStored:
+        """Build a :class:`DraftStored` from a SQLite ``drafts`` row dict.
+
+        Rehydrates the typed :class:`Intent` and the three scope
+        objects from their JSON columns. When ``intent_json`` is
+        ``NULL`` (legacy rows), the intent is replaced with a
+        permissive ``permit`` placeholder so downstream verification
+        still has a typed object to consume.
+
+        Args:
+            row: Dict produced by ``SELECT * FROM drafts``.
+
+        Returns:
+            The reconstructed :class:`DraftStored`.
+        """
+        intent_payload = row["intent_json"]
+        principal_payload = row["principal_scope_json"]
+        action_payload = row["action_scope_json"]
+        resource_payload = row["resource_scope_json"]
+        return cls(
+            id=row["id"],
+            policy_id=row["policy_id"],
+            model=row["model"],
+            request_id=row["request_id"],
+            unresolved=tuple(json.loads(row["unresolved_json"])),
+            cedar=row["cedar"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            intent=(
+                Intent.from_dict(json.loads(intent_payload))
+                if intent_payload
+                else Intent(
+                    id=row["id"],
+                    requirement_id=row["policy_id"] or "",
+                    effect="permit",
+                    principal=Principal(),
+                    action=Action(),
+                    resource=Resource(),
+                )
+            ),
+            principal=(
+                Principal.from_dict(json.loads(principal_payload))
+                if principal_payload
+                else Principal()
+            ),
+            action=(
+                Action.from_dict(json.loads(action_payload))
+                if action_payload
+                else Action()
+            ),
+            resource=(
+                Resource.from_dict(json.loads(resource_payload))
+                if resource_payload
+                else Resource()
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ReportStored:
@@ -154,6 +246,24 @@ class ReportStored:
     passed: bool
     payload: Payload = field(default_factory=Payload)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> ReportStored:
+        """Build a :class:`ReportStored` from a SQLite ``reports`` row dict.
+
+        Args:
+            row: Dict produced by ``SELECT * FROM reports``.
+
+        Returns:
+            The reconstructed :class:`ReportStored`.
+        """
+        return cls(
+            policy_id=row["policy_id"],
+            kind=row["kind"],
+            passed=bool(row["passed"]),
+            payload=Payload.from_dict(json.loads(row["payload_json"])),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
 
 
 @runtime_checkable
