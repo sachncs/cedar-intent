@@ -26,7 +26,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
 
 from cedarpy import format_policies, validate_policies
 
@@ -119,27 +118,6 @@ class Vreport:
                     (f"format received non-string input: {error}",), source
                 ) from error
         return cls(passed=True, errors=(), formatted=tuple(formatted))
-
-    @classmethod
-    def validate_policy(cls, policy: Any, schema: Schema) -> "Vreport":
-        """Validate a single :class:`~cedrus.policies.Policy`.
-
-        Args:
-            policy: Any object with a ``cedar`` attribute and an ``id``.
-            schema: The Cedar schema to validate against.
-
-        Returns:
-            A :class:`Vreport` for the single policy.
-
-        Raises:
-            Validate: When ``policy`` has no Cedar source.
-        """
-        cedar = getattr(policy, "cedar", "")
-        if not cedar:
-            raise Validate(
-                f"policy {getattr(policy, 'id', '?')} has no Cedar source"
-            )
-        return cls.from_cedar([cedar], schema)
 
 
 @dataclass(frozen=True, slots=True)
