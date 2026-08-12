@@ -141,7 +141,7 @@ class Outcome:
         """Return a JSON-friendly representation of the scenario result.
 
         Returns:
-            Dict with ``scenario``, ``expected``, ``actual``,
+            A dict with ``scenario``, ``expected``, ``actual``,
             ``passed`` and ``diagnostics`` keys.
         """
         return {
@@ -169,7 +169,7 @@ class Suite:
         """Return a JSON-friendly representation of the test report.
 
         Returns:
-            Dict with ``passed`` and ``results`` keys.
+            A dict with ``passed`` and ``results`` keys.
         """
         return {
             "passed": self.passed,
@@ -211,6 +211,10 @@ class Run:
             The populated :class:`Suite`. Also stored on
                 ``self.result`` so callers can inspect the run after
                 the call returns.
+
+        Raises:
+            Validate: If the engine returns a decision string that is
+                not ``"Allow"`` or ``"Deny"``.
         """
         policy_set = PolicySet.from_str("\n\n".join(policies))
         outcomes: list[Outcome] = []
@@ -271,6 +275,10 @@ class Run:
 
         Returns:
             The :class:`Outcome` for ``scenario``.
+
+        Raises:
+            Validate: If the engine returns a decision string that is
+                not ``"Allow"`` or ``"Deny"``.
         """
         request: dict[str, Any] = {
             "principal": scenario.principal,
