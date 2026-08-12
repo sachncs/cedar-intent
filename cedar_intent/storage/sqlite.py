@@ -60,7 +60,7 @@ from ..deployment import DeploymentRecord
 from ..errors import StorageError
 from ..migrations import detect_legacy_rows
 from ..requirements import Requirement
-from ..scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
+from ..scopes import ActionScope
 from .base import StoredDraft, StoredPolicy, StoredReport
 
 #: Current schema version. Bump whenever the SQLite schema changes in
@@ -380,7 +380,13 @@ class SqliteRepository:
         Args:
             policy: Policy row to upsert.
         """
-        intent_payload = serialize_intent(policy.intent)
+        from ..scope_json import intent_to_dict
+
+        intent_payload = (
+            json.dumps(intent_to_dict(policy.intent), sort_keys=True)
+            if policy.intent is not None
+            else None
+        )
         with self.connection:
             self.connection.execute(
                 """
@@ -605,47 +611,29 @@ class SqliteRepository:
 def serialize_intent(intent: PolicyIntent | None) -> str | None:
     """Serialize a :class:`PolicyIntent` to a JSON string for SQLite storage.
 
+    This is a thin wrapper around :func:`cedar_intent.scope_json.intent_to_dict`.
+    The canonical wire format lives there so storage and verification
+    layers can never disagree.
+
     Args:
         intent: The intent to serialize, or ``None``.
 
     Returns:
         The JSON string, or ``None`` if ``intent`` is ``None``.
     """
+    from ..scope_json import intent_to_dict
+
     if intent is None:
         return None
-    payload = {
-        "id": intent.id,
-        "requirement_id": intent.requirement_id,
-        "effect": intent.effect,
-        "principal": {
-            "kind": intent.principal.kind,
-            "type_name": intent.principal.type_name,
-            "entity_id": intent.principal.entity_id,
-            "group_type": intent.principal.group_type,
-            "group_id": intent.principal.group_id,
-        },
-        "action": {
-            "kind": intent.action.kind,
-            "name": intent.action.name,
-            "group": intent.action.group,
-            "namespace": intent.action.namespace,
-        },
-        "resource": {
-            "kind": intent.resource.kind,
-            "type_name": intent.resource.type_name,
-            "entity_id": intent.resource.entity_id,
-            "parent_type": intent.resource.parent_type,
-            "parent_id": intent.resource.parent_id,
-        },
-        "when_clauses": [clause.body for clause in intent.when_clauses],
-        "unless_clauses": [clause.body for clause in intent.unless_clauses],
-        "notes": dict(intent.notes),
-    }
-    return json.dumps(payload, sort_keys=True)
+    return json.dumps(intent_to_dict(intent), sort_keys=True)
 
 
 def deserialize_intent(payload: str | None) -> PolicyIntent | None:
     """Deserialize a :class:`PolicyIntent` from its JSON representation.
+
+    This is a thin wrapper around :func:`cedar_intent.scope_json.intent_from_dict`.
+    Both the canonical ``when_clauses``/``unless_clauses`` shape and
+    the legacy ``when``/``unless`` shape are accepted on read.
 
     Args:
         payload: JSON string previously produced by
@@ -655,39 +643,11 @@ def deserialize_intent(payload: str | None) -> PolicyIntent | None:
         The reconstructed :class:`PolicyIntent`, or ``None`` if
         ``payload`` is empty.
     """
+    from ..scope_json import intent_from_dict
+
     if not payload:
         return None
-    data = json.loads(payload)
-    return PolicyIntent(
-        id=data["id"],
-        requirement_id=data["requirement_id"],
-        effect=data["effect"],
-        principal=PrincipalScope(
-            kind=data["principal"]["kind"],
-            type_name=data["principal"].get("type_name"),
-            entity_id=data["principal"].get("entity_id"),
-            group_type=data["principal"].get("group_type"),
-            group_id=data["principal"].get("group_id"),
-        ),
-        action=ActionScope(
-            kind=data["action"]["kind"],
-            name=data["action"].get("name"),
-            group=data["action"].get("group"),
-            namespace=data["action"].get("namespace"),
-        ),
-        resource=ResourceScope(
-            kind=data["resource"]["kind"],
-            type_name=data["resource"].get("type_name"),
-            entity_id=data["resource"].get("entity_id"),
-            parent_type=data["resource"].get("parent_type"),
-            parent_id=data["resource"].get("parent_id"),
-        ),
-        when_clauses=tuple(ConditionClause(body=body) for body in data.get("when_clauses", [])),
-        unless_clauses=tuple(
-            ConditionClause(body=body) for body in data.get("unless_clauses", [])
-        ),
-        notes=dict(data.get("notes", {})),
-    )
+    return intent_from_dict(json.loads(payload))
 
 
 def deserialize_action_scope(payload: str | None) -> ActionScope | None:

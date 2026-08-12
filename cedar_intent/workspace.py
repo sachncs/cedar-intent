@@ -62,7 +62,7 @@ from .policies import CompiledPolicy, DraftPolicy, ExistingPolicy, Policy
 from .requirements import Requirement, load_requirement, load_requirements
 from .scenarios import Scenario, TestReport, load_scenarios, run_scenarios
 from .schema import CedarSchema
-from .scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
+from .scopes import ActionScope, PrincipalScope, ResourceScope
 from .storage import (
     InMemoryRepository,
     Repository,
@@ -913,26 +913,14 @@ def build_stored_draft(
     """
     from .scope_json import (
         action_scope_to_dict,
+        intent_to_dict,
         principal_scope_to_dict,
         resource_scope_to_dict,
     )
 
     intent_json: str | None = None
     if draft.intent is not None:
-        intent_json = json.dumps(
-            {
-                "id": draft.intent.id,
-                "requirement_id": draft.intent.requirement_id,
-                "effect": draft.intent.effect,
-                "principal": principal_scope_to_dict(draft.intent.principal),
-                "action": action_scope_to_dict(draft.intent.action),
-                "resource": resource_scope_to_dict(draft.intent.resource),
-                "when": [clause.body for clause in draft.intent.when_clauses],
-                "unless": [clause.body for clause in draft.intent.unless_clauses],
-                "notes": dict(draft.intent.notes),
-            },
-            sort_keys=True,
-        )
+        intent_json = json.dumps(intent_to_dict(draft.intent), sort_keys=True)
     principal_json = (
         json.dumps(principal_scope_to_dict(draft.principal), sort_keys=True)
         if draft.principal is not None
@@ -1121,16 +1109,17 @@ def intent_from_draft(
     no longer synthesizes a permissive ``permit(any/any/any)`` fallback
     because that would silently bypass verification gates downstream.
 
+    Both the canonical ``when_clauses``/``unless_clauses`` shape and
+    the legacy ``when``/``unless`` shape are accepted on read for
+    backward compatibility with rows stored by earlier cedar-intent
+    versions.
+
     Raises:
         WorkspaceError: When ``intent_json`` is present but cannot be
             parsed into the expected scope shape.
     """
     from .errors import WorkspaceError
-    from .scope_json import (
-        action_scope_from_dict,
-        principal_scope_from_dict,
-        resource_scope_from_dict,
-    )
+    from .scope_json import intent_from_dict
 
     if not draft.intent_json:
         return None
@@ -1141,27 +1130,45 @@ def intent_from_draft(
             "re-run `cedar-intent policy generate` for the requirement"
         )
     try:
-        principal = principal_scope_from_dict(data.get("principal")) or PrincipalScope()
-        action = action_scope_from_dict(data.get("action")) or ActionScope()
-        resource = resource_scope_from_dict(data.get("resource")) or ResourceScope()
-        when = tuple(ConditionClause(body=body) for body in data.get("when", []) or [])
-        unless = tuple(ConditionClause(body=body) for body in data.get("unless", []) or [])
+        intent = intent_from_dict(data)
     except (KeyError, TypeError, ValueError) as error:
         raise WorkspaceError(
             f"stored draft {draft.id!r} has corrupt intent JSON ({error}); "
             "re-run `cedar-intent policy generate` for the requirement"
         ) from error
-    return PolicyIntent(
-        id=str(data.get("id", intent_id)),
-        requirement_id=str(data.get("requirement_id", requirement_id)),
-        effect=data.get("effect", "permit"),
-        principal=principal,
-        action=action,
-        resource=resource,
-        when_clauses=when,
-        unless_clauses=unless,
-        notes=dict(data.get("notes", {}) or {}),
-    )
+    if intent is None:
+        raise WorkspaceError(
+            f"stored draft {draft.id!r} has empty intent JSON; "
+            "re-run `cedar-intent policy generate` for the requirement"
+        )
+    # When ``intent.id`` or ``intent.requirement_id`` are missing from
+    # the stored JSON, fall back to the supplied identifiers so the
+    # caller's context is preserved.
+    if not intent.id:
+        intent = PolicyIntent(
+            id=intent_id,
+            requirement_id=intent.requirement_id or requirement_id,
+            effect=intent.effect,
+            principal=intent.principal,
+            action=intent.action,
+            resource=intent.resource,
+            when_clauses=intent.when_clauses,
+            unless_clauses=intent.unless_clauses,
+            notes=dict(intent.notes),
+        )
+    elif not intent.requirement_id:
+        intent = PolicyIntent(
+            id=intent.id,
+            requirement_id=requirement_id,
+            effect=intent.effect,
+            principal=intent.principal,
+            action=intent.action,
+            resource=intent.resource,
+            when_clauses=intent.when_clauses,
+            unless_clauses=intent.unless_clauses,
+            notes=dict(intent.notes),
+        )
+    return intent
 
 
 __all__ = [

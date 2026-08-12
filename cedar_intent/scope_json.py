@@ -13,8 +13,15 @@ Round-trip rules
 * Missing optional fields decode to ``None``.
 * Empty optional strings decode to ``None`` (so the SQL ``IS NULL``
   check works as expected).
-* ``when``/``unless`` clauses lose their ``attributes`` map on
-  deserialization; the body alone is sufficient for verification.
+* ``when_clauses``/``unless_clauses`` arrays carry
+  ``{"body": str, "attributes": dict}`` objects so the verification
+  layer can recover both the body and any operator-supplied
+  attributes.
+* The legacy short-form ``when``/``unless`` keys (carrying a list of
+  body strings) are still accepted on read for backward compatibility
+  with rows stored by earlier cedar-intent versions, but every
+  writer now uses the canonical ``when_clauses``/``unless_clauses``
+  shape.
 
 The helpers are stateless and safe to call from any thread.
 """
@@ -23,6 +30,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .compiler import PolicyIntent
 from .scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
 
 
@@ -159,10 +167,95 @@ def condition_clauses_to_list(
 def condition_clauses_from_list(
     data: list[dict[str, Any]] | None,
 ) -> tuple[ConditionClause, ...]:
-    """Deserialize a JSON list back into a tuple of condition clauses."""
+    """Deserialize a JSON list back into a tuple of condition clauses.
+
+    Accepts both the canonical shape
+    (``[{"body": "...", "attributes": {...}}, ...]``) and the legacy
+    short form (``["body string", ...]``) for backward compatibility.
+    """
     if not data:
         return ()
-    return tuple(ConditionClause(body=item["body"]) for item in data if "body" in item)
+    clauses: list[ConditionClause] = []
+    for item in data:
+        if isinstance(item, str):
+            clauses.append(ConditionClause(body=item))
+        elif isinstance(item, dict) and "body" in item:
+            attrs = item.get("attributes") or {}
+            clauses.append(
+                ConditionClause(
+                    body=item["body"],
+                    attributes=dict(attrs) if isinstance(attrs, dict) else {},
+                )
+            )
+    return tuple(clauses)
+
+
+def intent_to_dict(intent: PolicyIntent | None) -> dict[str, Any] | None:
+    """Serialize a :class:`PolicyIntent` to a JSON-friendly dict.
+
+    The canonical wire format uses ``when_clauses`` and
+    ``unless_clauses`` keys with ``[{"body": ..., "attributes": ...},
+    ...]`` values so the verification layer can recover both the body
+    and any operator-supplied attributes.
+
+    Args:
+        intent: Intent to serialize, or ``None``.
+
+    Returns:
+        A plain ``dict`` mirroring the intent's fields, or ``None``
+        when ``intent`` is ``None``.
+    """
+    if intent is None:
+        return None
+    return {
+        "id": intent.id,
+        "requirement_id": intent.requirement_id,
+        "effect": intent.effect,
+        "principal": principal_scope_to_dict(intent.principal),
+        "action": action_scope_to_dict(intent.action),
+        "resource": resource_scope_to_dict(intent.resource),
+        "when_clauses": condition_clauses_to_list(intent.when_clauses),
+        "unless_clauses": condition_clauses_to_list(intent.unless_clauses),
+        "notes": dict(intent.notes),
+    }
+
+
+def intent_from_dict(data: dict[str, Any] | None) -> PolicyIntent | None:
+    """Deserialize a :class:`PolicyIntent` from a JSON-friendly dict.
+
+    Accepts both the canonical ``when_clauses``/``unless_clauses``
+    shape and the legacy short form (``when``/``unless`` carrying a
+    list of body strings) so rows stored by earlier cedar-intent
+    versions still load.
+
+    Args:
+        data: Mapping previously produced by :func:`intent_to_dict`,
+            or ``None``.
+
+    Returns:
+        The reconstructed :class:`PolicyIntent`, or ``None`` when
+        ``data`` is ``None``.
+    """
+    if data is None:
+        return None
+    when_raw = data.get("when_clauses", data.get("when"))
+    unless_raw = data.get("unless_clauses", data.get("unless"))
+    principal = principal_scope_from_dict(data.get("principal")) or PrincipalScope()
+    action = action_scope_from_dict(data.get("action")) or ActionScope()
+    resource = resource_scope_from_dict(data.get("resource")) or ResourceScope()
+    when_clauses = condition_clauses_from_list(when_raw)
+    unless_clauses = condition_clauses_from_list(unless_raw)
+    return PolicyIntent(
+        id=str(data.get("id", "")),
+        requirement_id=str(data.get("requirement_id", "")),
+        effect=data.get("effect", "permit"),
+        principal=principal,
+        action=action,
+        resource=resource,
+        when_clauses=when_clauses,
+        unless_clauses=unless_clauses,
+        notes=dict(data.get("notes", {}) or {}),
+    )
 
 
 __all__ = [
@@ -170,6 +263,8 @@ __all__ = [
     "action_scope_to_dict",
     "condition_clauses_from_list",
     "condition_clauses_to_list",
+    "intent_from_dict",
+    "intent_to_dict",
     "principal_scope_from_dict",
     "principal_scope_to_dict",
     "resource_scope_from_dict",

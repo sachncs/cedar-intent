@@ -207,6 +207,8 @@ def _parse_action_scope(cedar: str) -> ActionScope | None:
 
 def _dumps(scope: Any) -> str:
     """Serialize a scope object to JSON."""
+    from .scope_json import intent_to_dict
+
     if isinstance(scope, PrincipalScope):
         return json.dumps(principal_scope_to_dict(scope), sort_keys=True)
     if isinstance(scope, ActionScope):
@@ -214,20 +216,7 @@ def _dumps(scope: Any) -> str:
     if isinstance(scope, ResourceScope):
         return json.dumps(resource_scope_to_dict(scope), sort_keys=True)
     if isinstance(scope, PolicyIntent):
-        return json.dumps(
-            {
-                "id": scope.id,
-                "requirement_id": scope.requirement_id,
-                "effect": scope.effect,
-                "principal": principal_scope_to_dict(scope.principal),
-                "action": action_scope_to_dict(scope.action),
-                "resource": resource_scope_to_dict(scope.resource),
-                "when": [clause.body for clause in scope.when_clauses],
-                "unless": [clause.body for clause in scope.unless_clauses],
-                "notes": dict(scope.notes),
-            },
-            sort_keys=True,
-        )
+        return json.dumps(intent_to_dict(scope), sort_keys=True)
     if isinstance(scope, ConditionClause):
         return json.dumps({"body": scope.body}, sort_keys=True)
     return json.dumps(scope, sort_keys=True, default=str)
