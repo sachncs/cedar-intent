@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cedar-intent"
-version = "0.5.0"
+dynamic = ["version"]
 description = "Compile organizational authorization intent into validated Cedar policies."
 requires-python = ">=3.11"
 dependencies = [
@@ -31,6 +31,9 @@ packages = [
 
 [tool.setuptools.package-data]
 cedar_intent = ["py.typed"]
+
+[tool.setuptools.dynamic]
+version = {attr = "cedar_intent.__version__"}
 
 [tool.ruff]
 line-length = 100

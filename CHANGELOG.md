@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - Unreleased
+
+### Changed
+- Version is now sourced from `cedar_intent.__version__` at build time via
+  `[tool.setuptools.dynamic]`, eliminating drift between the package and
+  `pyproject.toml`.
+
 ## [0.5.0] - 2026-07-20
 
 ### Added
@@ -94,6 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   generator, SQLite-backed workspace, and CLI for end-to-end
   requirement-to-Cedar drafting.
 
-[Unreleased]: https://github.com/sachin/cedar-intent/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/sachin/cedar-intent/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/sachin/cedar-intent/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sachin/cedar-intent/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/sachin/cedar-intent/releases/tag/v0.4.0
