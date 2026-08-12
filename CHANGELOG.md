@@ -6,6 +6,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - Unreleased
+
+### Changed
+- **Rename**: The package is renamed from `cedar_intent` to `cedrus`.
+  All classes are renamed to single-word nouns; all methods are
+  single-word verbs; all enum discriminators live as class-level
+  constants on the owning class.
+- **Polymorphism**: Every entity has an abstract base / Protocol
+  (`Scope`, `Policy`, `Generator`, `Repository`). The Repository is
+  segregated into six Protocols (`NeedRepository`, `StoredRepository`,
+  `DraftRepository`, `ReportRepository`, `DeployRepository`,
+  `UnitOfWork`).
+- **Encapsulation**: Wire shapes (`Intent`, `Source`, `Manifest`,
+  `Need`, `Case`, etc.) are `@dataclass(frozen=True, slots=True)`.
+  Mutable state (`Domain`) uses `@dataclass(slots=True)` with mutation
+  funneled through `Domain.mutate(**changes)`.
+- **Object flow**: Strings and dicts flow only at wire boundaries.
+  Internal APIs consume and produce typed objects (`Domain`, `Draft`,
+  `Intent`, `Manifest`, `Record`, `Headers`, `Body`, `Receipt`,
+  `Target`, `Notes`, `Metadata`, `Unresolved`, `Usage`, `Payload`).
+- **Space API**: Polymorphic methods (`Space.apply(draft | need)`,
+  `Space.load(schema)`, `Space.create(draft)`, `Space.generate(ctx)`,
+  `Space.export(domain)`, `Space.write(bundle)`) replace the
+  string-based Workspace API.
+
+### Removed (breaking)
+- `cedar_intent` import path is gone; use `cedrus`.
+- Multi-word class names (`PolicyIntent`, `BundleExporter`, etc.) are
+  gone; use `Intent`, `Bundler`, etc.
+- Free functions (`validate_cedar`, `compile_intent`, etc.) are gone;
+  use orchestrator classes (`Validator`, `Compiler`, etc.).
+
 ## [0.6.0] - Unreleased
 
 ### Added
