@@ -57,7 +57,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 from cedrus.compile import Intent
@@ -141,14 +141,14 @@ class ReportStored:
         payload: Typed report payload; defaults to an empty
             :class:`Payload` when the report has no findings.
         created_at: Timestamp at which the report was recorded;
-            ``None`` for legacy rows.
+            defaults to ``datetime.now(UTC)`` when not provided.
     """
 
     policy_id: str
     kind: str
     passed: bool
     payload: Payload = field(default_factory=Payload)
-    created_at: datetime | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @runtime_checkable
