@@ -75,7 +75,7 @@ from cedrus.store.base import DraftStored, ReportStored, Stored
 
 #: Current schema version. Bump whenever the SQLite schema changes in
 #: a way that requires row data to be migrated.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_STATEMENTS = (
     """
@@ -92,12 +92,11 @@ SCHEMA_STATEMENTS = (
         id TEXT PRIMARY KEY,
         domain TEXT NOT NULL,
         requirement_id TEXT,
-        intent_json TEXT,
         cedar TEXT NOT NULL,
         status TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        action_scope_json TEXT,
+        intent_id TEXT,
         FOREIGN KEY (requirement_id) REFERENCES requirements(id) ON DELETE SET NULL
     )
     """,
@@ -107,13 +106,12 @@ SCHEMA_STATEMENTS = (
         policy_id TEXT,
         model TEXT NOT NULL,
         request_id TEXT,
-        unresolved_json TEXT NOT NULL,
         cedar TEXT NOT NULL,
         created_at TEXT NOT NULL,
-        intent_json TEXT,
-        principal_scope_json TEXT,
-        action_scope_json TEXT,
-        resource_scope_json TEXT
+        intent_id TEXT,
+        principal_id TEXT,
+        action_id TEXT,
+        resource_id TEXT
     )
     """,
     """
@@ -122,7 +120,6 @@ SCHEMA_STATEMENTS = (
         policy_id TEXT,
         kind TEXT NOT NULL,
         passed INTEGER NOT NULL,
-        payload_json TEXT NOT NULL,
         created_at TEXT NOT NULL
     )
     """,
@@ -134,8 +131,108 @@ SCHEMA_STATEMENTS = (
         target_kind TEXT NOT NULL,
         bundle_hash TEXT NOT NULL,
         status TEXT NOT NULL,
-        response_json TEXT NOT NULL,
         created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS principals (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        type_name TEXT,
+        entity_id TEXT,
+        group_type TEXT,
+        group_id TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS actions (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        name TEXT,
+        group TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS resources (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        type_name TEXT,
+        entity_id TEXT,
+        parent_type TEXT,
+        parent_id TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS clauses (
+        id TEXT PRIMARY KEY,
+        body TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS clause_attributes (
+        clause_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        PRIMARY KEY (clause_id, key)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS intents (
+        id TEXT PRIMARY KEY,
+        effect TEXT NOT NULL,
+        requirement_id TEXT NOT NULL,
+        principal_id TEXT NOT NULL,
+        action_id TEXT NOT NULL,
+        resource_id TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS intent_when_clauses (
+        intent_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        clause_id TEXT NOT NULL,
+        PRIMARY KEY (intent_id, position)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS intent_unless_clauses (
+        intent_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        clause_id TEXT NOT NULL,
+        PRIMARY KEY (intent_id, position)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS intent_notes (
+        intent_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        PRIMARY KEY (intent_id, key)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS draft_unresolved (
+        draft_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        item TEXT NOT NULL,
+        PRIMARY KEY (draft_id, position)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS report_payload (
+        report_id INTEGER NOT NULL,
+        position INTEGER NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        PRIMARY KEY (report_id, position, key)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS deployment_responses (
+        deployment_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        PRIMARY KEY (deployment_id, key)
     )
     """,
     """
@@ -147,22 +244,11 @@ SCHEMA_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_drafts_policy ON drafts(policy_id)",
     "CREATE INDEX IF NOT EXISTS idx_reports_policy ON reports(policy_id)",
     "CREATE INDEX IF NOT EXISTS idx_deployments_domain ON deployments(domain)",
-)
-
-
-#: ALTER TABLE statements that add the new ``*_json`` columns
-#: introduced in 0.6.0. Each statement is wrapped in a check against
-#: ``sqlite_master`` so it is idempotent. ``ALTER TABLE ...
-#: ADD COLUMN`` does not accept ``IF NOT EXISTS`` on older SQLite
-#: versions, hence the manual guard.
-ALTER_INTENT_JSON = (
-    "ALTER TABLE policies ADD COLUMN action_scope_json TEXT",
-)
-ALTER_DRAFT_COLUMNS = (
-    "ALTER TABLE drafts ADD COLUMN intent_json TEXT",
-    "ALTER TABLE drafts ADD COLUMN principal_scope_json TEXT",
-    "ALTER TABLE drafts ADD COLUMN action_scope_json TEXT",
-    "ALTER TABLE drafts ADD COLUMN resource_scope_json TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_intent_when_clauses ON intent_when_clauses(intent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_intent_unless_clauses ON intent_unless_clauses(intent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_draft_unresolved ON draft_unresolved(draft_id)",
+    "CREATE INDEX IF NOT EXISTS idx_report_payload ON report_payload(report_id)",
+    "CREATE INDEX IF NOT EXISTS idx_deployment_responses ON deployment_responses(deployment_id)",
 )
 
 
