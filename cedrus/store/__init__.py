@@ -24,7 +24,6 @@ See Also:
         / ``upsert`` / ``update`` / ``latest`` CRUD methods).
     :mod:`cedrus.store.memory`: :class:`Memory` implementation.
     :mod:`cedrus.store.sqlite`: :class:`Backend` implementation.
-    :mod:`cedrus.data.persist`: Newer typed persistence rows.
 """
 
 from cedrus.store.base import DraftStored, ReportStored, Repository, Stored

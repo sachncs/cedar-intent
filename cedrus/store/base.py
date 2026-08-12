@@ -49,7 +49,6 @@ Attributes:
 See Also:
     :mod:`cedrus.store.memory`: In-memory repository implementation.
     :mod:`cedrus.store.sqlite`: SQLite repository implementation.
-    :mod:`cedrus.data.persist`: Newer typed persistence rows.
 """
 
 from __future__ import annotations

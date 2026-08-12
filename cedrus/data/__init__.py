@@ -8,8 +8,7 @@ Wire shapes are the boundary between the typed in-memory object model
 and the untyped strings/bytes on the wire (HTTP, SQLite columns,
 manifest JSON). The internal object model never crosses a wire; it
 goes through ``to_dict()`` to produce the wire format and
-``from_dict()`` / ``from_strings()`` / ``from_row()`` to consume
-it.
+``from_dict()`` / ``from_strings()`` to consume it.
 
 All classes are ``@dataclass(frozen=True, slots=True)``.
 
@@ -26,19 +25,14 @@ Attributes:
     Context: Input bundle for a generator call.
     Proposal: One generator proposal for a single requirement.
     Result: Final output of a generator call with provenance.
-    DraftStored: A persisted draft proposal row.
-    ReportStored: A persisted validation or test report row.
-    Stored: A persisted policy row.
     Unresolved: Items the generator could not safely resolve.
 
 See Also:
     :mod:`cedrus.data.wire`: Wire-shape classes (JSON-friendly boundary types).
     :mod:`cedrus.data.transit`: In-process typed data classes.
-    :mod:`cedrus.data.persist`: SQLite-row dataclasses.
     :mod:`cedrus.data.unresolved`: Typed wrapper for unresolved items.
 """
 
-from cedrus.data.persist import DraftStored, ReportStored, Stored
 from cedrus.data.transit import Context, Proposal, Result
 from cedrus.data.unresolved import Unresolved
 from cedrus.data.wire import (
@@ -56,16 +50,13 @@ from cedrus.data.wire import (
 __all__ = [
     "Body",
     "Context",
-    "DraftStored",
     "Headers",
     "Metadata",
     "Notes",
     "Payload",
     "Proposal",
     "Receipt",
-    "ReportStored",
     "Result",
-    "Stored",
     "Target",
     "TargetKind",
     "Unresolved",

@@ -56,7 +56,6 @@ See Also:
         implements, plus the typed-object CRUD methods that drive
         the SQL primitives exposed here.
     :mod:`cedrus.store.memory`: In-memory repository implementation.
-    :mod:`cedrus.data.persist`: Newer typed persistence rows.
 """
 
 from __future__ import annotations

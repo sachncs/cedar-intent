@@ -20,7 +20,7 @@ Attributes:
     Payload: Typed wrapper for a JSON payload (e.g., a validation report body).
 
 See Also:
-    :mod:`cedrus.data.persist`: The persistence rows that store these
+    :mod:`cedrus.store.base`: The persistence rows that store these
         wire shapes in SQLite.
 """
 
