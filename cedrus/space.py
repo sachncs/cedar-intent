@@ -494,9 +494,9 @@ class Workspace:
             returned draft carries the generator's Cedar and
             provenance.
         """
-        result = generator.generate(self._build_context(draft, schema, existing))
+        result = generator.generate(self.build_context(draft, schema, existing))
         proposal = result.proposal
-        qualified_intent = self._qualify_intent(proposal.intent, schema)
+        qualified_intent = self.qualify_intent(proposal.intent, schema)
         compiled_source = qualified_intent.compile()
         new_draft = Draft(
             id=draft.id,
@@ -687,7 +687,7 @@ class Workspace:
         if scenarios:
             scenario_list: list[Case] = list(scenarios)
             test_report = draft.test(
-                schema, scenario_list, entities=self._resolve_test_entities(entities)
+                schema, scenario_list, entities=self.resolve_test_entities(entities)
             )
             if not test_report.passed:
                 failures = [
@@ -700,11 +700,11 @@ class Workspace:
                     + ", ".join(failure.scenario.name for failure in failures)
                 )
         with self.repository.transaction():
-            self._build_stored_report(draft.id, "validation", report).save(
+            self.build_stored_report(draft.id, "validation", report).save(
                 self.repository
             )
             if scenarios and test_report is not None:
-                self._build_stored_report(draft.id, "test", test_report).save(
+                self.build_stored_report(draft.id, "test", test_report).save(
                     self.repository
                 )
             compiled = Compiled(
@@ -764,12 +764,12 @@ class Workspace:
                 f"no draft exists for requirement {requirement_id!r}; "
                 "run 'cedrus policy generate' first"
             ) from error
-        intent = self._intent_from_draft(stored_draft, placeholder.id, requirement_id)
-        principal_payload = self._loads_optional_json(
+        intent = self.intent_from_draft(stored_draft, placeholder.id, requirement_id)
+        principal_payload = self.loads_optional_json(
             stored_draft.principal_scope_json
         )
-        action_payload = self._loads_optional_json(stored_draft.action_scope_json)
-        resource_payload = self._loads_optional_json(
+        action_payload = self.loads_optional_json(stored_draft.action_scope_json)
+        resource_payload = self.loads_optional_json(
             stored_draft.resource_scope_json
         )
         draft = Draft(
@@ -887,7 +887,7 @@ class Workspace:
             self.repository.close()
 
     @staticmethod
-    def _build_context(
+    def build_context(
         draft: Draft,
         schema: Schema,
         existing: Sequence[Kind],
@@ -924,7 +924,7 @@ class Workspace:
         )
 
     @staticmethod
-    def _build_stored_report(
+    def build_stored_report(
         policy_id: str,
         kind: str,
         report: Vreport | Suite,
@@ -950,12 +950,12 @@ class Workspace:
         )
 
     @staticmethod
-    def _qualify_intent(intent: Intent, schema: Schema) -> Intent:
+    def qualify_intent(intent: Intent, schema: Schema) -> Intent:
         """Return a copy of ``intent`` with namespace-qualified type names.
 
         The generator emits ``User``, ``Photo``, ``viewPhoto`` and
         similar names without their namespace prefix.
-        ``_qualify_intent`` looks each one up in the schema and
+        ``qualify_intent`` looks each one up in the schema and
         rewrites it with its namespace when there is a unique match.
         Unresolved names pass through unchanged.
 
@@ -985,7 +985,7 @@ class Workspace:
             kind=intent.action.kind,
             name=intent.action.name,
             group=intent.action.group,
-            namespace=self._find_action_namespace(intent.action, schema),
+            namespace=self.find_action_namespace(intent.action, schema),
         )
         return Intent(
             id=intent.id,
@@ -1000,7 +1000,7 @@ class Workspace:
         )
 
     @staticmethod
-    def _find_action_namespace(action: Action, schema: Schema) -> str | None:
+    def find_action_namespace(action: Action, schema: Schema) -> str | None:
         """Return the namespace that owns the given action, or ``None``.
 
         Searches every namespace in ``schema.source`` for an action
@@ -1046,14 +1046,14 @@ class Workspace:
         return action.namespace
 
     @staticmethod
-    def _resolve_test_entities(
+    def resolve_test_entities(
         entities: Sequence[Mapping[str, Any]],
     ) -> list[Mapping[str, Any]]:
         """Normalize test entities for passing into the Cedar engine."""
         return [dict(entity) for entity in entities]
 
     @staticmethod
-    def _loads_optional_json(payload: str | None) -> dict[str, Any] | None:
+    def loads_optional_json(payload: str | None) -> dict[str, Any] | None:
         """Deserialize a JSON string into a dict.
 
         Args:
@@ -1071,7 +1071,7 @@ class Workspace:
         return cast(dict[str, Any], data)
 
     @staticmethod
-    def _intent_from_draft(
+    def intent_from_draft(
         draft: "DraftStored", intent_id: str, requirement_id: str
     ) -> Intent | None:
         """Rebuild the typed intent for a stored draft.
@@ -1106,7 +1106,7 @@ class Workspace:
         """
         if draft.intent is None:
             return None
-        data = Workspace._loads_optional_json(draft.intent.to_dict())
+        data = Workspace.loads_optional_json(draft.intent.to_dict())
         if data is None:
             return None
         try:
