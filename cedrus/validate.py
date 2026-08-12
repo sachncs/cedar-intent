@@ -54,6 +54,19 @@ class Vreport:
         }
 
 
+
+
+class Validator:
+    """Schema validator. Subclass for alternate Cedar engine bindings."""
+
+    def __init__(self, schema: Schema) -> None:
+        self.schema = schema
+
+    def validate(self, cedars: list[str]) -> Vreport:
+        """Validate Cedar statements against the schema."""
+        return validate_cedar(cedars, self.schema)
+
+
 def validate_cedar(policies: Sequence[str], schema: Schema) -> Vreport:
     """Validate Cedar statements against the schema and return a structured report.
 

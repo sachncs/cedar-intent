@@ -129,6 +129,24 @@ def load_scenarios(mapping: Sequence[Mapping[str, Any]]) -> list[Case]:
     return scenarios
 
 
+
+
+class Runner:
+    """Scenario runner. Subclass for alternate scenario backends."""
+
+    def __init__(self, schema: Schema) -> None:
+        self.schema = schema
+
+    def run(self, cases: list) -> Suite:
+        """Run every case and return a Suite."""
+        return run_scenarios(
+            [case.cedar for case in cases],
+            entities=[],
+            scenarios=list(cases),
+            schema=self.schema,
+        )
+
+
 def run_scenarios(
     policies: Sequence[str],
     entities: Sequence[Mapping[str, Any]],

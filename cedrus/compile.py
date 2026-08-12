@@ -102,6 +102,16 @@ class Source:
         }
 
 
+
+
+class Compiler:
+    """Deterministic Cedar compiler. Single entry point: :meth:`compile`."""
+
+    def compile(self, intent: Intent) -> Source:
+        """Compile ``intent`` into a Cedar :class:`Source`."""
+        return compile_intent(intent)
+
+
 def compile_intent(intent: Intent) -> Source:
     """Compile a single :class:`Intent` to Cedar source.
 

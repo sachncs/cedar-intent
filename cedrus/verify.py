@@ -65,6 +65,8 @@ from typing import Any
 
 import cedarpy
 
+from .schema import Schema
+
 VerificationSeverity = str  # "warning" | "info"
 
 
@@ -178,6 +180,51 @@ class Extraction:
             self.resource,
             self.conditions,
         )
+
+
+
+
+class Verifier:
+    """Static symbolic verifier.
+
+    The default implementation analyzes Cedar source via the
+    cedarpy AST. Subclass and override individual methods to customize
+    the verification strategy (e.g., an SMT-based backend).
+
+    The class is stateless; construction is cheap.
+    """
+
+    def __init__(self, schema: Schema) -> None:
+        self.schema = schema
+
+    def verify(
+        self,
+        policies: Sequence[Any],
+        requirement_ids: Sequence[str] = (),
+        action_names: Sequence[tuple[str, str]] = (),
+        entity_type_names: Iterable[str] = (),
+    ) -> Report:
+        """Verify ``policies`` and return a structured report."""
+        return verify_policies(
+            domain="",
+            policies=policies,
+            requirement_ids=requirement_ids,
+            action_names=action_names,
+            entity_type_names=entity_type_names,
+            actions_by_namespace=self.schema.actions_by_namespace(),
+        )
+
+    def extract(self, policy: Any) -> Extraction:
+        """Extract the scope signature from a single policy."""
+        return extract_scope(policy)
+
+    def shadow(self, policies: Sequence[Any]) -> list[Finding]:
+        """Detect shadowed permits."""
+        return detect_shadowing([(p, extract_scope(p)) for p in policies])
+
+    def redundant(self, policies: Sequence[Any]) -> list[Finding]:
+        """Detect redundant duplicates."""
+        return detect_redundancy([(p, extract_scope(p)) for p in policies])
 
 
 def verify_policies(
