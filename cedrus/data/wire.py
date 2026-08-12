@@ -18,6 +18,10 @@ Attributes:
     Notes: Free-form notes attached to an :class:`~cedrus.compile.Intent`.
     Metadata: Free-form deployment metadata attached to a manifest.
     Payload: Typed wrapper for a JSON payload (e.g., a validation report body).
+
+See Also:
+    :mod:`cedrus.data.persist`: The persistence rows that store these
+        wire shapes in SQLite.
 """
 
 from __future__ import annotations
@@ -132,6 +136,7 @@ class Body:
     sha256: str = field(init=False)
 
     def __post_init__(self) -> None:
+        """Compute and cache the SHA-256 of the payload bytes."""
         # Use object.__setattr__ because frozen dataclasses forbid
         # attribute assignment in __post_init__.
         object.__setattr__(self, "sha256", hashlib.sha256(self.payload).hexdigest())
