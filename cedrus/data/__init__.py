@@ -12,6 +12,30 @@ goes through ``to_dict()`` to produce the wire format and
 it.
 
 All classes are ``@dataclass(frozen=True, slots=True)``.
+
+Attributes:
+    Body: HTTP request body with computed SHA-256.
+    Context: Input bundle for a generator call.
+    DraftStored: A persisted draft proposal row.
+    Headers: HTTP header collection with reserved-name and CR/LF validation.
+    Metadata: Free-form deployment metadata attached to a manifest.
+    Notes: Free-form notes attached to an :class:`~cedrus.compile.Intent`.
+    Payload: Typed wrapper for a JSON payload (e.g., a validation report body).
+    Proposal: One generator proposal for a single requirement.
+    Receipt: HTTP response metadata persisted in a :class:`~cedrus.deploy.Record`.
+    ReportStored: A persisted validation or test report row.
+    Result: Final output of a generator call with provenance.
+    Stored: A persisted policy row.
+    Target: Deployment target (local path or remote URL).
+    TargetKind: Deployment target kind (``LOCAL`` / ``REMOTE``).
+    Unresolved: Items the generator could not safely resolve.
+    Usage: LLM token-usage metadata extracted from a generation response.
+
+See Also:
+    :mod:`cedrus.data.wire`: Wire-shape classes (JSON-friendly boundary types).
+    :mod:`cedrus.data.transit`: In-process typed data classes.
+    :mod:`cedrus.data.persist`: SQLite-row dataclasses.
+    :mod:`cedrus.data.unresolved`: Typed wrapper for unresolved items.
 """
 
 from .persist import DraftStored, ReportStored, Stored
