@@ -8,17 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.7.0] - Unreleased
 
+The package is renamed from `cedar_intent` to **cedrus**. All classes
+become single-word nouns; all methods become single-word verbs. The
+verification layer is replaced with an AST-based verifier. The
+deployment layer uses an httpx-based client with DNS-pinned
+connections. The persistence layer uses six segregated Protocols
+rather than one monolithic Repository.
+
 ### Changed
 - **Rename**: The package is renamed from `cedar_intent` to `cedrus`.
-  All classes are renamed to single-word nouns; all methods are
-  single-word verbs; all enum discriminators live as class-level
-  constants on the owning class. The full rename table is in
-  `todo.md` (Phases B and C).
-- **Polymorphism**: Every entity has an abstract base / Protocol
-  (`Scope`, `Policy`, `Generator`, `Repository`). The orchestrators
-  (`Verifier`, `Validator`, `Bundler`, `Runner`, `Migrator`, `Client`,
-  `Parser`, `Space`, `Cli`) are concrete classes subclassable for
-  custom strategies.
+  All classes are renamed to single-word nouns (`Intent`, `Source`,
+  `Need`, `Case`, `Outcome`, `Suite`, `Vreport`, `Principal`,
+  `Action`, `Resource`, `Clause`, `Extraction`, `Finding`, `Report`,
+  `Context`, `Proposal`, `Result`, `Llm`, `Offline`, `Compiled`,
+  `Draft`, `Existing`, `Schema`, `Manifest`, `Record`, `Bundler`,
+  `Guard`, `Pin`, `Client`, `Stored`, `DraftStored`, `ReportStored`,
+  `Memory`, `Sqlite`). Methods are single-word verbs.
+- **Polymorphism**: Abstract bases (`Scope`, `Policy`, `Error`) and
+  Protocols (`Generator`, `Repository`) define the contract for
+  every entity. The Repository is segregated into six Protocols
+  (`NeedRepository`, `StoredRepository`, `DraftRepository`,
+  `ReportRepository`, `DeployRepository`, `UnitOfWork`).
 - **Encapsulation**: Wire shapes (`Intent`, `Source`, `Manifest`,
   `Need`, `Case`, etc.) are `@dataclass(frozen=True, slots=True)`.
   Mutable state (`Domain`) uses `@dataclass(slots=True)` with mutation
@@ -28,41 +38,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `Intent`, `Manifest`, `Record`, `Headers`, `Body`, `Receipt`,
   `Target`, `Notes`, `Metadata`, `Unresolved`, `Usage`, `Payload`).
 - **No leading underscores**: Every module-level symbol is single-word
-  and public-by-name. Internal scope is conveyed via `__all__` and
-  module docstrings, not name prefixing.
-- **Space API**: Polymorphic methods (`Space.apply(draft | need)`,
-  `Space.load(schema)`, `Space.create(draft)`, `Space.generate(ctx)`,
-  `Space.export(domain)`, `Space.write(bundle)`) replace the
-  string-based Workspace API.
+  and public-by-name.
 - **Single-word files**: All module filenames are single-word:
   `compile.py`, `deploy.py`, `error.py`, `migrate.py`, `need.py`,
   `case.py`, `scope.py`, `validate.py`, `verify.py`, `space.py`,
   `generate/`, `store/`.
+- **Space API**: Polymorphic methods (`Space.apply(draft | need)`,
+  `Space.load(schema)`, `Space.create(draft)`, `Space.generate(ctx)`,
+  `Space.export(domain)`, `Space.write(bundle)`).
+- **Verifier AST parser**: `verify_policies` was regex-based and
+  silently degraded to `permit(any/any/any)` on unparseable input. The
+  new parser uses `cedarpy.policies_to_json_str` and emits a
+  `malformed-policy` finding on parse failure.
 
 ### Added
 - `cedrus.data` package: typed wire shapes (`Headers`, `Body`,
-  `Receipt`, `Target`, `Usage`, `Notes`, `Metadata`, `Payload`),
-  in-memory types (`Context`, `Proposal`, `Result`, `Unresolved`),
-  and persistence shapes (`Stored`, `DraftStored`, `ReportStored`).
+  `Receipt`, `Target`, `TargetKind`, `Usage`, `Notes`, `Metadata`,
+  `Payload`), in-memory types (`Context`, `Proposal`, `Result`,
+  `Unresolved`), and persistence shapes (`Stored`, `DraftStored`,
+  `ReportStored`).
 - `Domain` dataclass as the rich mutable object the Space operates
   on. Mutations funnel through `Domain.mutate(**changes)`.
-- `Space` orchestrator (renamed from `Workspace`) with polymorphic
-  methods.
-- `Workspace` kept as a deprecated alias for `Space` during the
-  transition period.
+- `Space` orchestrator (renamed from `Workspace`).
+- Orchestrator classes: `Verifier`, `Compiler`, `Validator`,
+  `Runner`, `Bundler`, `Guard`, `Client`, `Pin`, `Transport`,
+  `Migrator`.
+- `cedrus migrate` CLI subcommand (`--apply`, `--check`) for
+  upgrading pre-0.6.0 workspaces.
+- `Space` polymorphic methods (`apply(draft | need)`, `load(schema)`,
+  `create(draft)`, `generate(context)`, `export(domain)`,
+  `write(bundle)`).
+- Test coverage of the new data layer (`tests/test_domain.py`,
+  20 tests) and the existing adversarial sets (SSRF truth table,
+  pinned transport, verifier adversarial, intent serializer).
 
 ### Removed (breaking)
 - `cedar_intent` import path is gone; use `cedrus`.
 - Multi-word class names (`PolicyIntent`, `BundleExporter`,
-  `DeploymentClient`, etc.) are gone; use `Intent`, `Bundler`,
-  `Client`, etc.
-- Multi-word file names (`compiler.py`, `deployment.py`, etc.) are
-  gone; use `compile.py`, `deploy.py`, etc.
-- All leading-underscore module-level symbols (private convention)
-  are gone; use the public name.
-- Free functions like `validate_cedar`, `compile_intent`,
-  `verify_policies`, `run_scenarios` are kept as deprecated aliases
-  for the orchestrator methods during the transition period.
+  `DeploymentClient`, `Workspace`, etc.) are gone; use `Intent`,
+  `Bundler`, `Client`, `Space`, etc.
+- All leading-underscore module-level symbols are gone; use the
+  public name.
+- Backward-compat shims kept for the major free functions
+  (`validate_cedar`, `run_scenarios`, `verify_policies`,
+  `compile_intent`, `load_requirement`, `load_requirements`,
+  `load_scenarios`, `detect_legacy_rows`, `migrate_legacy_rows`)
+  and the `Workspace` class alias. These will be removed in 0.8.
+
+### Migration notes
+- `from cedar_intent import X` → `from cedrus import X`
+- `Workspace(...)` → `Space(...)` (alias kept for one minor release)
+- `verify_policies(...)` → `Verifier(schema).verify(...)` (free
+  function alias kept)
+- All `_private` symbols are now `public`; review imports for
+  collisions.
+
 
 ## [0.6.0] - Unreleased
 
