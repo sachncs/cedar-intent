@@ -69,13 +69,13 @@ class Unresolved:
             A new :class:`Unresolved` containing the unique,
             non-empty items in first-seen order.
         """
-        seen: dict[str, None] = {}
-        for source in sources:
-            for item in source:
-                stripped = item.strip()
-                if stripped and stripped not in seen:
-                    seen[stripped] = None
-        return cls(items=tuple(seen.keys()))
+        seen: dict[str, None] = dict.fromkeys(
+            stripped
+            for source in sources
+            for item in source
+            if (stripped := item.strip())
+        )
+        return cls(items=tuple(seen))
 
 
 __all__ = ["Unresolved"]
