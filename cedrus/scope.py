@@ -31,6 +31,7 @@ Attributes:
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -532,8 +533,8 @@ class Clause(Scope):
         attributes: Optional attribute bindings referenced by ``body``.
     """
 
-    id: str = field(default_factory=id)
     body: str
+    id: str = field(default_factory=id)
     attributes: dict[str, Expression] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

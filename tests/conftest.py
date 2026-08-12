@@ -104,7 +104,7 @@ def workspace_root(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def workspace(workspace_root: Path):
-    from cedrus.space import Space
+    from cedrus import Space
 
     ws = Space.open(workspace_root)
     try:
@@ -115,7 +115,7 @@ def workspace(workspace_root: Path):
 
 @pytest.fixture
 def in_memory_workspace() -> Iterator:
-    from cedrus.space import Space
+    from cedrus import Space
 
     ws = Space.in_memory()
     try:

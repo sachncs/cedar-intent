@@ -655,7 +655,7 @@ def write_intent(repo: Backend, rows: dict[str, Any]) -> None:
         repo.execute(
             "INSERT OR REPLACE INTO actions "
             "(id, kind, name, group) "
-            "VALUES (:id, :kind, :name, :group)",
+            "VALUES (:id, :kind, :name, :action_group)",
             action,
         )
     for resource in rows.get("resources", ()):
@@ -892,7 +892,7 @@ class Repository(Protocol):
     def transaction(self) -> Any:
         """Return a context manager that runs the body inside one transaction.
 
-        Used by the workspace's :meth:`Workspace.apply` to record
+        Used by the workspace's :meth:`Space.apply` to record
         every typed-object graph (policy + intent + scopes + clauses,
         draft + scope graph, etc.) atomically. For the SQLite backend
         this wraps the connection's transaction context manager; for

@@ -300,7 +300,7 @@ def derive_domain(source_path: Path, workspace_root: Path) -> str:
 
     Args:
         source_path: Path to the requirement file.
-        workspace_root: Workspace root path.
+        workspace_root: Space root path.
 
     Returns:
         The domain name, or ``"default"`` when the file is at the

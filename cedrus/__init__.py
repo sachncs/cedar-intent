@@ -27,7 +27,7 @@ The pipeline flows through these classes:
 * :class:`~cedrus.deploy.Bundler` and :class:`~cedrus.deploy.Client`
   produce and push the deployment bundle.
 
-The :class:`~cedrus.space.Workspace` class orchestrates every stage
+The :class:`~cedrus.space.Space` class orchestrates every stage
 and is the recommended entry point for Python users.
 
 Attributes:
@@ -42,7 +42,7 @@ Attributes:
     Config: Raised on invalid configuration or CLI input.
     Context: Input bundle for a generator call.
     Deploy: Raised on deployment failure.
-    Domain: One authorization domain inside a :class:`~cedrus.space.Workspace`.
+    Domain: One authorization domain inside a :class:`~cedrus.space.Space`.
     Draft: A draft policy carrying explicit scopes.
     Error: Base class for every cedrus exception.
     Existing: A policy imported from raw Cedar source.
@@ -72,7 +72,7 @@ Attributes:
     Scope: Abstract base for every scope shape.
     ScopeFault: Raised on invalid scope construction.
     Source: Output of the deterministic compiler.
-    SpaceError: Alias for the workspace-level error class.
+    SpaceError: Alias for the orchestrator-level error class.
     Store: Raised on storage failure.
     Suite: Aggregate result of a :class:`Run` call.
     Transport: httpx transport that pins connections to a resolved IP.
@@ -80,7 +80,7 @@ Attributes:
     Validator: Schema validator wrapper around the Cedar engine.
     Verifier: Static symbolic verifier.
     Vreport: Outcome of a validation pass.
-    Workspace: Top-level cedrus orchestrator.
+    Space: Top-level cedrus orchestrator.
 
 See Also:
     :mod:`cedrus.case`: Authorization scenarios.
@@ -93,7 +93,7 @@ See Also:
     :mod:`cedrus.policies`: Draft / Compiled / Existing policy shapes.
     :mod:`cedrus.schema`: Cedar JSON schema parser.
     :mod:`cedrus.scope`: Scope-shape dataclasses.
-    :mod:`cedrus.space`: Workspace orchestrator (recommended entry point).
+    :mod:`cedrus.space`: Space orchestrator (recommended entry point).
     :mod:`cedrus.store`: Storage Protocol and backends.
     :mod:`cedrus.validate`: Cedar parse + schema validation.
     :mod:`cedrus.verify`: Static verification (shadowing / redundancy / coverage).
@@ -138,7 +138,7 @@ from cedrus.need import Need
 from cedrus.policies import Compiled, Draft, Existing, Kind
 from cedrus.schema import Schema
 from cedrus.scope import Action, Clause, Principal, Resource, Scope
-from cedrus.space import Workspace
+from cedrus.space import Space
 from cedrus.store import Backend, Memory, Repository
 from cedrus.validate import Validator, Vreport
 from cedrus.verify import Extraction, Finding, Report, Verifier
@@ -195,6 +195,6 @@ __all__ = [
     "Validator",
     "Verifier",
     "Vreport",
-    "Workspace",
+    "Space",
     "__version__",
 ]

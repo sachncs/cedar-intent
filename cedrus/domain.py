@@ -10,7 +10,7 @@ accidentally bypass the orchestrator's invariants.
 
 Attributes:
     Domain: One authorization domain inside a
-        :class:`~cedrus.space.Workspace`.
+        :class:`~cedrus.space.Space`.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from cedrus.policies import Existing
 
 
 class Domain:
-    """One authorization domain inside a :class:`~cedrus.space.Workspace`.
+    """One authorization domain inside a :class:`~cedrus.space.Space`.
 
     Attributes:
         name: Domain identifier (e.g., ``"hr"``).

@@ -1,15 +1,15 @@
 """Command-line interface for cedrus.
 
 Each subcommand is implemented as a small handler that operates on a
-:class:`~cedrus.space.Workspace`. The :func:`main` entrypoint returns an
+:class:`~cedrus.space.Space`. The :func:`main` entrypoint returns an
 exit code so the process can be wired into CI pipelines without
 parsing stdout.
 
 Design:
     The CLI is a thin layer over the public Python API. Every
     subcommand opens the workspace through
-    :meth:`~cedrus.space.Workspace.open` (or constructs it through
-    :meth:`~cedrus.space.Workspace.create` for ``init``), delegates the
+    :meth:`~cedrus.space.Space.open` (or constructs it through
+    :meth:`~cedrus.space.Space.create` for ``init``), delegates the
     actual work to a workspace method, and returns a JSON-serializable
     dict for humanize/JSON output.
 
@@ -34,7 +34,7 @@ Attributes:
         with every subcommand wired in.
 
 See Also:
-    :mod:`cedrus.space`: Workspace / typed-object API the CLI delegates
+    :mod:`cedrus.space`: Space / typed-object API the CLI delegates
         to.
     :mod:`cedrus.error`: Error types the CLI translates to stderr.
 """
@@ -51,7 +51,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from cedrus import Error, Llm, Offline, Workspace
+from cedrus import Error, Llm, Offline, Space
 from cedrus.case import Case
 from cedrus.error import Config
 from cedrus.scope import Action, Principal, Resource
@@ -106,7 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--workspace",
         type=Path,
         default=Path.cwd(),
-        help="Workspace directory (defaults to current directory).",
+        help="Space directory (defaults to current directory).",
     )
     parser.add_argument(
         "--json",
@@ -129,7 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
 def add_workspace_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the ``init`` subcommand."""
     parser = sub.add_parser("init", help="Initialize a new workspace.")
-    parser.add_argument("--path", type=str, required=True, help="Workspace root.")
+    parser.add_argument("--path", type=str, required=True, help="Space root.")
 
 
 def add_domain_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -394,7 +394,7 @@ def run_command(args: Namespace) -> tuple[Any, int]:
     workspace_path = args.workspace.resolve()
     if not workspace_path.exists():
         raise Config(f"workspace directory does not exist: {workspace_path}")
-    workspace = Workspace.open(workspace_path)
+    workspace = Space.open(workspace_path)
     try:
         handler = HANDLERS.get(args.command)
         if handler is None:
@@ -408,7 +408,7 @@ def command_init(path: str) -> dict[str, Any]:
     """Initialize a new workspace and report the absolute path.
 
     Args:
-        path: Workspace root path supplied via ``--path``.
+        path: Space root path supplied via ``--path``.
 
     Returns:
         A dict with an ``"initialized"`` key whose value is the
@@ -421,12 +421,12 @@ def command_init(path: str) -> dict[str, Any]:
     if not text or text in {".", "/"}:
         raise Config("init --path must be a non-empty directory path")
     target = Path(text)
-    workspace = Workspace.create(target)
+    workspace = Space.create(target)
     workspace.close()
     return {"initialized": str(target.resolve())}
 
 
-def command_domain(workspace: Workspace, args: Namespace) -> Any:
+def command_domain(workspace: Space, args: Namespace) -> Any:
     """Handle ``domain add`` and ``domain list`` subcommands.
 
     Polymorphic dispatch on ``args.domain_command``:
@@ -462,7 +462,7 @@ def command_domain(workspace: Workspace, args: Namespace) -> Any:
     raise Config(f"unknown domain command: {args.domain_command}")
 
 
-def command_requirement(workspace: Workspace, args: Namespace) -> Any:
+def command_requirement(workspace: Space, args: Namespace) -> Any:
     """Handle ``requirement add`` and ``requirement list`` subcommands.
 
     Polymorphic dispatch on ``args.requirement_command``:
@@ -499,7 +499,7 @@ def command_requirement(workspace: Workspace, args: Namespace) -> Any:
     raise Config(f"unknown requirement command: {args.requirement_command}")
 
 
-def command_policy(workspace: Workspace, args: Namespace) -> Any:
+def command_policy(workspace: Space, args: Namespace) -> Any:
     """Handle ``policy draft``, ``policy generate``, and ``policy apply`` subcommands.
 
     Dispatch is keyed on ``args.policy_command``:
@@ -531,7 +531,7 @@ def command_policy(workspace: Workspace, args: Namespace) -> Any:
     return handler(workspace, args, schema)
 
 
-def policy_draft(workspace: Workspace, args: Namespace, schema: Any) -> Any:
+def policy_draft(workspace: Space, args: Namespace, schema: Any) -> Any:
     """``policy draft`` subcommand handler."""
     draft = workspace.create_draft(
         args.requirement_id,
@@ -542,7 +542,7 @@ def policy_draft(workspace: Workspace, args: Namespace, schema: Any) -> Any:
     return {"draft": draft.to_dict()}
 
 
-def policy_generate(workspace: Workspace, args: Namespace, schema: Any) -> Any:
+def policy_generate(workspace: Space, args: Namespace, schema: Any) -> Any:
     """``policy generate`` subcommand handler."""
     draft = workspace.create_draft(
         args.requirement_id,
@@ -563,7 +563,7 @@ def policy_generate(workspace: Workspace, args: Namespace, schema: Any) -> Any:
     }
 
 
-def policy_apply(workspace: Workspace, args: Namespace, schema: Any) -> Any:
+def policy_apply(workspace: Space, args: Namespace, schema: Any) -> Any:
     """``policy apply`` subcommand handler."""
     scopes = (
         build_principal(args),
@@ -589,7 +589,7 @@ POLICY_HANDLERS: dict[str, Any] = {
 }
 
 
-def command_export(workspace: Workspace, args: Namespace) -> Any:
+def command_export(workspace: Space, args: Namespace) -> Any:
     """Export the domain's compiled Cedar to ``args.output``.
 
     Args:
@@ -610,7 +610,7 @@ def command_export(workspace: Workspace, args: Namespace) -> Any:
     return {"domain": args.domain, "output": str(output)}
 
 
-def command_check(workspace: Workspace, args: Namespace) -> Any:
+def command_check(workspace: Space, args: Namespace) -> Any:
     """Run validation across every domain (or the specified one).
 
     Args:
@@ -647,7 +647,7 @@ def command_check(workspace: Workspace, args: Namespace) -> Any:
     return {"passed": overall, "domains": results}
 
 
-def command_verify(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
+def command_verify(workspace: Space, args: Namespace) -> tuple[Any, int]:
     """Run verification for ``args.domain`` and return its report.
 
     Args:
@@ -667,13 +667,13 @@ def command_verify(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
     return report.to_dict(), exit_code
 
 
-def command_deploy(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
+def command_deploy(workspace: Space, args: Namespace) -> tuple[Any, int]:
     """Handle the three ``deploy`` subcommands polymorphically.
 
     Dispatch is keyed on ``args.deploy_command``:
-    ``push`` calls :meth:`Workspace.deploy`, ``bundle`` calls
-    :meth:`Workspace.write_bundle`, and ``history`` calls
-    :meth:`Workspace.list_deployments`.
+    ``push`` calls :meth:`Space.deploy`, ``bundle`` calls
+    :meth:`Space.write_bundle`, and ``history`` calls
+    :meth:`Space.list_deployments`.
 
     Args:
         workspace: Open workspace to operate on.
@@ -699,7 +699,7 @@ def command_deploy(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
     return handler(workspace, args), 0
 
 
-def deploy_push(workspace: Workspace, args: Namespace) -> Any:
+def deploy_push(workspace: Space, args: Namespace) -> Any:
     """``deploy push`` subcommand handler."""
     headers = parse_headers(getattr(args, "header", []) or [])
     record = workspace.deploy(
@@ -714,14 +714,14 @@ def deploy_push(workspace: Workspace, args: Namespace) -> Any:
     return {"deployment": deployment_to_dict(record)}
 
 
-def deploy_bundle(workspace: Workspace, args: Namespace) -> Any:
+def deploy_bundle(workspace: Space, args: Namespace) -> Any:
     """``deploy bundle`` subcommand handler."""
     manifest = workspace.build_bundle(args.domain)
     workspace.write_bundle(manifest, args.output)
     return {"domain": args.domain, "output": str(args.output)}
 
 
-def deploy_history(workspace: Workspace, args: Namespace) -> Any:
+def deploy_history(workspace: Space, args: Namespace) -> Any:
     """``deploy history`` subcommand handler."""
     records = workspace.list_deployments(getattr(args, "domain", None))
     return {"deployments": [deployment_to_dict(record) for record in records]}

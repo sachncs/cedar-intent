@@ -17,7 +17,7 @@ Hierarchy:
       :class:`Compile`, :class:`Validate`, :class:`Generate`,
       :class:`ScopeFault`.
     * :class:`Store` - repository-level failures such as missing records.
-    * :class:`Space` - workspace-level invariants violated.
+    * :class:`Space` - space-level invariants violated.
     * :class:`Deploy` - deployment operation failed.
     * :class:`Parse` - cedarpy could not parse a policy.
 
@@ -38,7 +38,7 @@ Attributes:
     Generate: Generator failed to produce a proposal.
     ScopeFault: Scope object is malformed.
     Store: Repository-level failure (e.g. missing record).
-    Space: Workspace-level invariant violation.
+    Space: Space-level invariant violation.
     Deploy: Deployment operation failed.
     Parse: cedarpy could not parse a policy.
 """

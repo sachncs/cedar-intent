@@ -144,7 +144,7 @@ SCHEMA_STATEMENTS = (
         id TEXT PRIMARY KEY,
         kind TEXT NOT NULL,
         name TEXT,
-        group TEXT
+        action_group TEXT
     )
     """,
     """

@@ -1,6 +1,6 @@
-"""Workspace orchestrator.
+"""Space orchestrator.
 
-A :class:`Workspace` binds every cedrus concern together: it owns a
+A :class:`Space` binds every cedrus concern together: it owns a
 repository, loads schemas and requirements from disk, drives generators,
 applies drafts, and exports validated policy bundles for embedded Cedar
 applications.
@@ -8,35 +8,35 @@ applications.
 Lifecycle:
     A typical session runs through these stages:
 
-    1. **Initialize** - :meth:`Workspace.create` or
-       :meth:`Workspace.open` creates or loads the workspace layout
+    1. **Initialize** - :meth:`Space.create` or
+       :meth:`Space.open` creates or loads the workspace layout
        and storage.
-    2. **Declare domain** - :meth:`Workspace.init_domain` creates the
+    2. **Declare domain** - :meth:`Space.init_domain` creates the
        directory layout and an empty schema for a domain.
-    3. **Load requirements** - :meth:`Workspace.add_requirement_file`
-       or :meth:`Workspace.add_requirement_directory` registers
+    3. **Load requirements** - :meth:`Space.add_requirement_file`
+       or :meth:`Space.add_requirement_directory` registers
        Markdown requirements.
-    4. **Generate draft** - :meth:`Workspace.generate_draft` runs a
+    4. **Generate draft** - :meth:`Space.generate_draft` runs a
        :class:`~cedrus.generate.Generator` against a draft and
        persists the proposal.
-    5. **Apply** - :meth:`Workspace.apply` or
-       :meth:`Workspace.apply_for_requirement` validates, optionally
+    5. **Apply** - :meth:`Space.apply` or
+       :meth:`Space.apply_for_requirement` validates, optionally
        runs scenarios, and persists a :class:`Compiled`.
-    6. **Verify** - :meth:`Workspace.verify_domain` flags shadowing,
+    6. **Verify** - :meth:`Space.verify_domain` flags shadowing,
        redundancy, and coverage gaps.
-    7. **Deploy** - :meth:`Workspace.build_bundle`,
-       :meth:`Workspace.write_bundle`, and :meth:`Workspace.deploy`
+    7. **Deploy** - :meth:`Space.build_bundle`,
+       :meth:`Space.write_bundle`, and :meth:`Space.deploy`
        produce and push the deployment artifact.
 
 Thread safety:
-    A single :class:`Workspace` instance is safe for concurrent use
+    A single :class:`Space` instance is safe for concurrent use
     from multiple threads only when the underlying
     :class:`Repository` supports it. The default :class:`Backend`
     serializes access through its connection; for heavy parallel use,
     prefer one workspace per thread.
 
 Attributes:
-    Workspace: Top-level orchestrator.
+    Space: Top-level orchestrator.
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ DEFAULT_SCENARIOS_FILENAME = "scenarios.json"
 
 
 @dataclass
-class Workspace:
+class Space:
     """Top-level cedrus orchestrator for a single organization workspace.
 
     Attributes:
@@ -85,14 +85,14 @@ class Workspace:
     storage_path: Path
 
     @classmethod
-    def open(cls, path: Path) -> "Workspace":
+    def open(cls, path: Path) -> "Space":
         """Open an existing workspace at ``path``.
 
         Args:
             path: Filesystem path of the workspace root.
 
         Returns:
-            A :class:`Workspace` backed by a SQLite repository.
+            A :class:`Space` backed by a SQLite repository.
 
         Raises:
             Space: If the path does not exist.
@@ -105,14 +105,14 @@ class Workspace:
         return cls(root=root, repository=repository, storage_path=storage_path)
 
     @classmethod
-    def create(cls, path: Path) -> "Workspace":
+    def create(cls, path: Path) -> "Space":
         """Create a new workspace at ``path`` and return it.
 
         Args:
             path: Filesystem path that will become the workspace root.
 
         Returns:
-            A freshly created :class:`Workspace`.
+            A freshly created :class:`Space`.
         """
         root = Path(path).resolve()
         root.mkdir(parents=True, exist_ok=True)
@@ -122,7 +122,7 @@ class Workspace:
         return cls(root=root, repository=repository, storage_path=storage_path)
 
     @classmethod
-    def in_memory(cls, path: Path | None = None) -> "Workspace":
+    def in_memory(cls, path: Path | None = None) -> "Space":
         """Build an in-memory workspace for tests or ephemeral sessions.
 
         Args:
@@ -130,7 +130,7 @@ class Workspace:
                 Defaults to the current directory.
 
         Returns:
-            A :class:`Workspace` backed by an :class:`Memory`.
+            A :class:`Space` backed by an :class:`Memory`.
         """
         root = (path or Path.cwd()).resolve()
         return cls(
@@ -1106,7 +1106,7 @@ class Workspace:
         """
         if draft.intent is None:
             return None
-        data = Workspace.loads_optional_json(draft.intent.to_dict())
+        data = Space.loads_optional_json(draft.intent.to_dict())
         if data is None:
             return None
         try:
@@ -1154,5 +1154,5 @@ __all__ = [
     "DEFAULT_SCENARIOS_FILENAME",
     "DEFAULT_STORAGE_FILENAME",
     "Space",
-    "Workspace",
+    "Space",
 ]

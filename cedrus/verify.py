@@ -251,10 +251,22 @@ class Extraction:
 
     @staticmethod
     def policy_cedar_text(policy: Any) -> str:
-        """Return the Cedar source text associated with a policy-like object."""
+        """Return the Cedar source text associated with a policy-like object.
+
+        Accepts any of:
+        * a :class:`~cedrus.compile.Intent` — calls ``policy.compile().cedar``
+        * an object with a ``cedar`` attribute (e.g., :class:`Compiled`,
+          :class:`Draft`, :class:`Existing`) — uses it directly
+        * an object whose ``notes`` mapping carries ``"cedar_text"``
+        """
         cedar = getattr(policy, "cedar", None)
         if cedar:
             return str(cedar)
+        if hasattr(policy, "compile") and callable(policy.compile):
+            try:
+                return str(policy.compile().cedar)
+            except Exception:
+                pass
         notes = getattr(policy, "notes", None)
         if isinstance(notes, Mapping):
             return str(notes.get("cedar_text", ""))
@@ -273,15 +285,6 @@ class Verifier:
     """
 
     schema: Schema
-
-    def __init__(self, schema: Schema) -> None:
-        """Store the schema for subsequent ``verify`` calls.
-
-        Args:
-            schema: The Cedar schema to use for action-group
-                resolution and namespace lookup.
-        """
-        self.schema = schema
 
     def verify(
         self,
