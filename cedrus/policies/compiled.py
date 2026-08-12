@@ -89,7 +89,12 @@ class Compiled(Kind):
 
         Returns:
             A :class:`Vreport` describing the outcome.
+
+        Raises:
+            Fault: If the policy has no Cedar source.
         """
+        if not self.cedar:
+            raise Fault(f"compiled policy {self.id} has no Cedar source to validate")
         return Validator(schema).validate([self.cedar])
 
     def to_dict(self) -> Mapping[str, Any]:

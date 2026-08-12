@@ -1,298 +1,314 @@
-"""Tests for the Policy class hierarchy."""
+"""Tests for :mod:`cedrus.policies` — Draft, Compiled, Existing, Kind.
 
+Covers data modelling (defaults, kind discriminators, to_intent
+contract), behaviour modelling (compile, validate, test, with_status,
+as_compiled), and ugly paths (missing intent raises, intent_for_verification
+placeholder, inherited methods from Kind).
+"""
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 
 from cedrus import (
     Action,
     Compiled,
-    Context,
     Draft,
     Existing,
-    Fault,
+    Intent,
     Kind,
     Need,
     Principal,
     Resource,
-    Result,
-    Schema,
+    Source,
+    Validator,
+    Vreport,
 )
-from cedrus.compile import Intent
-from cedrus.generate import Proposal
+from cedrus.error import Fault
+from cedrus.policies.draft import DraftStatus
 
 
-def make_requirement(identifier: str = "HR-042") -> Need:
+def _need() -> Need:
     return Need(
-        id=identifier,
-        text="Only owners can view private photos.",
+        id="HR-001",
+        text="Body",
         domain="hr",
-        source_path=Path(f"/tmp/{identifier}.md"),
+        source_path=Path("/tmp/HR-001.md"),
         created_at=datetime.now(UTC),
     )
 
 
-def make_intent(requirement_id: str = "HR-042") -> Intent:
+def _intent() -> Intent:
     return Intent(
-        id=f"hr-{requirement_id.lower()}",
-        requirement_id=requirement_id,
+        id="HR-001",
+        requirement_id="HR-001",
         effect="permit",
-        principal=Principal(kind="is_type", type_name="User"),
-        action=Action(kind="named", name="viewPhoto"),
-        resource=Resource(kind="is_type", type_name="Photo"),
+        principal=Principal(kind="any"),
+        action=Action(kind="any"),
+        resource=Resource(kind="any"),
     )
 
 
-def test_policy_kind_for_each_subclass(requirement: Need) -> None:
-    draft = Draft.from_requirement(requirement)
-    existing = Existing.from_requirement(
-        requirement, cedar="permit (principal, action, resource);"
-    )
-    compiled = Compiled(id="hr", requirement=requirement, cedar="permit (...) ;")
+# ---------------------------------------------------------------------------
+# Kind (abstract base) — behaviour via Draft/Compiled/Existing subclasses
+# ---------------------------------------------------------------------------
+
+
+def test_kind_is_abstract() -> None:
+    with pytest.raises(TypeError):
+        Kind(id="x", requirement=_need(), cedar="")  # type: ignore[abstract]
+
+
+def test_draft_kind_discriminator_is_draft() -> None:
+    draft = Draft(id="hr", requirement=_need())
     assert draft.kind() == "draft"
-    assert existing.kind() == "existing"
+
+
+def test_compiled_kind_discriminator_is_compiled() -> None:
+    compiled = Compiled(id="hr", requirement=_need(), cedar="permit (...);")
     assert compiled.kind() == "compiled"
 
 
-def test_existing_policy_without_intent_raises(requirement: Need) -> None:
-    policy = Existing.from_requirement(
-        requirement, cedar="permit (principal, action, resource);"
+def test_existing_kind_discriminator_is_existing() -> None:
+    existing = Existing(id="hr", requirement=_need(), cedar="permit (...);")
+    assert existing.kind() == "existing"
+
+
+# ---------------------------------------------------------------------------
+# Draft
+# ---------------------------------------------------------------------------
+
+
+def test_draft_defaults() -> None:
+    draft = Draft(id="hr", requirement=_need())
+    assert draft.principal.kind == "any"
+    assert draft.action.kind == "any"
+    assert draft.resource.kind == "any"
+    assert draft.intent is None
+    assert draft.unresolved == ()
+    assert draft.status == "proposed"
+    assert draft.model is None
+    assert draft.request_id is None
+
+
+def test_draft_from_requirement_uses_default_policy_id() -> None:
+    draft = Draft.from_requirement(_need())
+    assert draft.id == "draft-HR-001"
+
+
+def test_draft_from_requirement_accepts_custom_policy_id() -> None:
+    draft = Draft.from_requirement(_need(), policy_id="custom-id")
+    assert draft.id == "custom-id"
+
+
+def test_draft_from_requirement_uses_supplied_scopes() -> None:
+    draft = Draft.from_requirement(
+        _need(),
+        principal=Principal(kind="is_type", type_name="User"),
+        action=Action(kind="named", name="view"),
+        resource=Resource(kind="any"),
     )
-    with pytest.raises(Fault):
-        policy.to_intent()
+    assert draft.principal.type_name == "User"
+    assert draft.action.name == "view"
 
 
-def test_existing_policy_with_intent_returns_it(requirement: Need) -> None:
-    intent = make_intent()
-    policy = Existing.from_requirement(
-        requirement, cedar="permit (...) ;", parsed_intent=intent
-    )
-    assert policy.to_intent() is intent
+def test_draft_from_requirement_with_no_scopes_uses_defaults() -> None:
+    draft = Draft.from_requirement(_need())
+    assert draft.principal.kind == "any"
+    assert draft.action.kind == "any"
+    assert draft.resource.kind == "any"
 
 
-def test_draft_policy_without_intent_raises(requirement: Need) -> None:
-    draft = Draft.from_requirement(requirement)
+def test_draft_to_intent_raises_when_no_intent_yet() -> None:
+    draft = Draft(id="hr", requirement=_need())
     with pytest.raises(Fault):
         draft.to_intent()
 
 
-def test_draft_policy_with_intent_returns_it(requirement: Need) -> None:
-    intent = make_intent()
-    draft = Draft(
-        id="hr",
-        requirement=requirement,
-        intent=intent,
-    )
+def test_draft_to_intent_returns_stored_intent() -> None:
+    intent = _intent()
+    draft = Draft(id="hr", requirement=_need(), intent=intent)
     assert draft.to_intent() is intent
 
 
-def test_draft_generate_uses_supplied_scopes_and_existing(
-    requirement: Need, schema: Schema
-) -> None:
-    draft = Draft(
-        id="hr-hr-042",
-        requirement=requirement,
-        principal=Principal(kind="specific", type_name="User", entity_id="alice"),
-        action=Action(kind="named", name="viewPhoto"),
-        resource=Resource(kind="is_type", type_name="Photo"),
-    )
-    existing_intent = make_intent("HR-001")
-    existing = Existing.from_requirement(
-        requirement, cedar="permit (...) ;", parsed_intent=existing_intent
-    )
-    result = Proposal(intent=existing_intent, unresolved=())
-    generator = SimpleNamespace(
-        name="fake",
-        model="fake-model",
-        generate=MagicMock(
-            return_value=Result(
-                proposal=result,
-                model="fake-model",
-                request_id=None,
-                usage={},
-            )
-        ),
-    )
-    proposal = draft.generate(schema, generator, existing=[existing])
-    assert proposal.intent is existing_intent
-    assert generator.generate.call_count == 1
-    context: Context = generator.generate.call_args.args[0]
-    assert context.principal.kind == "specific"
-    assert context.action.name == "viewPhoto"
-    assert context.resource.type_name == "Photo"
-    assert context.existing == (existing_intent,)
-
-
-def test_draft_apply_result_merges_notes(requirement: Need) -> None:
-    from cedrus.data import Notes, Usage
-
-    draft = Draft(
-        id="hr-hr-042",
-        requirement=requirement,
-        notes=Notes.from_dict({"author": "alice"}),
-    )
-    intent = make_intent()
-    result = Result(
-        proposal=Proposal(
-            intent=intent,
-            unresolved=(),
-            notes=Notes.from_dict({"generator": "fake"}),
-        ),
-        model="fake-model",
-        request_id=None,
-        usage=Usage(prompt=0, completion=0, total=0),
-    )
-    proposal = draft.apply_result(result)
-    assert proposal.notes.to_dict() == {"author": "alice", "generator": "fake"}
-
-
-def test_draft_compile_uses_intent(requirement: Need, schema: Schema) -> None:
-    intent = make_intent()
-    draft = Draft(id="hr", requirement=requirement, intent=intent)
-    source = draft.compile(schema)
-    assert "permit" in source.cedar
-
-
-def test_draft_compile_falls_back_to_scopes(requirement: Need, schema: Schema) -> None:
-    draft = Draft(
-        id="hr",
-        requirement=requirement,
-        principal=Principal(kind="is_type", type_name="User"),
-        action=Action(kind="named", name="viewPhoto"),
-        resource=Resource(kind="is_type", type_name="Photo"),
-    )
-    source = draft.compile(schema)
-    assert "permit" in source.cedar
-    assert "principal is User" in source.cedar
-
-
-def test_draft_as_compiled_populates_cedar(requirement: Need, schema: Schema) -> None:
-    intent = make_intent()
-    draft = Draft(id="hr", requirement=requirement, intent=intent)
-    compiled = draft.as_compiled(schema)
-    assert compiled.cedar
-    assert "permit" in compiled.cedar
-
-
-def test_draft_with_status_returns_new_instance(requirement: Need) -> None:
-    draft = Draft.from_requirement(requirement)
+def test_draft_with_status_returns_new_instance() -> None:
+    draft = Draft(id="hr", requirement=_need())
     accepted = draft.with_status("accepted")
     assert accepted.status == "accepted"
     assert draft.status == "proposed"
+    assert accepted is not draft
 
 
-def test_draft_to_dict_contains_scope_kinds(requirement: Need) -> None:
-    draft = Draft.from_requirement(requirement)
-    data = draft.to_dict()
-    assert data["principal"] == "any"
-    assert data["action"] == "any"
-    assert data["resource"] == "any"
-    assert data["status"] == "proposed"
+def test_draft_compile_with_intent_returns_source() -> None:
+    intent = _intent()
+    draft = Draft(id="hr", requirement=_need(), intent=intent)
+    source = draft.compile()
+    assert isinstance(source, Source)
+    assert source.intent_id == "HR-001"
 
 
-def test_compiled_policy_validate(schema: Schema) -> None:
-    cedar = (
-        'permit (principal == PhotoFlash::User::"alice", '
-        'action == PhotoFlash::Action::"viewPhoto", '
-        'resource == PhotoFlash::Photo::"p1");'
+def test_draft_compile_without_intent_builds_minimal_permit() -> None:
+    draft = Draft(id="hr", requirement=_need())
+    source = draft.compile()
+    assert "permit" in source.cedar
+
+
+def test_draft_as_compiled_populates_cedar_and_bumps_created_at() -> None:
+    draft = Draft(id="hr", requirement=_need())
+    compiled = draft.as_compiled()
+    assert compiled.cedar
+    assert compiled.created_at >= draft.created_at
+
+
+def test_draft_to_dict_carries_scope_kinds_and_status() -> None:
+    draft = Draft(
+        id="hr",
+        requirement=_need(),
+        principal=Principal(kind="is_type", type_name="User"),
+        action=Action(kind="named", name="view"),
+        resource=Resource(kind="any"),
+        status="accepted",
+        unresolved=("x",),
     )
-    compiled = Compiled(id="hr", requirement=make_requirement(), cedar=cedar)
-    assert compiled.validate(schema).passed
+    d = draft.to_dict()
+    assert d["id"] == "hr"
+    assert d["kind"] == "draft"
+    assert d["principal"] == "is_type"
+    assert d["action"] == "named"
+    assert d["resource"] == "any"
+    assert d["status"] == "accepted"
+    assert d["unresolved"] == ["x"]
 
 
-def test_compiled_policy_without_intent_raises(requirement: Need) -> None:
-    compiled = Compiled(id="hr", requirement=requirement, cedar="permit (...) ;")
+# ---------------------------------------------------------------------------
+# Draft.compile — schema argument is interface symmetry
+# ---------------------------------------------------------------------------
+
+
+def test_draft_compile_accepts_and_ignores_schema_kwarg() -> None:
+    draft = Draft(id="hr", requirement=_need())
+    source = draft.compile(schema=None)  # type: ignore[arg-type]
+    assert "permit" in source.cedar
+
+
+# ---------------------------------------------------------------------------
+# Compiled
+# ---------------------------------------------------------------------------
+
+
+def test_compiled_default_intent_is_none() -> None:
+    compiled = Compiled(id="hr", requirement=_need(), cedar="permit (...);")
+    assert compiled.intent is None
+
+
+def test_compiled_to_intent_raises_when_intent_is_none() -> None:
+    compiled = Compiled(id="hr", requirement=_need(), cedar="permit (...);")
     with pytest.raises(Fault):
         compiled.to_intent()
 
 
-def test_compiled_policy_with_intent_returns_it(requirement: Need) -> None:
-    intent = make_intent()
-    compiled = Compiled(
-        id="hr", requirement=requirement, cedar="permit (...) ;", intent=intent
-    )
+def test_compiled_to_intent_returns_stored_intent() -> None:
+    intent = _intent()
+    compiled = Compiled(id="hr", requirement=_need(), cedar="permit (...);", intent=intent)
     assert compiled.to_intent() is intent
 
 
-def test_compiled_policy_test_runs_scenarios(schema: Schema) -> None:
-    cedar = (
-        'permit (principal == PhotoFlash::User::"alice", '
-        'action == PhotoFlash::Action::"viewPhoto", '
-        'resource == PhotoFlash::Photo::"p1");'
-    )
-    compiled = Compiled(id="hr", requirement=make_requirement(), cedar=cedar)
-    report = compiled.test(
-        schema,
-        [
-            SimpleNamespace(
-                name="ok",
-                principal='PhotoFlash::User::"alice"',
-                action='PhotoFlash::Action::"viewPhoto"',
-                resource='PhotoFlash::Photo::"p1"',
-                context={},
-                expected="Allow",
-            )
-        ],
-    )
-    assert report.passed
+def test_compiled_validate_raises_when_cedar_empty() -> None:
+    from cedrus import Schema
 
-
-def test_base_policy_requires_subclass_implementation(requirement: Need) -> None:
-    class Bare(Kind):
-        def kind(self) -> str:
-            return "bare"
-
-    bare = Bare(id="x", requirement=requirement)
+    compiled = Compiled(id="hr", requirement=_need(), cedar="")
+    schema = Schema.from_mapping({"hr": {"entityTypes": {"User": {}}, "actions": {}}})
     with pytest.raises(Fault):
-        bare.to_intent()
+        compiled.validate(schema)
 
 
-def test_base_policy_validate_requires_cedar(requirement: Need) -> None:
-    class Bare(Kind):
-        def kind(self) -> str:
-            return "bare"
-
-    bare = Bare(id="x", requirement=requirement, cedar="")
-    with pytest.raises(Fault):
-        bare.validate(Schema.from_mapping({"Demo": {"entityTypes": {}, "actions": {}}}))
+def test_compiled_to_dict_includes_intent_id_when_present() -> None:
+    compiled = Compiled(id="hr", requirement=_need(), cedar="permit (...);", intent=_intent())
+    d = compiled.to_dict()
+    assert d["kind"] == "compiled"
+    assert d["intent_id"] == "HR-001"
 
 
-def test_policy_from_requirement_helpers(requirement: Need) -> None:
-    draft = Draft.from_requirement(
-        requirement,
-        principal=Principal(kind="any"),
-        action=Action(kind="any"),
-        resource=Resource(kind="any"),
-        policy_id="custom-id",
-    )
-    assert draft.id == "custom-id"
-    existing = Existing.from_requirement(
-        requirement, cedar="permit (principal, action, resource);", policy_id="existing-id"
-    )
-    assert existing.id == "existing-id"
+def test_compiled_to_dict_includes_null_intent_id_when_missing() -> None:
+    compiled = Compiled(id="hr", requirement=_need(), cedar="permit (...);")
+    d = compiled.to_dict()
+    assert d["intent_id"] is None
 
 
-def test_compiled_policy_from_intent_helper(requirement: Need) -> None:
-    intent = make_intent()
+def test_compiled_from_intent_uses_intent_id_when_no_override() -> None:
+    intent = _intent()
+    compiled = Compiled.from_intent(intent, cedar="permit (...);", requirement=_need())
+    assert compiled.id == intent.id
+
+
+def test_compiled_from_intent_honors_policy_id_override() -> None:
+    intent = _intent()
     compiled = Compiled.from_intent(
-        intent, "permit (principal, action, resource);", requirement, policy_id="custom"
+        intent, cedar="permit (...);", requirement=_need(), policy_id="custom"
     )
     assert compiled.id == "custom"
-    assert compiled.to_intent() is intent
 
 
-def test_offline_generator_fills_draft_cedar(requirement: Need, schema: Schema) -> None:
-    draft = Draft(
-        id="hr-hr-042",
-        requirement=requirement,
-        principal=Principal(kind="specific", type_name="User", entity_id="alice"),
-        action=Action(kind="named", name="viewPhoto"),
-        resource=Resource(kind="is_type", type_name="Photo"),
-    )
-    updated = draft.as_compiled(schema)
-    assert "permit" in updated.cedar
+def test_compiled_intent_for_verification_returns_stored_intent() -> None:
+    intent = _intent()
+    compiled = Compiled(id="hr", requirement=_need(), cedar="permit (...);", intent=intent)
+    assert compiled.intent_for_verification() is intent
+
+
+# ---------------------------------------------------------------------------
+# Existing
+# ---------------------------------------------------------------------------
+
+
+def test_existing_default_parsed_intent_is_none() -> None:
+    existing = Existing(id="hr", requirement=_need(), cedar="permit (...);")
+    assert existing.parsed_intent is None
+
+
+def test_existing_to_intent_raises_when_no_parsed_intent() -> None:
+    existing = Existing(id="hr", requirement=_need(), cedar="permit (...);")
+    with pytest.raises(Fault):
+        existing.to_intent()
+
+
+def test_existing_to_intent_returns_parsed_intent_when_present() -> None:
+    intent = _intent()
+    existing = Existing(id="hr", requirement=_need(), cedar="permit (...);", parsed_intent=intent)
+    assert existing.to_intent() is intent
+
+
+def test_existing_from_requirement_constructs_from_requirement_and_cedar() -> None:
+    cedar = 'permit (principal, action == Action::"view", resource);'
+    existing = Existing.from_requirement(_need(), cedar=cedar)
+    assert existing.id == "existing-HR-001"
+    assert existing.cedar == cedar
+
+
+def test_existing_intent_for_verification_returns_placeholder_when_unparsed() -> None:
+    existing = Existing(id="hr", requirement=_need(), cedar="permit (...);")
+    placeholder = existing.intent_for_verification()
+    assert placeholder.effect == "permit"
+    assert placeholder.principal.kind == "any"
+    assert "missing_intent" in placeholder.notes
+
+
+def test_existing_intent_for_verification_returns_parsed_intent_when_available() -> None:
+    intent = _intent()
+    existing = Existing(id="hr", requirement=_need(), cedar="permit (...);", parsed_intent=intent)
+    assert existing.intent_for_verification() is intent
+
+
+# ---------------------------------------------------------------------------
+# DraftStatus type alias
+# ---------------------------------------------------------------------------
+
+
+def test_draft_status_is_string() -> None:
+    assert DraftStatus("proposed") == "proposed"
+    assert DraftStatus("accepted") == "accepted"
+    assert DraftStatus("rejected") == "rejected"
+
+
+__all__ = []

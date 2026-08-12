@@ -130,14 +130,6 @@ class Validator:
 
     schema: Schema
 
-    def __init__(self, schema: Schema) -> None:
-        """Store the schema for subsequent ``validate`` calls.
-
-        Args:
-            schema: The Cedar schema to validate against.
-        """
-        self.schema = schema
-
     def validate(self, cedars: list[str]) -> Vreport:
         """Validate Cedar statements against the stored schema.
 
