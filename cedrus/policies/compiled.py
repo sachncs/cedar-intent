@@ -1,15 +1,28 @@
 """A policy that has been compiled and validated.
 
 A :class:`Compiled` is the final form produced by
-:meth:`Workspace.apply` after the compiler has rendered the intent
-and Cedar has accepted the source. The workspace treats a compiled
-policy as the authoritative artifact for that requirement and
-includes it in subsequent verification, test, and deployment runs.
+:meth:`~cedrus.space.Space.apply` after the compiler has rendered the
+intent and Cedar has accepted the source. The workspace treats a
+compiled policy as the authoritative artifact for that requirement
+and includes it in subsequent verification, test, and deployment
+runs.
 
 Compiled policies are immutable. To produce a new version, build a
-:class:`Draft` from the same requirement and run the apply
-pipeline again; cedrus does not currently version policies
-internally.
+:class:`~cedrus.policies.draft.Draft` from the same requirement and
+run the apply pipeline again; cedrus does not currently version
+policies internally.
+
+Attributes:
+    Compiled: Final-form policy carrying both the typed intent and
+        the rendered Cedar.
+
+See Also:
+    :mod:`cedrus.policies.base`: :class:`Kind` abstract base that
+        :class:`Compiled` extends.
+    :mod:`cedrus.policies.draft`: The :class:`Draft` form this policy
+        started life as before compilation.
+    :mod:`cedrus.policies.existing`: The :class:`Existing` form for
+        policies imported from raw Cedar source.
 """
 
 from __future__ import annotations
@@ -18,63 +31,58 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ..case import Case, Runner, Suite
-from ..compile import Intent
-from ..error import Fault
-from ..need import Need
-from ..schema import Schema
-from ..validate import Vreport, validate_cedar
-from .base import Kind
+from cedrus.compile import Intent
+from cedrus.error import Fault
+from cedrus.need import Need
+from cedrus.schema import Schema
+from cedrus.validate import Validator, Vreport
+from cedrus.policies.base import Kind
 
 
 @dataclass(frozen=True, slots=True)
 class Compiled(Kind):
     """A policy that has been compiled and successfully validated.
 
+    Overrides :meth:`to_intent` to return the stored typed intent, and
+    :meth:`to_dict` to add ``intent_id``. Inherits :meth:`compile`,
+    :meth:`validate`, :meth:`test` and :meth:`to_dict` (base form) from
+    :class:`Kind`.
+
     Attributes:
-        intent: Typed intent that produced this policy.
+        intent: Typed intent that produced this policy; ``None`` only
+            on legacy storage rows that lack intent metadata.
     """
 
     intent: Intent | None = None
 
     def kind(self) -> str:
-        """Return the policy kind discriminator (``"compiled"``)."""
+        """Return the policy kind discriminator.
+
+        Returns:
+            Always ``"compiled"``.
+        """
         return "compiled"
 
     def to_intent(self) -> Intent:
         """Return the typed intent for this compiled policy.
 
+        Returns:
+            The stored :class:`Intent`.
+
         Raises:
-            Policy: If the intent metadata is missing. This
-                should not happen for policies produced by
-                :meth:`Workspace.apply`; the field is optional only
-                so that legacy storage rows without intent metadata
-                remain readable.
+            Fault: If ``intent`` is ``None`` (legacy rows only;
+                policies produced by
+                :meth:`~cedrus.space.Space.apply` always carry one).
         """
         if self.intent is None:
             raise Fault(f"compiled policy {self.id} is missing intent metadata")
         return self.intent
 
-    def test(
-        self,
-        schema: Schema,
-        scenarios: list[Case],
-        entities: list[Mapping[str, Any]] | None = None,
-    ) -> Suite:
-        """Run authorization scenarios through the Cedar engine.
-
-        Args:
-            schema: Cedar schema for scenario evaluation.
-            scenarios: Scenarios to execute.
-            entities: Optional entities to expose to the engine.
-
-        Returns:
-            A :class:`Suite` summarizing the outcomes.
-        """
-        return Runner(schema).run([self.cedar], scenarios)
-
     def validate(self, schema: Schema) -> Vreport:
-        """Validate this policy against ``schema``.
+        """Validate this policy's Cedar source against ``schema``.
+
+        Polymorphic route: defers to :class:`Validator` (the typed
+        validator wrapper around the Cedar engine).
 
         Args:
             schema: Cedar schema to validate against.
@@ -82,13 +90,16 @@ class Compiled(Kind):
         Returns:
             A :class:`Vreport` describing the outcome.
         """
-        return validate_cedar([self.cedar], schema)
+        return Validator(schema).validate([self.cedar])
 
     def to_dict(self) -> Mapping[str, Any]:
         """Return a JSON-friendly representation of this compiled policy.
 
-        Includes the intent id when present, or ``None`` when the policy
-        has no stored intent metadata.
+        Includes the intent id when present, or ``None`` when the
+        policy has no stored intent metadata.
+
+        Returns:
+            The base policy dict plus an ``intent_id`` key.
         """
         data = dict(Kind.to_dict(self))
         data["intent_id"] = None if self.intent is None else self.intent.id
