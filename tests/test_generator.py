@@ -38,7 +38,7 @@ def make_requirement() -> Need:
 
 def make_context(schema: Schema) -> Context:
     return Context(
-        requirement=make_requirement(),
+        need=make_requirement(),
         schema=schema,
         principal=Principal(kind="is_type", type_name="User"),
         action=Action(kind="named", name="deleteRecord"),
@@ -55,7 +55,7 @@ def test_offline_generator_detects_permit_and_forbid(schema: Schema) -> None:
         created_at=datetime.now(UTC),
     )
     forbid_context = Context(
-        requirement=forbid_req,
+        need=forbid_req,
         schema=schema,
         principal=Principal(kind="any"),
         action=Action(kind="any"),
@@ -83,7 +83,7 @@ def test_offline_generator_extracts_when_clause(schema: Schema) -> None:
 def test_offline_generator_reports_unresolved_for_vague_scopes(schema: Schema) -> None:
     generator = Offline()
     context = Context(
-        requirement=Need(
+        need=Need(
             id="HR-200",
             text="Allow access",
             domain="hr",
@@ -102,14 +102,14 @@ def test_offline_generator_reports_unresolved_for_vague_scopes(schema: Schema) -
 def test_offline_generator_complete_when_scopes_are_specific(schema: Schema) -> None:
     generator = Offline()
     context = Context(
-        requirement=make_requirement(),
+        need=make_requirement(),
         schema=schema,
         principal=Principal(kind="specific", type_name="User", entity_id="alice"),
         action=Action(kind="named", name="view"),
         resource=Resource(kind="is_type", type_name="Photo"),
     )
     proposal = generator.generate(context).proposal
-    assert proposal.complete
+    assert not bool(proposal.unresolved)
 
 
 def test_merge_unresolved_dedupes() -> None:
@@ -127,7 +127,7 @@ def test_draft_proposal_complete_property() -> None:
             resource=Resource(),
         )
     )
-    assert proposal.complete
+    assert not bool(proposal.unresolved)  # complete = no unresolved items
 
 
 def test_litellm_generator_validates_inputs() -> None:
@@ -272,8 +272,8 @@ def test_litellm_generator_handles_fallbacks(schema: Schema) -> None:
     with patch("cedrus.generate.litellm.litellm.completion") as completion:
         completion.return_value = response
         result = generator.generate(make_context(schema))
-    assert completion.call_args.kwargs["fallbacks"] == ["backup"]
-    assert not result.proposal.complete
+        assert completion.call_args.kwargs["fallbacks"] == ["backup"]
+        assert bool(result.proposal.unresolved)
     assert result.proposal.unresolved == ("x",)
 
 
@@ -382,7 +382,7 @@ def test_litellm_prompt_includes_hostile_requirement_verbatim(
     )
     gen = Llm(model="openai/test-model")
     ctx = Context(
-        requirement=hostile,
+        need=hostile,
         schema=schema,
         principal=Principal(kind="is_type", type_name="User"),
         action=Action(kind="named", name="deleteRecord"),

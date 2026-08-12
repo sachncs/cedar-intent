@@ -65,12 +65,12 @@ class Offline:
             A :class:`Result` carrying the typed proposal and
             deterministic provenance.
         """
-        intent_id = f"{context.requirement.domain}-{slugify(context.requirement.id)}"
-        when_clause = self.detect_when_clause(context.requirement.text)
+        intent_id = f"{context.need.domain}-{slugify(context.need.id)}"
+        when_clause = self.detect_when_clause(context.need.text)
         intent = Intent(
             id=intent_id,
-            requirement_id=context.requirement.id,
-            effect=self.detect_effect(context.requirement.text),
+            requirement_id=context.need.id,
+            effect=self.detect_effect(context.need.text),
             principal=context.principal,
             action=context.action,
             resource=context.resource,
@@ -147,7 +147,7 @@ class Offline:
         if (
             context.action == Action(kind="any")
             and context.resource == Resource(kind="any")
-            and "public" not in context.requirement.text.lower()
+            and "public" not in context.need.text.lower()
         ):
             issues.append(
                 "Need does not specify an action or resource; "

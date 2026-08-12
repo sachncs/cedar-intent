@@ -927,7 +927,7 @@ def build_generation_context(
         except Fault:
             continue
     return Context(
-        requirement=draft.requirement,
+        need=draft.requirement,
         schema=schema,
         principal=draft.principal,
         action=draft.action,

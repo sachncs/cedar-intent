@@ -129,20 +129,26 @@ def test_draft_generate_uses_supplied_scopes_and_existing(
 
 
 def test_draft_apply_result_merges_notes(requirement: Need) -> None:
+    from cedrus.data import Notes, Usage
+
     draft = Draft(
         id="hr-hr-042",
         requirement=requirement,
-        notes={"author": "alice"},
+        notes=Notes.from_dict({"author": "alice"}),
     )
     intent = make_intent()
     result = Result(
-        proposal=Proposal(intent=intent, unresolved=(), notes={"generator": "fake"}),
+        proposal=Proposal(
+            intent=intent,
+            unresolved=(),
+            notes=Notes.from_dict({"generator": "fake"}),
+        ),
         model="fake-model",
         request_id=None,
-        usage={},
+        usage=Usage(prompt=0, completion=0, total=0),
     )
     proposal = draft.apply_result(result)
-    assert proposal.notes == {"author": "alice", "generator": "fake"}
+    assert proposal.notes.to_dict() == {"author": "alice", "generator": "fake"}
 
 
 def test_draft_compile_uses_intent(requirement: Need, schema: Schema) -> None:

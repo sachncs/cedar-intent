@@ -33,6 +33,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..compile import Intent, Source, compile_intent
+from ..data import Notes
 from ..error import Fault
 from ..generate import Context, Generator, Proposal, Result
 from ..need import Need
@@ -65,7 +66,7 @@ class Draft(Kind):
     intent: Intent | None = None
     unresolved: tuple[str, ...] = field(default_factory=tuple)
     status: DraftStatus = "proposed"
-    notes: Mapping[str, str] = field(default_factory=dict)
+    notes: Notes = field(default_factory=Notes)
     model: str | None = None
     request_id: str | None = None
 
@@ -143,7 +144,7 @@ class Draft(Kind):
             except Fault:
                 continue
         context = Context(
-            requirement=self.requirement,
+            need=self.requirement,
             schema=schema,
             principal=self.principal,
             action=self.action,
@@ -165,10 +166,12 @@ class Draft(Kind):
             the generator's.
         """
         proposal = result.proposal
+        merged = dict(self.notes.to_dict())
+        merged.update(proposal.notes.to_dict())
         return Proposal(
             intent=proposal.intent,
             unresolved=proposal.unresolved,
-            notes={**self.notes, **proposal.notes},
+            notes=Notes.from_dict(merged),
         )
 
     def compile(self, schema: Schema | None = None) -> Source:
