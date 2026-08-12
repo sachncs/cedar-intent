@@ -41,7 +41,7 @@ from cedrus.error import Fault
 from cedrus.need import Need
 from cedrus.schema import Schema
 from cedrus.scope import Action, Principal, Resource
-from cedrus.validate import Vreport, validate_cedar
+from cedrus.validate import Validator, Vreport
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +139,10 @@ class Kind(ABC):
     def validate(self, schema: Schema) -> Vreport:
         """Validate the Cedar source for this policy against ``schema``.
 
+        Polymorphic route: defers to :class:`Validator` (the typed
+        validator wrapper around the Cedar engine). Subclass
+        :class:`Validator` to swap the underlying engine.
+
         Args:
             schema: Cedar schema to validate against.
 
@@ -150,7 +154,7 @@ class Kind(ABC):
         """
         if not self.cedar:
             raise Fault(f"policy {self.id} has no Cedar source to validate")
-        return validate_cedar([self.cedar], schema)
+        return Validator(schema).validate([self.cedar])
 
     def test(
         self,
