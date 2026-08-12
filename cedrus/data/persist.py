@@ -16,8 +16,8 @@ Attributes:
 """
 
 from __future__ import annotations
-from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from cedrus.compile import Intent
 from cedrus.data.wire import Payload
@@ -38,9 +38,10 @@ class Stored:
         intent: Parsed :class:`Intent`.
         cedar: Cedar source text for the policy.
         status: Lifecycle status (``"draft"``, ``"existing"``, ``"compiled"``).
-        created_at: Timestamp at which the row was first inserted.
         updated_at: Timestamp of the most recent upsert.
         action: :class:`Action` scope attached to the policy.
+        created_at: Timestamp at which the row was first inserted;
+            defaults to ``datetime.now(UTC)`` if not provided.
     """
 
     id: str
@@ -49,9 +50,9 @@ class Stored:
     intent: Intent
     cedar: str
     status: str
-    created_at: datetime
     updated_at: datetime
     action: Action
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,11 +70,12 @@ class DraftStored:
         request_id: Identifier of the originating generation request.
         unresolved: Tuple of unresolved reference keys.
         cedar: Cedar source text for the draft.
-        created_at: Timestamp at which the row was first inserted.
         intent: :class:`Intent` carried by the draft.
         principal: :class:`Principal` scope carried by the draft.
         action: :class:`Action` scope carried by the draft.
         resource: :class:`Resource` scope carried by the draft.
+        created_at: Timestamp at which the row was first inserted;
+            defaults to ``datetime.now(UTC)`` if not provided.
     """
 
     id: str
@@ -82,11 +84,11 @@ class DraftStored:
     request_id: str
     unresolved: tuple[str, ...]
     cedar: str
-    created_at: datetime
     intent: Intent
     principal: Principal
     action: Action
     resource: Resource
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,14 +104,15 @@ class ReportStored:
         kind: Report kind (e.g. ``"validation"``, ``"test"``).
         passed: Whether the report's checks passed.
         payload: Typed report payload.
-        created_at: Timestamp at which the row was first inserted.
+        created_at: Timestamp at which the row was first inserted;
+            defaults to ``datetime.now(UTC)`` if not provided.
     """
 
     policy_id: str
     kind: str
     passed: bool
     payload: Payload
-    created_at: datetime
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 __all__ = ["DraftStored", "ReportStored", "Stored"]
