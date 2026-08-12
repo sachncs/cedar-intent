@@ -14,10 +14,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from ..compile import Intent
-from ..data.wire import Notes, Usage
-from ..scope import Action, Principal, Resource
-from .unresolved import Unresolved
+from cedrus.compile import Intent
+from cedrus.data.unresolved import Unresolved
+from cedrus.data.wire import Notes, Usage
+from cedrus.scope import Action, Principal, Resource
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,14 +63,14 @@ class Result:
     Attributes:
         proposal: The generator's proposal.
         model: Model identifier (or generator's static name).
-        request_id: Provider-supplied request identifier (if any).
-        usage: Optional token-usage metadata.
+        request_id: Provider-supplied request identifier.
+        usage: Token-usage metadata.
         created_at: When the generator returned.
     """
 
     proposal: Proposal
     model: str
-    request_id: str | None
+    request_id: str
     usage: Usage
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
