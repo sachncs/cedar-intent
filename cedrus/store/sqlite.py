@@ -260,9 +260,9 @@ class Backend:
                 column = statement.split("ADD COLUMN")[-1].split()[0]
                 if not self.column_exists("drafts", column):
                     self.connection.execute(statement)
-            self._stamp_schema_version()
+            self.stamp_schema_version()
 
-    def _stamp_schema_version(self) -> None:
+    def stamp_schema_version(self) -> None:
         """Insert or update the ``meta.schema_version`` row in this transaction."""
         row = self.connection.execute("SELECT schema_version FROM meta").fetchone()
         if row is None:
