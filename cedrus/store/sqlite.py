@@ -69,6 +69,7 @@ from cedrus.deploy import Record
 from cedrus.error import Store
 from cedrus.need import Need
 from cedrus.scope import Action, Principal, Resource, Scope
+from cedrus.store.base import DraftStored, ReportStored, Stored
 
 #: Current schema version. Bump whenever the SQLite schema changes in
 #: a way that requires row data to be migrated.
