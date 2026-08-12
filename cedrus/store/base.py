@@ -60,8 +60,6 @@ See Also:
 
 from __future__ import annotations
 
-import json
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
@@ -70,7 +68,7 @@ from cedrus.compile import Intent
 from cedrus.data import Payload
 from cedrus.deploy import Record
 from cedrus.need import Need
-from cedrus.scope import Action, Principal, Resource, Scope
+from cedrus.scope import Action, Principal, Resource
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,37 +103,34 @@ class Stored:
     action: Action | None = None
 
     @classmethod
-    def from_row(cls, row: dict[str, Any]) -> Stored:
-        """Build a :class:`Stored` from a SQLite ``policies`` row dict.
+    def parse(cls, data: dict[str, Any]) -> Stored:
+        """Build a :class:`Stored` from the normalized ``policies`` rows.
 
-        Rehydrates the typed :class:`Intent` and :class:`Action`
-        scope from their JSON columns. Both default to ``None`` when
-        the corresponding column is ``NULL``.
+        ``data`` carries the main ``"policies"`` row and the optional
+        ``"intents"`` data dict (which in turn carries the
+        ``principals`` / ``actions`` / ``resources`` / ``when_clauses``
+        / ``unless_clauses`` / ``notes`` rows). The intent is hydrated
+        via :meth:`Intent.parse`; ``None`` when the policy has no
+        intent yet.
 
         Args:
-            row: Dict produced by ``SELECT * FROM policies``.
+            data: Assembled dict from the SQLite read path.
 
         Returns:
             The reconstructed :class:`Stored`.
         """
+        row = data["policies"]
+        intent_data = data.get("intents")
+        intent = Intent.parse(int(intent_data)) if intent_data else None
         return cls(
             id=row["id"],
             domain=row["domain"],
             requirement_id=row["requirement_id"],
-            intent=(
-                Intent.from_dict(json.loads(row["intent_json"]))
-                if row["intent_json"]
-                else None
-            ),
+            intent=intent,
             cedar=row["cedar"],
             status=row["status"],
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
-            action=(
-                Action.from_dict(json.loads(row["action_scope_json"]))
-                if row["action_scope_json"]
-                else None
-            ),
         )
 
 
@@ -170,60 +165,33 @@ class DraftStored:
     resource: Resource
 
     @classmethod
-    def from_row(cls, row: dict[str, Any]) -> DraftStored:
-        """Build a :class:`DraftStored` from a SQLite ``drafts`` row dict.
+    def parse(cls, data: dict[str, Any]) -> DraftStored:
+        """Build a :class:`DraftStored` from the normalized ``drafts`` rows.
 
-        Rehydrates the typed :class:`Intent` and the three scope
-        objects from their JSON columns. When ``intent_json`` is
-        ``NULL`` (legacy rows), the intent is replaced with a
-        permissive ``permit`` placeholder so downstream verification
-        still has a typed object to consume.
+        ``data`` carries the main ``"drafts"`` row plus the
+        ``"intents"`` / ``"principals"`` / ``"actions"`` /
+        ``"resources"`` / ``"unresolved"`` row lists.
 
         Args:
-            row: Dict produced by ``SELECT * FROM drafts``.
+            data: Assembled dict from the SQLite read path.
 
         Returns:
             The reconstructed :class:`DraftStored`.
         """
-        intent_payload = row["intent_json"]
-        principal_payload = row["principal_scope_json"]
-        action_payload = row["action_scope_json"]
-        resource_payload = row["resource_scope_json"]
+        row = data["drafts"]
+        unresolved = tuple(item["item"] for item in data.get("unresolved", ()))
         return cls(
             id=row["id"],
             policy_id=row["policy_id"],
             model=row["model"],
             request_id=row["request_id"],
-            unresolved=tuple(json.loads(row["unresolved_json"])),
+            unresolved=unresolved,
             cedar=row["cedar"],
             created_at=datetime.fromisoformat(row["created_at"]),
-            intent=(
-                Intent.from_dict(json.loads(intent_payload))
-                if intent_payload
-                else Intent(
-                    id=row["id"],
-                    requirement_id=row["policy_id"] or "",
-                    effect="permit",
-                    principal=Principal(),
-                    action=Action(),
-                    resource=Resource(),
-                )
-            ),
-            principal=(
-                Principal.from_dict(json.loads(principal_payload))
-                if principal_payload
-                else Principal()
-            ),
-            action=(
-                Action.from_dict(json.loads(action_payload))
-                if action_payload
-                else Action()
-            ),
-            resource=(
-                Resource.from_dict(json.loads(resource_payload))
-                if resource_payload
-                else Resource()
-            ),
+            intent=Intent.parse(data["intents"]),
+            principal=Principal.parse(data["principals"]),
+            action=Action.parse(data["actions"]),
+            resource=Resource.parse(data["resources"]),
         )
 
 
@@ -248,20 +216,24 @@ class ReportStored:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod
-    def from_row(cls, row: dict[str, Any]) -> ReportStored:
-        """Build a :class:`ReportStored` from a SQLite ``reports`` row dict.
+    def parse(cls, data: dict[str, Any]) -> ReportStored:
+        """Build a :class:`ReportStored` from the normalized ``reports`` rows.
+
+        ``data`` carries the main ``"reports"`` row plus the
+        ``"payload"`` (report_payload) row list.
 
         Args:
-            row: Dict produced by ``SELECT * FROM reports``.
+            data: Assembled dict from the SQLite read path.
 
         Returns:
             The reconstructed :class:`ReportStored`.
         """
+        row = data["reports"]
         return cls(
             policy_id=row["policy_id"],
             kind=row["kind"],
             passed=bool(row["passed"]),
-            payload=Payload.from_dict(json.loads(row["payload_json"])),
+            payload=Payload.parse(data),
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
@@ -274,52 +246,41 @@ class Repository(Protocol):
     verify conformance with ``isinstance``. New backends (for example,
     a Postgres or DynamoDB implementation) can satisfy the Protocol
     without inheriting from any base class.
+
+    CRUD lives on the typed objects themselves
+    (``Need.save`` / ``Need.get`` / ``Need.list``,
+    ``Stored.upsert`` / ``Stored.latest_draft`` / ``Stored.list_drafts``,
+    ``DraftStored.save`` / ``DraftStored.update`` / ``DraftStored.latest`` /
+    ``DraftStored.list``, ``ReportStored.save`` / ``ReportStored.latest``,
+    ``Record.save`` / ``Record.list``); the backend only exposes the
+    SQL primitives those calls need.
     """
 
-    def add_requirement(self, requirement: Need) -> None: ...
-    def get_requirement(self, requirement_id: str) -> Need: ...
-    def list_requirements(self, domain: str | None = None) -> Sequence[Need]: ...
-    def remove_requirement(self, requirement_id: str) -> None: ...
+    def fetch(self, query: str, params: tuple = ()) -> list[dict[str, Any]]:
+        """Execute ``query`` and return rows as dicts.
 
-    def upsert_policy(self, policy: Stored) -> None: ...
-    def get_policy(self, policy_id: str) -> Stored: ...
-    def list_policies(self, domain: str | None = None) -> Sequence[Stored]: ...
-    def remove_policy(self, policy_id: str) -> None: ...
-
-    def record_draft(self, draft: DraftStored) -> None: ...
-    def update_draft_scopes(
-        self,
-        draft_id: str,
-        *,
-        intent: Intent | None = None,
-        principal: Principal | None = None,
-        action: Action | None = None,
-        resource: Resource | None = None,
-    ) -> None: ...
-    def latest_draft(self, policy_id: str) -> DraftStored: ...
-    def list_drafts(self, policy_id: str | None = None) -> Sequence[DraftStored]: ...
-
-    def record_report(self, report: ReportStored) -> None: ...
-    def latest_report(self, policy_id: str, kind: str) -> ReportStored: ...
-
-    def record_deployment(self, deployment: Record) -> None: ...
+        Single general row fetcher. Every typed-object CRUD method
+        builds its own SQL (with whatever JOINs it needs) and calls
+        ``fetch`` once or as many times as it needs.
+        """
+        ...
 
     def transaction(self) -> Any:
         """Return a context manager that runs the body inside one transaction.
 
-        Used by the workspace's :meth:`Workspace.apply` to record both
-        the validation and the test reports alongside the policy
-        upsert in a single atomic write. For the SQLite backend this
-        wraps the connection's transaction context manager; for the
-        in-memory backend it is a no-op.
+        Used by the workspace's :meth:`Workspace.apply` to record
+        every typed-object graph (policy + intent + scopes + clauses,
+        draft + scope graph, etc.) atomically. For the SQLite backend
+        this wraps the connection's transaction context manager; for
+        the in-memory backend it is a no-op.
 
         Returns:
             A context manager.
         """
         ...
-    def list_deployments(
-        self, domain: str | None = None
-    ) -> Sequence[Record]: ...
+
+    def remove_requirement(self, requirement_id: str) -> None: ...
+    def remove_policy(self, policy_id: str) -> None: ...
 
 
 __all__ = [

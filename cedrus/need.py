@@ -53,7 +53,7 @@ class Need:
             raise Require(f"requirement {self.id} has no domain")
 
     @classmethod
-    def from_row(cls, row: dict[str, Any]) -> Need:
+    def parse(cls, row: dict[str, Any]) -> Need:
         """Build a :class:`Need` from a SQLite ``requirements`` row dict.
 
         Args:
