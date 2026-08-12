@@ -29,8 +29,6 @@ Attributes:
     Proposal: One generator proposal for a single requirement.
     Result: Final output of a generator call with provenance.
     Generator: Minimum surface every generator must implement.
-    merge_unresolved: Combine unresolved requirement strings, dropping
-        empties and duplicates.
     Notes: Free-form notes attached to a :class:`~cedrus.compile.Intent`.
     Usage: LLM token-usage metadata extracted from a generation response.
 
@@ -43,7 +41,6 @@ See Also:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
 from cedrus.data import Context as DataContext
@@ -64,30 +61,7 @@ __all__ = [
     "Proposal",
     "Result",
     "Usage",
-    "merge_unresolved",
 ]
-
-
-def merge_unresolved(*sources: Sequence[str]) -> tuple[str, ...]:
-    """Combine unresolved requirement strings, dropping empties and duplicates.
-
-    Each item is stripped of surrounding whitespace before
-    de-duplication; empty strings are ignored.
-
-    Args:
-        *sources: One or more sequences of unresolved item strings.
-            Order is preserved by first occurrence.
-
-    Returns:
-        A tuple of unique, non-empty strings.
-    """
-    seen: dict[str, None] = dict.fromkeys(
-        stripped
-        for source in sources
-        for item in source
-        if (stripped := item.strip())
-    )
-    return tuple(seen)
 
 
 @runtime_checkable
