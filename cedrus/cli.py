@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from argparse import Namespace, _SubParsersAction
@@ -65,7 +66,7 @@ def positive_finite_float(value: str) -> float:
         number = float(value)
     except ValueError as error:
         raise argparse.ArgumentTypeError(f"expected a number, got {value!r}") from error
-    if number != number or number in (float("inf"), float("-inf")) or number <= 0:
+    if not math.isfinite(number) or number <= 0:
         raise argparse.ArgumentTypeError(
             f"value must be a positive finite number, got {value!r}"
         )
