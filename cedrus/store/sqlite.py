@@ -4,7 +4,8 @@ Uses only the standard library ``sqlite3`` module. The database schema
 is created on demand and the schema migration is idempotent.
 
 This module exposes the SQL primitives (``fetch``, ``execute``,
-``transaction``, ``migrate``) that the typed objects (``Need``,
+``transaction``, ``migrate``, ``remove_requirement``,
+``remove_policy``, ``close``) that the typed objects (``Need``,
 ``Stored``, ``DraftStored``, ``ReportStored``, ``Record``) call from
 their ``save`` / ``get`` / ``list`` / ``latest`` / ``update`` /
 ``upsert`` methods. The backend itself does not own any CRUD — see
