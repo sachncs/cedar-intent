@@ -49,7 +49,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from .case import Case, Suite, Runner
+from .case import Case, Run, Suite
 from .compile import Intent, compile_intent
 from .deploy import (
     Bundler,
@@ -853,7 +853,9 @@ class Workspace:
         effective_schema = schema or Schema.from_mapping(
             {"": {"entityTypes": {}, "actions": {}}}
         )
-        return Runner(effective_schema).run(policies, scenarios)
+        return Run(scenarios).evaluate(effective_schema, policies).result or Suite(
+            passed=True, results=()
+        )
 
     def export_domain(self, domain: str, output: Path) -> Path:
         """Write a Cedar bundle for ``domain`` to ``output``.

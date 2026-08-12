@@ -46,7 +46,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from cedrus.case import Case, Runner, Suite
+from cedrus.case import Case, Run, Suite
 from cedrus.compile import Intent, Source
 from cedrus.error import Fault
 from cedrus.need import Need
@@ -186,7 +186,9 @@ class Kind(ABC):
         Returns:
             A :class:`Suite` summarizing the results.
         """
-        return Runner(schema).run([self.cedar], scenarios)
+        return Run(scenarios).evaluate(schema, [self.cedar]).result or Suite(
+            passed=True, results=()
+        )
 
     def to_dict(self) -> Mapping[str, object]:
         """Return a JSON-friendly representation of this policy.

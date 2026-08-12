@@ -20,8 +20,8 @@ The pipeline flows:
   Cedar source text.
 * :class:`~cedrus.validate.Validator` runs Cedar parse and
   schema validation.
-* :class:`~cedrus.case.Runner` exercises the policy against
-  authorization scenarios.
+* :class:`~cedrus.case.Run` exercises a list of :class:`~cedrus.case.Case`
+  against the policy and returns a :class:`~cedrus.case.Suite`.
 * :class:`~cedrus.verify.Verifier` runs static checks for
   shadowing, redundancy, and coverage.
 * :class:`~cedrus.deploy.Bundler` and
