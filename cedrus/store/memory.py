@@ -15,7 +15,8 @@ Attributes:
 
 See Also:
     :mod:`cedrus.store.base`: :class:`Repository` Protocol this module
-        implements.
+        implements, plus the typed-object CRUD methods that drive
+        the SQL primitives on the SQLite side.
     :mod:`cedrus.store.sqlite`: On-disk SQLite implementation.
 """
 
@@ -177,10 +178,8 @@ class Memory:
     ) -> None:
         """Update one or more typed-scope fields on a stored draft.
 
-        Mirrors the SQLite-side migration helper so the same call
-        signature works against both backends. Each typed-object
-        keyword is optional; passing ``None`` (the default) leaves
-        that field untouched on the matching draft.
+        Each typed-object keyword is optional; passing ``None`` (the
+        default) leaves that field untouched on the matching draft.
 
         Args:
             draft_id: Identifier of the draft to update.
