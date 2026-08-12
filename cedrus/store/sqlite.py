@@ -1,47 +1,74 @@
 """SQLite-backed implementation of the Repository Protocol.
 
-Uses only the standard library ``sqlite3`` module. The database schema is
-created on demand and migrations are idempotent.
+Uses only the standard library ``sqlite3`` module. The database schema
+is created on demand and migrations are idempotent.
 
-Schema
-------
+Schema:
+    Six tables back the entity types exposed by the Protocol:
 
-Six tables back the entity types exposed by the Protocol:
+    * ``meta`` — single-row metadata table recording the current
+      schema version. The version is set in the same transaction as
+      the schema change, so a partially-migrated database either has
+      its declared version or does not exist at all.
+    * ``requirements`` (id PRIMARY KEY)
+    * ``policies`` (id PRIMARY KEY, requirement_id REFERENCES
+      requirements(id) ON DELETE SET NULL)
+    * ``drafts`` (id PRIMARY KEY, policy_id REFERENCES policies(id)
+      logical via the policy_id string)
+    * ``reports`` (id AUTOINCREMENT PRIMARY KEY, policy_id logical)
+    * ``deployments`` (id PRIMARY KEY, domain indexed)
 
-* ``meta`` — single-row metadata table recording the current schema
-  version. The version is set in the same transaction as the
-  schema change, so a partially-migrated database either has its
-  declared version or does not exist at all.
-* ``requirements`` (id PRIMARY KEY)
-* ``policies`` (id PRIMARY KEY, requirement_id REFERENCES requirements(id)
-  ON DELETE SET NULL)
-* ``drafts`` (id PRIMARY KEY, policy_id REFERENCES policies(id) logical
-  via the policy_id string)
-* ``reports`` (id AUTOINCREMENT PRIMARY KEY, policy_id logical)
-* ``deployments`` (id PRIMARY KEY, domain indexed)
+    The typed intent and per-slot scopes on ``policies`` and ``drafts``
+    are stored as serialized JSON in dedicated ``*_json`` columns and
+    re-hydrated to the typed objects on read. The serialization goes
+    through :meth:`Intent.to_dict`, ``Scope.to_dict`` and
+    :meth:`Payload.to_dict` so the wire format lives in one place.
+    Older databases are upgraded in place by :meth:`Sqlite.migrate`
+    followed by a strict-refusal check in :meth:`Sqlite.__post_init__`
+    that raises :class:`Store` when any legacy row remains.
 
-Starting with cedrus 0.6.0, every row in ``policies`` and
-``drafts`` carries additional JSON columns that capture the typed
-intent and per-slot scopes. Older databases are upgraded in place by
-:meth:`Sqlite.migrate` followed by a strict-refusal check
-in :meth:`Sqlite.__post_init__` that raises
-:class:`Store` when any legacy row remains.
+Concurrency:
+    ``Sqlite`` enables ``journal_mode=WAL`` and
+    ``busy_timeout=5000`` so concurrent readers do not block writers
+    and transient lock contention waits instead of raising
+    immediately. The class connects with ``check_same_thread=False``
+    and guards every mutating call with an ``RLock``, so the same
+    instance can be shared between threads. The Python GIL plus
+    SQLite's connection-level serialization make this safe; the RLock
+    is documentation as much as defense.
 
-Concurrency
------------
+    For parallel use across processes, each process should open its
+    own :class:`Sqlite` instance; SQLite's WAL mode handles the
+    cross-process locking.
 
-``Sqlite`` enables ``journal_mode=WAL`` and
-``busy_timeout=5000`` so concurrent readers do not block writers and
-transient lock contention waits instead of raising immediately. The
-class connects with ``check_same_thread=False`` and guards every
-mutating call with an ``RLock``, so the same instance can be shared
-between threads. The Python GIL plus SQLite's connection-level
-serialization make this safe; the RLock is documentation as much as
-defense.
+Attributes:
+    Sqlite: SQLite-backed :class:`Repository` implementation.
+    serialize_intent: Convert a typed :class:`Intent` to a JSON string
+        for SQLite storage.
+    deserialize_intent: Rehydrate a typed :class:`Intent` from its
+        SQLite JSON column.
+    serialize_scope: Convert a typed :class:`Scope` to a JSON string.
+    deserialize_scope: Rehydrate a typed :class:`Scope` from its
+        SQLite JSON column (typed on the caller-supplied scope class).
+    serialize_payload: Convert a typed :class:`Payload` to a JSON string.
+    deserialize_payload: Rehydrate a typed :class:`Payload` from its
+        SQLite JSON column.
+    requirement_from_row: Build a :class:`Need` from a ``requirements``
+        SQLite row dict.
+    policy_from_row: Build a :class:`Stored` from a ``policies`` SQLite
+        row dict.
+    draft_from_row: Build a :class:`DraftStored` from a ``drafts``
+        SQLite row dict.
+    report_from_row: Build a :class:`ReportStored` from a ``reports``
+        SQLite row dict.
+    deployment_from_row: Build a :class:`~cedrus.deploy.Record` from a
+        ``deployments`` SQLite row dict.
 
-For parallel use across processes, each process should open its own
-:class:`Sqlite` instance; SQLite's WAL mode handles the
-cross-process locking.
+See Also:
+    :mod:`cedrus.store.base`: :class:`Repository` Protocol this module
+        implements.
+    :mod:`cedrus.store.memory`: In-memory repository implementation.
+    :mod:`cedrus.migrate`: Migration helpers for pre-0.6.0 databases.
 """
 
 from __future__ import annotations
@@ -49,19 +76,19 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ..compile import Intent
-from ..deploy import Record
-from ..error import Store
-from ..migrate import detect_legacy_rows
-from ..need import Need
-from ..scope import Action
-from .base import DraftStored, ReportStored, Stored
+from cedrus.compile import Intent
+from cedrus.data import Payload
+from cedrus.deploy import Record
+from cedrus.error import Store
+from cedrus.migrate import detect_legacy_rows
+from cedrus.need import Need
+from cedrus.scope import Action, Principal, Resource, Scope
 
 #: Current schema version. Bump whenever the SQLite schema changes in
 #: a way that requires row data to be migrated.
@@ -140,10 +167,11 @@ SCHEMA_STATEMENTS = (
 )
 
 
-# ALTER TABLE statements that add the new JSON columns introduced in
-# 0.6.0. Each statement is wrapped in a check against ``sqlite_master``
-# so it is idempotent. ``ALTER TABLE ... ADD COLUMN`` does not accept
-# ``IF NOT EXISTS`` on older SQLite versions, hence the manual guard.
+#: ALTER TABLE statements that add the new ``*_json`` columns
+#: introduced in 0.6.0. Each statement is wrapped in a check against
+#: ``sqlite_master`` so it is idempotent. ``ALTER TABLE ...
+#: ADD COLUMN`` does not accept ``IF NOT EXISTS`` on older SQLite
+#: versions, hence the manual guard.
 ALTER_INTENT_JSON = (
     "ALTER TABLE policies ADD COLUMN action_scope_json TEXT",
 )
@@ -157,11 +185,239 @@ ALTER_DRAFT_COLUMNS = (
 
 #: Tables whose names are allowed in dynamic SQL. Anything outside
 #: this allow-list is rejected, preventing the f-string interpolation
-#: in :meth:`Sqlite.column_exists` from becoming a SQL
-#: injection vector.
+#: in :meth:`Sqlite.column_exists` from becoming a SQL injection
+#: vector.
 KNOWN_TABLES = frozenset(
     {"requirements", "policies", "drafts", "reports", "deployments", "meta"}
 )
+
+
+# ---------------------------------------------------------------------------
+# Typed serialization helpers
+# ---------------------------------------------------------------------------
+
+
+def serialize_intent(intent: Intent | None) -> str | None:
+    """Convert a typed :class:`Intent` to a JSON string for SQLite storage.
+
+    Thin wrapper around :meth:`Intent.to_dict`. ``None`` is persisted
+    as SQL ``NULL``.
+
+    Args:
+        intent: The intent to serialize, or ``None``.
+
+    Returns:
+        The JSON string, or ``None`` if ``intent`` is ``None``.
+    """
+    if intent is None:
+        return None
+    return json.dumps(intent.to_dict(), sort_keys=True)
+
+
+def deserialize_intent(payload: str | None) -> Intent | None:
+    """Rehydrate a typed :class:`Intent` from its SQLite JSON column.
+
+    Thin wrapper around :meth:`Intent.from_dict`. Returns ``None``
+    for empty payloads (the legacy form for "no intent yet").
+
+    Args:
+        payload: JSON string previously produced by
+            :func:`serialize_intent`, or ``None``.
+
+    Returns:
+        The reconstructed :class:`Intent`, or ``None`` if
+        ``payload`` is empty.
+    """
+    if not payload:
+        return None
+    return Intent.from_dict(json.loads(payload))
+
+
+def serialize_scope(scope: Scope | None) -> str | None:
+    """Convert a typed :class:`Scope` to a JSON string for SQLite storage.
+
+    Polymorphic: dispatches on the runtime scope type via
+    :meth:`Scope.to_dict`. ``None`` is persisted as SQL ``NULL``.
+
+    Args:
+        scope: The scope to serialize, or ``None``.
+
+    Returns:
+        The JSON string, or ``None`` if ``scope`` is ``None``.
+    """
+    if scope is None:
+        return None
+    return json.dumps(scope.to_dict(), sort_keys=True)
+
+
+def deserialize_scope(
+    payload: str | None, cls: type[Scope]
+) -> Scope | None:
+    """Rehydrate a typed :class:`Scope` from its SQLite JSON column.
+
+    Polymorphic: the caller supplies the concrete scope class
+    (:class:`Principal`, :class:`Action`, or :class:`Resource`) so the
+    matching :meth:`from_dict` classmethod is used.
+
+    Args:
+        payload: JSON string previously produced by
+            :func:`serialize_scope`, or ``None``.
+        cls: Concrete scope subclass to instantiate.
+
+    Returns:
+        The reconstructed :class:`Scope`, or ``None`` if ``payload``
+        is empty.
+    """
+    if not payload:
+        return None
+    return cls.from_dict(json.loads(payload))
+
+
+def serialize_payload(payload: Payload) -> str:
+    """Convert a typed :class:`Payload` to a JSON string for SQLite storage.
+
+    Args:
+        payload: The payload to serialize.
+
+    Returns:
+        The JSON string.
+    """
+    return json.dumps(payload.to_dict(), sort_keys=True)
+
+
+def deserialize_payload(payload: str) -> Payload:
+    """Rehydrate a typed :class:`Payload` from its SQLite JSON column.
+
+    Args:
+        payload: JSON string previously produced by
+            :func:`serialize_payload`.
+
+    Returns:
+        The reconstructed :class:`Payload`.
+    """
+    return Payload.from_dict(json.loads(payload))
+
+
+# ---------------------------------------------------------------------------
+# Row adapters
+# ---------------------------------------------------------------------------
+
+
+def requirement_from_row(row: dict[str, Any]) -> Need:
+    """Build a :class:`Need` from a SQLite requirements row.
+
+    Args:
+        row: Dict produced by ``SELECT * FROM requirements``.
+
+    Returns:
+        The reconstructed :class:`Need`.
+    """
+    from pathlib import Path
+
+    return Need(
+        id=row["id"],
+        text=row["text"],
+        domain=row["domain"],
+        source_path=Path(row["source_path"]),
+        created_at=datetime.fromisoformat(row["created_at"]),
+    )
+
+
+def policy_from_row(row: dict[str, Any]) -> Stored:
+    """Build a :class:`Stored` from a SQLite policies row.
+
+    Args:
+        row: Dict produced by ``SELECT * FROM policies``.
+
+    Returns:
+        The reconstructed :class:`Stored`.
+    """
+    return Stored(
+        id=row["id"],
+        domain=row["domain"],
+        requirement_id=row["requirement_id"],
+        intent=deserialize_intent(row["intent_json"]),
+        cedar=row["cedar"],
+        status=row["status"],
+        created_at=datetime.fromisoformat(row["created_at"]),
+        updated_at=datetime.fromisoformat(row["updated_at"]),
+        action=deserialize_scope(row["action_scope_json"], Action),
+    )
+
+
+def draft_from_row(row: dict[str, Any]) -> DraftStored:
+    """Build a :class:`DraftStored` from a SQLite drafts row.
+
+    Args:
+        row: Dict produced by ``SELECT * FROM drafts``.
+
+    Returns:
+        The reconstructed :class:`DraftStored`.
+    """
+    return DraftStored(
+        id=row["id"],
+        policy_id=row["policy_id"],
+        model=row["model"],
+        request_id=row["request_id"],
+        unresolved=tuple(json.loads(row["unresolved_json"])),
+        cedar=row["cedar"],
+        created_at=datetime.fromisoformat(row["created_at"]),
+        intent=deserialize_intent(row["intent_json"]) or Intent(
+            id=row["id"],
+            requirement_id=row["policy_id"] or "",
+            effect="permit",
+            principal=Principal(),
+            action=Action(),
+            resource=Resource(),
+        ),
+        principal=deserialize_scope(row["principal_scope_json"], Principal) or Principal(),
+        action=deserialize_scope(row["action_scope_json"], Action) or Action(),
+        resource=deserialize_scope(row["resource_scope_json"], Resource) or Resource(),
+    )
+
+
+def report_from_row(row: dict[str, Any]) -> ReportStored:
+    """Build a :class:`ReportStored` from a SQLite reports row.
+
+    Args:
+        row: Dict produced by ``SELECT * FROM reports``.
+
+    Returns:
+        The reconstructed :class:`ReportStored`.
+    """
+    return ReportStored(
+        policy_id=row["policy_id"],
+        kind=row["kind"],
+        passed=bool(row["passed"]),
+        payload=deserialize_payload(row["payload_json"]),
+        created_at=datetime.fromisoformat(row["created_at"]),
+    )
+
+
+def deployment_from_row(row: dict[str, Any]) -> Record:
+    """Build a :class:`~cedrus.deploy.Record` from a SQLite deployments row.
+
+    Args:
+        row: Dict produced by ``SELECT * FROM deployments``.
+
+    Returns:
+        The reconstructed :class:`Record`.
+    """
+    return Record(
+        id=row["id"],
+        domain=row["domain"],
+        target=row["target"],
+        target_kind=row["target_kind"],
+        bundle_hash=row["bundle_hash"],
+        status=row["status"],
+        response=dict(json.loads(row["response_json"])),
+        created_at=datetime.fromisoformat(row["created_at"]),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sqlite repository
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -171,10 +427,10 @@ class Sqlite:
     Attributes:
         path: Filesystem location of the SQLite database file. The
             parent directory is created on construction.
-        allow_legacy: When ``True``, skip the legacy-row refusal check
-            in :meth:`__post_init__`. Only the migration CLI should
-            set this; every other caller should leave it ``False`` so a
-            legacy workspace is rejected loudly.
+        allow_legacy: When ``True``, skip the legacy-row refusal
+            check in :meth:`__post_init__`. Only the migration CLI
+            should set this; every other caller should leave it
+            ``False`` so a legacy workspace is rejected loudly.
         connection: Open :class:`sqlite3.Connection` to the database.
     """
 
@@ -206,11 +462,14 @@ class Sqlite:
 
         Args:
             table: Table name to inspect. Must be a known table name
-                (``requirements``, ``policies``, ``drafts``, ``reports``,
-                ``deployments``, ``meta``); anything else raises
-                :class:`Store` rather than interpolating user
-                input into a SQL statement.
+                (``requirements``, ``policies``, ``drafts``,
+                ``reports``, ``deployments``, ``meta``); anything
+                else raises :class:`Store` rather than interpolating
+                user input into a SQL statement.
             column: Column name to look up.
+
+        Returns:
+            ``True`` if the column is present.
 
         Raises:
             Store: If ``table`` is not a known table.
@@ -271,10 +530,10 @@ class Sqlite:
         """Refuse to operate on a workspace that still has legacy rows.
 
         Hard-refuses per the 0.6.0 migration policy: any row whose new
-        JSON columns are NULL is treated as a hard error because the
-        verification and deployment paths rely on those columns being
-        populated. The CLI exposes ``cedrus migrate`` to upgrade
-        legacy rows in place.
+        ``*_json`` columns are ``NULL`` is treated as a hard error
+        because the verification and deployment paths rely on those
+        columns being populated. The CLI exposes ``cedrus migrate`` to
+        upgrade legacy rows in place.
 
         Raises:
             Store: When one or more legacy rows remain.
@@ -336,6 +595,12 @@ class Sqlite:
     def get_requirement(self, requirement_id: str) -> Need:
         """Return the requirement with ``requirement_id``.
 
+        Args:
+            requirement_id: Identifier of the requirement to fetch.
+
+        Returns:
+            The stored :class:`Need`.
+
         Raises:
             Store: If no requirement exists with that id.
         """
@@ -347,7 +612,15 @@ class Sqlite:
         return requirement_from_row(dict(row))
 
     def list_requirements(self, domain: str | None = None) -> Sequence[Need]:
-        """Return all requirements, optionally filtered by ``domain``."""
+        """Return all requirements, optionally filtered by ``domain``.
+
+        Args:
+            domain: When provided, only requirements whose ``domain``
+                matches are returned.
+
+        Returns:
+            A sequence of :class:`Need` objects in id order.
+        """
         if domain is None:
             rows = self.connection.execute(
                 "SELECT * FROM requirements ORDER BY id"
@@ -360,6 +633,9 @@ class Sqlite:
 
     def remove_requirement(self, requirement_id: str) -> None:
         """Remove the requirement with ``requirement_id``.
+
+        Args:
+            requirement_id: Identifier of the requirement to remove.
 
         Raises:
             Store: If no requirement exists with that id.
@@ -374,19 +650,12 @@ class Sqlite:
     def upsert_policy(self, policy: Stored) -> None:
         """Insert or update ``policy`` in the store.
 
-        The ``intent`` and ``action`` fields are serialized to JSON when
-        present; ``None`` is persisted as SQL ``NULL``.
+        The ``intent`` and ``action`` fields are serialized to JSON
+        when present; ``None`` is persisted as SQL ``NULL``.
 
         Args:
             policy: Policy row to upsert.
         """
-        from ..compile import intent_to_dict
-
-        intent_payload = (
-            json.dumps(intent_to_dict(policy.intent), sort_keys=True)
-            if policy.intent is not None
-            else None
-        )
         with self.connection:
             self.connection.execute(
                 """
@@ -407,17 +676,23 @@ class Sqlite:
                     policy.id,
                     policy.domain,
                     policy.requirement_id,
-                    intent_payload,
+                    serialize_intent(policy.intent),
                     policy.cedar,
                     policy.status,
                     policy.created_at.isoformat(),
                     policy.updated_at.isoformat(),
-                    policy.action_scope_json,
+                    serialize_scope(policy.action),
                 ),
             )
 
     def get_policy(self, policy_id: str) -> Stored:
         """Return the policy with ``policy_id``.
+
+        Args:
+            policy_id: Identifier of the policy to fetch.
+
+        Returns:
+            The stored :class:`Stored`.
 
         Raises:
             Store: If no policy exists with that id.
@@ -430,7 +705,15 @@ class Sqlite:
         return policy_from_row(dict(row))
 
     def list_policies(self, domain: str | None = None) -> Sequence[Stored]:
-        """Return all policies, optionally filtered by ``domain``."""
+        """Return all policies, optionally filtered by ``domain``.
+
+        Args:
+            domain: When provided, only policies whose ``domain``
+                matches are returned.
+
+        Returns:
+            A sequence of :class:`Stored` in id order.
+        """
         if domain is None:
             rows = self.connection.execute(
                 "SELECT * FROM policies ORDER BY id"
@@ -444,6 +727,9 @@ class Sqlite:
     def remove_policy(self, policy_id: str) -> None:
         """Remove the policy with ``policy_id``.
 
+        Args:
+            policy_id: Identifier of the policy to remove.
+
         Raises:
             Store: If no policy exists with that id.
         """
@@ -455,7 +741,14 @@ class Sqlite:
                 raise Store(f"policy {policy_id!r} not found")
 
     def record_draft(self, draft: DraftStored) -> None:
-        """Append ``draft`` to the draft history."""
+        """Append ``draft`` to the draft history.
+
+        The intent and per-slot scopes are serialized to JSON for
+        storage and rehydrated by :func:`draft_from_row` on read.
+
+        Args:
+            draft: Draft row to record.
+        """
         with self.connection:
             self.connection.execute(
                 """
@@ -473,45 +766,70 @@ class Sqlite:
                     json.dumps(list(draft.unresolved)),
                     draft.cedar,
                     draft.created_at.isoformat(),
-                    draft.intent_json,
-                    draft.principal_scope_json,
-                    draft.action_scope_json,
-                    draft.resource_scope_json,
+                    serialize_intent(draft.intent),
+                    serialize_scope(draft.principal),
+                    serialize_scope(draft.action),
+                    serialize_scope(draft.resource),
                 ),
             )
 
-    def update_draft_json(
-        self, draft_id: str, json_columns: Mapping[str, str | None]
+    def update_draft_scopes(
+        self,
+        draft_id: str,
+        *,
+        intent: Intent | None = None,
+        principal: Principal | None = None,
+        action: Action | None = None,
+        resource: Resource | None = None,
     ) -> None:
-        """Update one or more of ``intent_json`` and the three scope JSON columns.
+        """Update one or more typed-scope columns on a stored draft.
 
-        Used by the 0.6.0 migration to populate legacy rows in place
-        rather than inserting duplicates. The ``json_columns`` keys
-        must be one of ``intent_json``, ``principal_scope_json``,
-        ``action_scope_json``, ``resource_scope_json``; anything else
-        raises :class:`Store` so user input cannot reach the
-        SQL layer.
+        Mirrors :meth:`Memory.update_draft_scopes`. Each typed-object
+        keyword is optional; passing ``None`` (the default) leaves the
+        corresponding ``*_json`` column untouched. Used by the 0.6.0
+        migration to populate legacy rows in place.
+
+        Args:
+            draft_id: Identifier of the draft to update.
+            intent: Replacement :class:`Intent`, or ``None`` to leave
+                the existing value in place.
+            principal: Replacement :class:`Principal`, or ``None`` to
+                leave the existing value in place.
+            action: Replacement :class:`Action`, or ``None`` to leave
+                the existing value in place.
+            resource: Replacement :class:`Resource`, or ``None`` to
+                leave the existing value in place.
         """
-        allowed = {
-            "intent_json",
-            "principal_scope_json",
-            "action_scope_json",
-            "resource_scope_json",
-        }
-        unknown = set(json_columns) - allowed
-        if unknown:
-            raise Store(f"unknown draft json columns: {sorted(unknown)}")
-        if not json_columns:
+        assignments: list[str] = []
+        values: list[str | None] = []
+        if intent is not None:
+            assignments.append("intent_json = ?")
+            values.append(serialize_intent(intent))
+        if principal is not None:
+            assignments.append("principal_scope_json = ?")
+            values.append(serialize_scope(principal))
+        if action is not None:
+            assignments.append("action_scope_json = ?")
+            values.append(serialize_scope(action))
+        if resource is not None:
+            assignments.append("resource_scope_json = ?")
+            values.append(serialize_scope(resource))
+        if not assignments:
             return
-        assignments = ", ".join(f"{col} = ?" for col in json_columns)
-        values = list(json_columns.values()) + [draft_id]
         with self.connection:
             self.connection.execute(
-                f"UPDATE drafts SET {assignments} WHERE id = ?", values
+                f"UPDATE drafts SET {', '.join(assignments)} WHERE id = ?",
+                [*values, draft_id],
             )
 
     def latest_draft(self, policy_id: str) -> DraftStored:
         """Return the most recent draft for ``policy_id``.
+
+        Args:
+            policy_id: Identifier of the policy to query.
+
+        Returns:
+            The most recent :class:`DraftStored` for ``policy_id``.
 
         Raises:
             Store: If no drafts exist for ``policy_id``.
@@ -525,7 +843,15 @@ class Sqlite:
         return draft_from_row(dict(row))
 
     def list_drafts(self, policy_id: str | None = None) -> Sequence[DraftStored]:
-        """Return all drafts, optionally filtered by ``policy_id``."""
+        """Return all drafts, optionally filtered by ``policy_id``.
+
+        Args:
+            policy_id: When provided, only drafts whose ``policy_id``
+                matches are returned.
+
+        Returns:
+            A sequence of :class:`DraftStored` in insertion order.
+        """
         if policy_id is None:
             rows = self.connection.execute(
                 "SELECT * FROM drafts ORDER BY created_at"
@@ -538,8 +864,17 @@ class Sqlite:
         return [draft_from_row(dict(row)) for row in rows]
 
     def record_report(self, report: ReportStored) -> None:
-        """Append ``report`` to the report history, stamping ``created_at`` when missing."""
-        created_at = report.created_at or datetime.now(UTC)
+        """Append ``report`` to the report history.
+
+        The typed :class:`Payload` is serialized to JSON for storage
+        and rehydrated by :func:`report_from_row` on read. ``passed``
+        is persisted as ``0``/``1`` to match the column type.
+
+        Args:
+            report: Report row to record. ``created_at`` is required;
+                callers should stamp it explicitly when constructing
+                the row.
+        """
         with self.connection:
             self.connection.execute(
                 """
@@ -550,13 +885,20 @@ class Sqlite:
                     report.policy_id,
                     report.kind,
                     1 if report.passed else 0,
-                    json.dumps(report.payload),
-                    created_at.isoformat(),
+                    serialize_payload(report.payload),
+                    report.created_at.isoformat(),
                 ),
             )
 
     def latest_report(self, policy_id: str, kind: str) -> ReportStored:
         """Return the most recent report for ``policy_id`` of ``kind``.
+
+        Args:
+            policy_id: Identifier of the policy to query.
+            kind: Report kind (``"validation"`` or ``"test"``).
+
+        Returns:
+            The most recent matching :class:`ReportStored`.
 
         Raises:
             Store: If no matching report exists.
@@ -571,7 +913,11 @@ class Sqlite:
         return report_from_row(dict(row))
 
     def record_deployment(self, deployment: Record) -> None:
-        """Append ``deployment`` to the deployment history."""
+        """Append ``deployment`` to the deployment history.
+
+        Args:
+            deployment: Deployment record to store.
+        """
         with self.connection:
             self.connection.execute(
                 """
@@ -598,6 +944,9 @@ class Sqlite:
         Every mutating call inside the block runs under the same
         connection transaction; if any statement raises, the
         transaction rolls back and none of the writes are persisted.
+
+        Returns:
+            A context manager.
         """
         import contextlib
 
@@ -611,7 +960,15 @@ class Sqlite:
     def list_deployments(
         self, domain: str | None = None
     ) -> Sequence[Record]:
-        """Return all deployments, optionally filtered by ``domain``."""
+        """Return all deployments, optionally filtered by ``domain``.
+
+        Args:
+            domain: When provided, only deployments whose ``domain``
+                matches are returned.
+
+        Returns:
+            A sequence of :class:`Record` in insertion order.
+        """
         if domain is None:
             rows = self.connection.execute(
                 "SELECT * FROM deployments ORDER BY created_at"
@@ -624,129 +981,17 @@ class Sqlite:
         return [deployment_from_row(dict(row)) for row in rows]
 
 
-def serialize_intent(intent: Intent | None) -> str | None:
-    """Serialize a :class:`Intent` to a JSON string for SQLite storage.
-
-    This is a thin wrapper around :func:`cedrus.scope.intent_to_dict`.
-    The canonical wire format lives there so storage and verification
-    layers can never disagree.
-
-    Args:
-        intent: The intent to serialize, or ``None``.
-
-    Returns:
-        The JSON string, or ``None`` if ``intent`` is ``None``.
-    """
-    from ..compile import intent_to_dict
-
-    if intent is None:
-        return None
-    return json.dumps(intent_to_dict(intent), sort_keys=True)
-
-
-def deserialize_intent(payload: str | None) -> Intent | None:
-    """Deserialize a :class:`Intent` from its JSON representation.
-
-    This is a thin wrapper around :func:`cedrus.scope.intent_from_dict`.
-    Both the canonical ``when_clauses``/``unless_clauses`` shape and
-    the legacy ``when``/``unless`` shape are accepted on read.
-
-    Args:
-        payload: JSON string previously produced by
-            :func:`serialize_intent`, or ``None``.
-
-    Returns:
-        The reconstructed :class:`Intent`, or ``None`` if
-        ``payload`` is empty.
-    """
-    from ..compile import intent_from_dict
-
-    if not payload:
-        return None
-    return intent_from_dict(json.loads(payload))
-
-
-def deserialize_action_scope(payload: str | None) -> Action | None:
-    """Deserialize an :class:`Action` from its JSON representation."""
-    if not payload:
-        return None
-    data = json.loads(payload)
-    return Action(
-        kind=data.get("kind", "any"),
-        name=data.get("name"),
-        group=data.get("group"),
-        namespace=data.get("namespace"),
-    )
-
-
-def requirement_from_row(row: dict[str, Any]) -> Need:
-    """Build a :class:`Need` from a SQLite requirements row."""
-    from pathlib import Path
-
-    return Need(
-        id=row["id"],
-        text=row["text"],
-        domain=row["domain"],
-        source_path=Path(row["source_path"]),
-        created_at=datetime.fromisoformat(row["created_at"]),
-    )
-
-
-def policy_from_row(row: dict[str, Any]) -> Stored:
-    """Build a :class:`Stored` from a SQLite policies row."""
-    return Stored(
-        id=row["id"],
-        domain=row["domain"],
-        requirement_id=row["requirement_id"],
-        intent=deserialize_intent(row["intent_json"]),
-        cedar=row["cedar"],
-        status=row["status"],
-        created_at=datetime.fromisoformat(row["created_at"]),
-        updated_at=datetime.fromisoformat(row["updated_at"]),
-        action_scope_json=row["action_scope_json"],
-    )
-
-
-def draft_from_row(row: dict[str, Any]) -> DraftStored:
-    """Build a :class:`DraftStored` from a SQLite drafts row."""
-    return DraftStored(
-        id=row["id"],
-        policy_id=row["policy_id"],
-        model=row["model"],
-        request_id=row["request_id"],
-        unresolved=tuple(json.loads(row["unresolved_json"])),
-        cedar=row["cedar"],
-        created_at=datetime.fromisoformat(row["created_at"]),
-        intent_json=row["intent_json"],
-        principal_scope_json=row["principal_scope_json"],
-        action_scope_json=row["action_scope_json"],
-        resource_scope_json=row["resource_scope_json"],
-    )
-
-
-def report_from_row(row: dict[str, Any]) -> ReportStored:
-    """Build a :class:`ReportStored` from a SQLite reports row."""
-    return ReportStored(
-        policy_id=row["policy_id"],
-        kind=row["kind"],
-        passed=bool(row["passed"]),
-        payload=json.loads(row["payload_json"]),
-        created_at=datetime.fromisoformat(row["created_at"]),
-    )
-
-
-def deployment_from_row(row: dict[str, Any]) -> Record:
-    """Build a :class:`Record` from a SQLite deployments row."""
-    return Record(
-        id=row["id"],
-        domain=row["domain"],
-        target=row["target"],
-        target_kind=row["target_kind"],
-        bundle_hash=row["bundle_hash"],
-        status=row["status"],
-        response=dict(json.loads(row["response_json"])),
-        created_at=datetime.fromisoformat(row["created_at"]),
-    )
-
-
-__all__ = ["Sqlite"]
+__all__ = [
+    "Sqlite",
+    "deployment_from_row",
+    "deserialize_intent",
+    "deserialize_payload",
+    "deserialize_scope",
+    "draft_from_row",
+    "policy_from_row",
+    "report_from_row",
+    "requirement_from_row",
+    "serialize_intent",
+    "serialize_payload",
+    "serialize_scope",
+]
