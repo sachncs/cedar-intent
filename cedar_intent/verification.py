@@ -651,18 +651,12 @@ def _parse_with_ast(cedar: str) -> CedarScopeExtraction:
     signatures and a canonicalized condition signature.
 
     Raises:
-        VerificationParseError: When cedarpy cannot parse ``cedar``.
+        VerificationParseError: When cedarpy cannot parse ``cedar`` or
+            when the input is empty.
     """
     text = cedar.strip()
     if not text:
-        return CedarScopeExtraction(
-            principal=("any",),
-            action=("any",),
-            resource=("any",),
-            conditions=(),
-            effect="permit",
-            cedar=cedar,
-        )
+        raise VerificationParseError("empty Cedar policy text")
     try:
         json_text = cedarpy.policies_to_json_str(text + "\n")
     except (ValueError, RuntimeError) as error:
