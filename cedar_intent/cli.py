@@ -77,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_export_parser(sub)
     add_check_parser(sub)
     add_verify_parser(sub)
+    add_migrate_parser(sub)
     add_deploy_parser(sub)
     return parser
 
@@ -203,8 +204,30 @@ def add_verify_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
     )
 
 
+def add_migrate_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Register the ``migrate`` subcommand.
+
+    ``cedar-intent migrate`` upgrades workspaces created before 0.6.0
+    so they carry the per-slot scope JSON columns and the typed intent
+    metadata. The default invocation reports the legacy row count;
+    ``--apply`` performs the migration; ``--check`` exits non-zero when
+    legacy rows are present (suitable for CI).
+    """
+    parser = sub.add_parser(
+        "migrate", help="Upgrade a pre-0.6.0 workspace to the current schema."
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--apply", action="store_true", help="Perform the migration in place."
+    )
+    group.add_argument(
+        "--check",
+        action="store_true",
+        help="Exit non-zero when legacy rows are present (CI mode).",
+    )
+
+
 def add_deploy_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
-    """Register the ``deploy`` subcommand tree."""
     parser = sub.add_parser(
         "deploy", help="Deploy compiled policies to a local directory or HTTP endpoint."
     )
@@ -304,7 +327,8 @@ def run_command(args: Namespace) -> tuple[Any, int]:
         return command_init(args.path), 0
     if not workspace_path.exists():
         raise ConfigError(f"workspace directory does not exist: {workspace_path}")
-    workspace = Workspace.open(workspace_path)
+    allow_legacy = args.command == "migrate"
+    workspace = Workspace.open(workspace_path, allow_legacy=allow_legacy)
     try:
         if args.command == "domain":
             return command_domain(workspace, args), 0
@@ -318,6 +342,8 @@ def run_command(args: Namespace) -> tuple[Any, int]:
             return command_check(workspace, args), 0
         if args.command == "verify":
             return command_verify(workspace, args)
+        if args.command == "migrate":
+            return command_migrate(workspace, args)
         if args.command == "deploy":
             return command_deploy(workspace, args)
     finally:
@@ -454,6 +480,34 @@ def command_verify(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
     report = workspace.verify_domain(args.domain, schema)
     exit_code = 1 if args.strict and not report.passed else 0
     return report.to_dict(), exit_code
+
+
+def command_migrate(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
+    """Run ``migrate`` subcommands.
+
+    Default: report the legacy row count (exit 0).
+    ``--apply``: perform the migration and exit 0 (or 1 on failure).
+    ``--check``: exit 1 when legacy rows are present, else exit 0.
+    """
+    from .migrations import detect_legacy_rows, migrate_legacy_rows
+
+    repository = workspace.repository
+    pending_before = detect_legacy_rows(repository)
+    if args.apply:
+        upgraded = migrate_legacy_rows(repository)
+        pending_after = detect_legacy_rows(repository)
+        return (
+            {
+                "applied": True,
+                "upgraded": upgraded,
+                "pending_before": pending_before,
+                "pending_after": pending_after,
+            },
+            0,
+        )
+    if args.check:
+        return ({"pending": pending_before}, 1 if pending_before else 0)
+    return ({"pending": pending_before}, 0)
 
 
 def command_deploy(workspace: Workspace, args: Namespace) -> tuple[Any, int]:

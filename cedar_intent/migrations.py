@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -45,15 +45,7 @@ from .scope_json import (
 from .scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
 
 if TYPE_CHECKING:
-    # Imported only for type checking; the runtime path uses structural
-    # duck typing through the ``_RepoLike`` Protocol below.
     from .storage.base import StoredDraft, StoredPolicy
-
-# ``StoredDraft`` and ``StoredPolicy`` are imported lazily below to break
-# a circular import: ``storage.sqlite`` imports ``detect_legacy_rows``,
-# which would otherwise re-enter ``storage.base`` while it is still
-# being initialized. The Protocol below is structural, so duck typing
-# works against any repository that exposes the four methods.
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,7 +57,9 @@ class _RepoLike(Protocol):
     def upsert_policy(self, policy: StoredPolicy) -> None: ...
     def list_policies(self, domain: str | None = None) -> Sequence[StoredPolicy]: ...
     def list_drafts(self, policy_id: str | None = None) -> Sequence[StoredDraft]: ...
-    def record_draft(self, draft: StoredDraft) -> None: ...
+    def update_draft_json(
+        self, draft_id: str, json_columns: Mapping[str, str | None]
+    ) -> None: ...
 
 
 def detect_legacy_rows(repository: _RepoLike) -> int:
@@ -119,8 +113,12 @@ def migrate_legacy_rows(repository: _RepoLike) -> int:
     return upgraded
 
 
-def _migrate_policy(repository: _RepoLike, policy: StoredPolicy) -> int:
+def _migrate_policy(repository: _RepoLike, policy: Any) -> int:
     """Re-derive ``action_scope_json`` for ``policy`` when missing."""
+    from .storage.base import StoredPolicy
+
+    if not isinstance(policy, StoredPolicy):
+        return 0
     if policy.action_scope_json is not None:
         return 0
     action_scope = _parse_action_scope(policy.cedar)
@@ -131,8 +129,12 @@ def _migrate_policy(repository: _RepoLike, policy: StoredPolicy) -> int:
     return 1
 
 
-def _migrate_draft(repository: _RepoLike, draft: StoredDraft) -> int:
-    """Rebuild the intent and scope JSON columns for ``draft``."""
+def _migrate_draft(repository: _RepoLike, draft: Any) -> int:
+    """Rebuild the intent and scope JSON columns for ``draft`` in place."""
+    from .storage.base import StoredDraft
+
+    if not isinstance(draft, StoredDraft):
+        return 0
     if (
         draft.intent_json is not None
         and draft.principal_scope_json is not None
@@ -143,20 +145,15 @@ def _migrate_draft(repository: _RepoLike, draft: StoredDraft) -> int:
     intent = _parse_intent_from_cedar(draft.cedar, draft.id, draft.policy_id)
     if intent is None:
         return 0
-    updated = StoredDraft(
-        id=draft.id,
-        policy_id=draft.policy_id,
-        model=draft.model,
-        request_id=draft.request_id,
-        unresolved=draft.unresolved,
-        cedar=draft.cedar,
-        created_at=draft.created_at,
-        intent_json=_dumps(intent),
-        principal_scope_json=_dumps(intent.principal),
-        action_scope_json=_dumps(intent.action),
-        resource_scope_json=_dumps(intent.resource),
+    repository.update_draft_json(
+        draft.id,
+        {
+            "intent_json": _dumps(intent),
+            "principal_scope_json": _dumps(intent.principal),
+            "action_scope_json": _dumps(intent.action),
+            "resource_scope_json": _dumps(intent.resource),
+        },
     )
-    repository.record_draft(updated)
     return 1
 
 
@@ -237,13 +234,17 @@ def _dumps(scope: Any) -> str:
 
 
 def _migrate_draft_data(
-    draft: StoredDraft,
+    draft: Any,
 ) -> tuple[str, str, str, str] | None:
     """Return the four JSON strings needed to populate the new columns.
 
     Used by tests to verify migration without touching the repository.
     Returns ``None`` when the draft is already migrated.
     """
+    from .storage.base import StoredDraft
+
+    if not isinstance(draft, StoredDraft):
+        return None
     if (
         draft.intent_json is not None
         and draft.principal_scope_json is not None

@@ -14,7 +14,7 @@ supported; tests should construct one instance per test.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -157,6 +157,48 @@ class InMemoryRepository:
     def record_draft(self, draft: StoredDraft) -> None:
         """Append ``draft`` to the draft history."""
         self.drafts.append(draft)
+
+    def update_draft_json(
+        self, draft_id: str, json_columns: Mapping[str, str | None]
+    ) -> None:
+        """Update one or more of ``intent_json`` and the three scope JSON columns.
+
+        Mirrors :meth:`SqliteRepository.update_draft_json` so the
+        migration code path works against both backends.
+        """
+        allowed = {
+            "intent_json",
+            "principal_scope_json",
+            "action_scope_json",
+            "resource_scope_json",
+        }
+        unknown = set(json_columns) - allowed
+        if unknown:
+            raise StorageError(f"unknown draft json columns: {sorted(unknown)}")
+        for index, draft in enumerate(self.drafts):
+            if draft.id == draft_id:
+                updated = StoredDraft(
+                    id=draft.id,
+                    policy_id=draft.policy_id,
+                    model=draft.model,
+                    request_id=draft.request_id,
+                    unresolved=draft.unresolved,
+                    cedar=draft.cedar,
+                    created_at=draft.created_at,
+                    intent_json=json_columns.get("intent_json", draft.intent_json),
+                    principal_scope_json=json_columns.get(
+                        "principal_scope_json", draft.principal_scope_json
+                    ),
+                    action_scope_json=json_columns.get(
+                        "action_scope_json", draft.action_scope_json
+                    ),
+                    resource_scope_json=json_columns.get(
+                        "resource_scope_json", draft.resource_scope_json
+                    ),
+                )
+                self.drafts[index] = updated
+                return
+        raise StorageError(f"no draft with id {draft_id!r}")
 
     def latest_draft(self, policy_id: str) -> StoredDraft:
         """Return the most recent draft for ``policy_id``.

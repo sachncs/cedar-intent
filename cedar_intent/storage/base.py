@@ -49,7 +49,7 @@ operators cannot accidentally work with a half-migrated store.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol, runtime_checkable
@@ -166,6 +166,7 @@ class Repository(Protocol):
     def remove_policy(self, policy_id: str) -> None: ...
 
     def record_draft(self, draft: StoredDraft) -> None: ...
+    def update_draft_json(self, draft_id: str, json_columns: Mapping[str, str | None]) -> None: ...
     def latest_draft(self, policy_id: str) -> StoredDraft: ...
     def list_drafts(self, policy_id: str | None = None) -> Sequence[StoredDraft]: ...
 

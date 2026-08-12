@@ -49,7 +49,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -171,10 +171,15 @@ class SqliteRepository:
     Attributes:
         path: Filesystem location of the SQLite database file. The
             parent directory is created on construction.
+        allow_legacy: When ``True``, skip the legacy-row refusal check
+            in :meth:`__post_init__`. Only the migration CLI should
+            set this; every other caller should leave it ``False`` so a
+            legacy workspace is rejected loudly.
         connection: Open :class:`sqlite3.Connection` to the database.
     """
 
     path: Path
+    allow_legacy: bool = False
     connection: sqlite3.Connection = field(init=False)
     lock: threading.RLock = field(init=False, repr=False)
 
@@ -193,7 +198,8 @@ class SqliteRepository:
         self.connection.execute("PRAGMA busy_timeout = 5000")
         self.connection.execute("PRAGMA synchronous = NORMAL")
         self.migrate()
-        self.refuse_legacy_rows()
+        if not self.allow_legacy:
+            self.refuse_legacy_rows()
 
     def column_exists(self, table: str, column: str) -> bool:
         """Return ``True`` when ``table.column`` exists in the schema.
@@ -466,6 +472,36 @@ class SqliteRepository:
                     draft.action_scope_json,
                     draft.resource_scope_json,
                 ),
+            )
+
+    def update_draft_json(
+        self, draft_id: str, json_columns: Mapping[str, str | None]
+    ) -> None:
+        """Update one or more of ``intent_json`` and the three scope JSON columns.
+
+        Used by the 0.6.0 migration to populate legacy rows in place
+        rather than inserting duplicates. The ``json_columns`` keys
+        must be one of ``intent_json``, ``principal_scope_json``,
+        ``action_scope_json``, ``resource_scope_json``; anything else
+        raises :class:`StorageError` so user input cannot reach the
+        SQL layer.
+        """
+        allowed = {
+            "intent_json",
+            "principal_scope_json",
+            "action_scope_json",
+            "resource_scope_json",
+        }
+        unknown = set(json_columns) - allowed
+        if unknown:
+            raise StorageError(f"unknown draft json columns: {sorted(unknown)}")
+        if not json_columns:
+            return
+        assignments = ", ".join(f"{col} = ?" for col in json_columns)
+        values = list(json_columns.values()) + [draft_id]
+        with self.connection:
+            self.connection.execute(
+                f"UPDATE drafts SET {assignments} WHERE id = ?", values
             )
 
     def latest_draft(self, policy_id: str) -> StoredDraft:
