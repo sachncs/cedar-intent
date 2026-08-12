@@ -43,16 +43,6 @@ Concurrency:
 
 Attributes:
     Sqlite: SQLite-backed :class:`Repository` implementation.
-    serialize_intent: Convert a typed :class:`Intent` to a JSON string
-        for SQLite storage.
-    deserialize_intent: Rehydrate a typed :class:`Intent` from its
-        SQLite JSON column.
-    serialize_scope: Convert a typed :class:`Scope` to a JSON string.
-    deserialize_scope: Rehydrate a typed :class:`Scope` from its
-        SQLite JSON column (typed on the caller-supplied scope class).
-    serialize_payload: Convert a typed :class:`Payload` to a JSON string.
-    deserialize_payload: Rehydrate a typed :class:`Payload` from its
-        SQLite JSON column.
     requirement_from_row: Build a :class:`Need` from a ``requirements``
         SQLite row dict.
     policy_from_row: Build a :class:`Stored` from a ``policies`` SQLite
@@ -192,112 +182,6 @@ KNOWN_TABLES = frozenset(
 
 
 # ---------------------------------------------------------------------------
-# Typed serialization helpers
-# ---------------------------------------------------------------------------
-
-
-def serialize_intent(intent: Intent | None) -> str | None:
-    """Convert a typed :class:`Intent` to a JSON string for SQLite storage.
-
-    Thin wrapper around :meth:`Intent.to_dict`. ``None`` is persisted
-    as SQL ``NULL``.
-
-    Args:
-        intent: The intent to serialize, or ``None``.
-
-    Returns:
-        The JSON string, or ``None`` if ``intent`` is ``None``.
-    """
-    if intent is None:
-        return None
-    return json.dumps(intent.to_dict(), sort_keys=True)
-
-
-def deserialize_intent(payload: str | None) -> Intent | None:
-    """Rehydrate a typed :class:`Intent` from its SQLite JSON column.
-
-    Thin wrapper around :meth:`Intent.from_dict`. Returns ``None``
-    for empty payloads (the legacy form for "no intent yet").
-
-    Args:
-        payload: JSON string previously produced by
-            :func:`serialize_intent`, or ``None``.
-
-    Returns:
-        The reconstructed :class:`Intent`, or ``None`` if
-        ``payload`` is empty.
-    """
-    if not payload:
-        return None
-    return Intent.from_dict(json.loads(payload))
-
-
-def serialize_scope(scope: Scope | None) -> str | None:
-    """Convert a typed :class:`Scope` to a JSON string for SQLite storage.
-
-    Polymorphic: dispatches on the runtime scope type via
-    :meth:`Scope.to_dict`. ``None`` is persisted as SQL ``NULL``.
-
-    Args:
-        scope: The scope to serialize, or ``None``.
-
-    Returns:
-        The JSON string, or ``None`` if ``scope`` is ``None``.
-    """
-    if scope is None:
-        return None
-    return json.dumps(scope.to_dict(), sort_keys=True)
-
-
-def deserialize_scope(
-    payload: str | None, cls: type[Scope]
-) -> Scope | None:
-    """Rehydrate a typed :class:`Scope` from its SQLite JSON column.
-
-    Polymorphic: the caller supplies the concrete scope class
-    (:class:`Principal`, :class:`Action`, or :class:`Resource`) so the
-    matching :meth:`from_dict` classmethod is used.
-
-    Args:
-        payload: JSON string previously produced by
-            :func:`serialize_scope`, or ``None``.
-        cls: Concrete scope subclass to instantiate.
-
-    Returns:
-        The reconstructed :class:`Scope`, or ``None`` if ``payload``
-        is empty.
-    """
-    if not payload:
-        return None
-    return cls.from_dict(json.loads(payload))
-
-
-def serialize_payload(payload: Payload) -> str:
-    """Convert a typed :class:`Payload` to a JSON string for SQLite storage.
-
-    Args:
-        payload: The payload to serialize.
-
-    Returns:
-        The JSON string.
-    """
-    return json.dumps(payload.to_dict(), sort_keys=True)
-
-
-def deserialize_payload(payload: str) -> Payload:
-    """Rehydrate a typed :class:`Payload` from its SQLite JSON column.
-
-    Args:
-        payload: JSON string previously produced by
-            :func:`serialize_payload`.
-
-    Returns:
-        The reconstructed :class:`Payload`.
-    """
-    return Payload.from_dict(json.loads(payload))
-
-
-# ---------------------------------------------------------------------------
 # Row adapters
 # ---------------------------------------------------------------------------
 
@@ -335,12 +219,20 @@ def policy_from_row(row: dict[str, Any]) -> Stored:
         id=row["id"],
         domain=row["domain"],
         requirement_id=row["requirement_id"],
-        intent=deserialize_intent(row["intent_json"]),
+        intent=(
+            Intent.from_dict(json.loads(row["intent_json"]))
+            if row["intent_json"]
+            else None
+        ),
         cedar=row["cedar"],
         status=row["status"],
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
-        action=deserialize_scope(row["action_scope_json"], Action),
+        action=(
+            Action.from_dict(json.loads(row["action_scope_json"]))
+            if row["action_scope_json"]
+            else None
+        ),
     )
 
 
@@ -353,6 +245,10 @@ def draft_from_row(row: dict[str, Any]) -> DraftStored:
     Returns:
         The reconstructed :class:`DraftStored`.
     """
+    intent_payload = row["intent_json"]
+    principal_payload = row["principal_scope_json"]
+    action_payload = row["action_scope_json"]
+    resource_payload = row["resource_scope_json"]
     return DraftStored(
         id=row["id"],
         policy_id=row["policy_id"],
@@ -361,17 +257,33 @@ def draft_from_row(row: dict[str, Any]) -> DraftStored:
         unresolved=tuple(json.loads(row["unresolved_json"])),
         cedar=row["cedar"],
         created_at=datetime.fromisoformat(row["created_at"]),
-        intent=deserialize_intent(row["intent_json"]) or Intent(
-            id=row["id"],
-            requirement_id=row["policy_id"] or "",
-            effect="permit",
-            principal=Principal(),
-            action=Action(),
-            resource=Resource(),
+        intent=(
+            Intent.from_dict(json.loads(intent_payload))
+            if intent_payload
+            else Intent(
+                id=row["id"],
+                requirement_id=row["policy_id"] or "",
+                effect="permit",
+                principal=Principal(),
+                action=Action(),
+                resource=Resource(),
+            )
         ),
-        principal=deserialize_scope(row["principal_scope_json"], Principal) or Principal(),
-        action=deserialize_scope(row["action_scope_json"], Action) or Action(),
-        resource=deserialize_scope(row["resource_scope_json"], Resource) or Resource(),
+        principal=(
+            Principal.from_dict(json.loads(principal_payload))
+            if principal_payload
+            else Principal()
+        ),
+        action=(
+            Action.from_dict(json.loads(action_payload))
+            if action_payload
+            else Action()
+        ),
+        resource=(
+            Resource.from_dict(json.loads(resource_payload))
+            if resource_payload
+            else Resource()
+        ),
     )
 
 
@@ -388,7 +300,7 @@ def report_from_row(row: dict[str, Any]) -> ReportStored:
         policy_id=row["policy_id"],
         kind=row["kind"],
         passed=bool(row["passed"]),
-        payload=deserialize_payload(row["payload_json"]),
+        payload=Payload.from_dict(json.loads(row["payload_json"])),
         created_at=datetime.fromisoformat(row["created_at"]),
     )
 
@@ -688,12 +600,16 @@ class Sqlite:
                     policy.id,
                     policy.domain,
                     policy.requirement_id,
-                    serialize_intent(policy.intent),
+                    json.dumps(policy.intent.to_dict(), sort_keys=True)
+                    if policy.intent is not None
+                    else None,
                     policy.cedar,
                     policy.status,
                     policy.created_at.isoformat(),
                     policy.updated_at.isoformat(),
-                    serialize_scope(policy.action),
+                    json.dumps(policy.action.to_dict(), sort_keys=True)
+                    if policy.action is not None
+                    else None,
                 ),
             )
 
@@ -778,10 +694,10 @@ class Sqlite:
                     json.dumps(list(draft.unresolved)),
                     draft.cedar,
                     draft.created_at.isoformat(),
-                    serialize_intent(draft.intent),
-                    serialize_scope(draft.principal),
-                    serialize_scope(draft.action),
-                    serialize_scope(draft.resource),
+                    json.dumps(draft.intent.to_dict(), sort_keys=True),
+                    json.dumps(draft.principal.to_dict(), sort_keys=True),
+                    json.dumps(draft.action.to_dict(), sort_keys=True),
+                    json.dumps(draft.resource.to_dict(), sort_keys=True),
                 ),
             )
 
@@ -813,19 +729,19 @@ class Sqlite:
                 leave the existing value in place.
         """
         assignments: list[str] = []
-        values: list[str | None] = []
+        values: list[str] = []
         if intent is not None:
             assignments.append("intent_json = ?")
-            values.append(serialize_intent(intent))
+            values.append(json.dumps(intent.to_dict(), sort_keys=True))
         if principal is not None:
             assignments.append("principal_scope_json = ?")
-            values.append(serialize_scope(principal))
+            values.append(json.dumps(principal.to_dict(), sort_keys=True))
         if action is not None:
             assignments.append("action_scope_json = ?")
-            values.append(serialize_scope(action))
+            values.append(json.dumps(action.to_dict(), sort_keys=True))
         if resource is not None:
             assignments.append("resource_scope_json = ?")
-            values.append(serialize_scope(resource))
+            values.append(json.dumps(resource.to_dict(), sort_keys=True))
         if not assignments:
             return
         with self.connection:
@@ -897,7 +813,7 @@ class Sqlite:
                     report.policy_id,
                     report.kind,
                     1 if report.passed else 0,
-                    serialize_payload(report.payload),
+                    json.dumps(report.payload.to_dict(), sort_keys=True),
                     report.created_at.isoformat(),
                 ),
             )
@@ -996,14 +912,8 @@ class Sqlite:
 __all__ = [
     "Sqlite",
     "deployment_from_row",
-    "deserialize_intent",
-    "deserialize_payload",
-    "deserialize_scope",
     "draft_from_row",
     "policy_from_row",
     "report_from_row",
     "requirement_from_row",
-    "serialize_intent",
-    "serialize_payload",
-    "serialize_scope",
 ]
