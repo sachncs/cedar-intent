@@ -30,13 +30,6 @@ The pipeline flows:
 
 The :class:`Space` class orchestrates every stage and is the
 recommended entry point for Python users.
-
-Schema migration
-----------------
-
-:mod:`cedrus.migrate` exposes the :class:`~cedrus.migrate.Migrator`
-helper for upgrading pre-0.7.0 workspaces. SQLite workspaces
-created before 0.7.0 refuse to open until the migration has run.
 """
 
 from .case import Case, Outcome, Suite
@@ -73,7 +66,6 @@ from .generate import (
     Proposal,
     Result,
 )
-from .migrate import Migrator
 from .need import Need
 from .policies import Compiled, Draft, Existing, Kind
 from .schema import Schema
@@ -111,7 +103,6 @@ __all__ = [
     "Llm",
     "Manifest",
     "Memory",
-    "Migrator",
     "Need",
     "Offline",
     "Outcome",

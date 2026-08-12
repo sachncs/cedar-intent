@@ -221,6 +221,73 @@ class Stored:
             DraftStored.parse(fetch_draft_data(repo, row)) for row in rows
         ]
 
+    @classmethod
+    def list(
+        cls,
+        repo: Backend,
+        *,
+        domain: str | None = None,
+    ) -> list[Stored]:
+        """All policies, optionally filtered by ``domain``.
+
+        Args:
+            repo: Storage backend to read from.
+            domain: When provided, only policies whose ``domain``
+                matches are returned.
+
+        Returns:
+            A list of :class:`Stored` in id order.
+        """
+        if domain is None:
+            rows = repo.fetch("SELECT * FROM policies ORDER BY id")
+        else:
+            rows = repo.fetch(
+                "SELECT * FROM policies WHERE domain = ? ORDER BY id",
+                (domain,),
+            )
+        result: list[Stored] = []
+        for row in rows:
+            intent_data = (
+                load_intent_data(repo, row["intent_id"])
+                if row.get("intent_id")
+                else None
+            )
+            data: dict[str, Any] = {"policies": row}
+            if intent_data is not None:
+                data.update(intent_data)
+            result.append(cls.parse(data))
+        return result
+
+    @classmethod
+    def get(cls, repo: Backend, policy_id: str) -> Stored:
+        """Load the policy with ``policy_id``.
+
+        Args:
+            repo: Storage backend to read from.
+            policy_id: Identifier of the policy to fetch.
+
+        Returns:
+            The stored :class:`Stored`.
+
+        Raises:
+            Store: If no policy exists with that id.
+        """
+        rows = repo.fetch(
+            "SELECT * FROM policies WHERE id = ?", (policy_id,),
+        )
+        if not rows:
+            raise Store(f"policy {policy_id!r} not found")
+        row = rows[0]
+        intent_data = (
+            load_intent_data(repo, row["intent_id"])
+            if row.get("intent_id")
+            else None
+        )
+        data: dict[str, Any] = {"policies": row}
+        if intent_data is not None:
+            data.update(intent_data)
+        return cls.parse(data)
+
 
 @dataclass(frozen=True, slots=True)
 class DraftStored:

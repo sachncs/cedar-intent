@@ -766,7 +766,7 @@ class Workspace:
             resource_scope_from_dict,
         )
 
-        requirement = self.repository.get_requirement(requirement_id)
+        requirement = Need.get(self.repository, requirement_id)
         placeholder = Draft.from_requirement(
             requirement,
             principal=scopes[0],

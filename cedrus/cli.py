@@ -113,7 +113,6 @@ def build_parser() -> argparse.ArgumentParser:
     add_export_parser(sub)
     add_check_parser(sub)
     add_verify_parser(sub)
-    add_migrate_parser(sub)
     add_deploy_parser(sub)
     return parser
 
@@ -237,29 +236,6 @@ def add_verify_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
     parser.add_argument("--domain", required=True, help="Domain to verify.")
     parser.add_argument(
         "--strict", action="store_true", help="Exit non-zero on any warning."
-    )
-
-
-def add_migrate_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
-    """Register the ``migrate`` subcommand.
-
-    ``cedrus migrate`` upgrades workspaces created before 0.6.0
-    so they carry the per-slot scope JSON columns and the typed intent
-    metadata. The default invocation reports the legacy row count;
-    ``--apply`` performs the migration; ``--check`` exits non-zero when
-    legacy rows are present (suitable for CI).
-    """
-    parser = sub.add_parser(
-        "migrate", help="Upgrade a pre-0.6.0 workspace to the current schema."
-    )
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
-        "--apply", action="store_true", help="Perform the migration in place."
-    )
-    group.add_argument(
-        "--check",
-        action="store_true",
-        help="Exit non-zero when legacy rows are present (CI mode).",
     )
 
 
@@ -423,8 +399,6 @@ def run_command(args: Namespace) -> tuple[Any, int]:
             return command_check(workspace, args), 0
         if args.command == "verify":
             return command_verify(workspace, args)
-        if args.command == "migrate":
-            return command_migrate(workspace, args)
         if args.command == "deploy":
             return command_deploy(workspace, args)
     finally:
@@ -576,25 +550,7 @@ def command_migrate(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
     ``--apply``: perform the migration and exit 0 (or 1 on failure).
     ``--check``: exit 1 when legacy rows are present, else exit 0.
     """
-    from .migrate import detect_legacy_rows, migrate_legacy_rows
-
-    repository = workspace.repository
-    pending_before = detect_legacy_rows(repository)
-    if args.apply:
-        upgraded = migrate_legacy_rows(repository)
-        pending_after = detect_legacy_rows(repository)
-        return (
-            {
-                "applied": True,
-                "upgraded": upgraded,
-                "pending_before": pending_before,
-                "pending_after": pending_after,
-            },
-            0,
-        )
-    if args.check:
-        return ({"pending": pending_before}, 1 if pending_before else 0)
-    return ({"pending": pending_before}, 0)
+    raise NotImplementedError("cedrus migrate is no longer supported")
 
 
 def command_deploy(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
