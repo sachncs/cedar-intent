@@ -417,16 +417,16 @@ class Bundler:
             for filename in ("bundle.cedar", "manifest.json"):
                 src = staging / filename
                 dst = directory / filename
-                self._fsync_file(src)
-                self._fsync_directory(staging)
-                self._replace(src, dst)
-            self._fsync_directory(directory)
+                self.fsync_file(src)
+                self.fsync_directory(staging)
+                self.replace(src, dst)
+            self.fsync_directory(directory)
         except OSError as error:
             raise Deploy(
                 f"failed to write deployment bundle to {directory}: {error}"
             ) from error
         finally:
-            self._rm_tmp(staging)
+            self.rm_tmp(staging)
         return directory
 
     def read_directory(self, directory: Path) -> Manifest:
@@ -485,14 +485,14 @@ class Bundler:
         )
 
     @staticmethod
-    def _fsync_file(path: Path) -> None:
+    def fsync_file(path: Path) -> None:
         """Flush ``path``'s data to durable storage."""
         with path.open("rb") as handle:
             handle.flush()
             os.fsync(handle.fileno())
 
     @staticmethod
-    def _fsync_directory(directory: Path) -> None:
+    def fsync_directory(directory: Path) -> None:
         """fsync a directory to durably record file replacements.
 
         Best-effort: some platforms do not allow opening a directory
@@ -511,12 +511,12 @@ class Bundler:
             os.close(fd)
 
     @staticmethod
-    def _replace(src: Path, dst: Path) -> None:
+    def replace(src: Path, dst: Path) -> None:
         """Atomically replace ``dst`` with ``src`` (POSIX rename)."""
         os.replace(src, dst)
 
     @staticmethod
-    def _rm_tmp(path: Path) -> None:
+    def rm_tmp(path: Path) -> None:
         """Best-effort removal of a temporary directory used for staging."""
         import shutil
 
@@ -795,7 +795,7 @@ class Transport(httpx.BaseTransport):
                         f"{self.pinned.host} failed: {error}"
                     ) from error
             request.headers["Host"] = self.pinned.host
-            return self._round_trip(request, sock, timeout)
+            return self.round_trip(request, sock, timeout)
         finally:
             try:
                 sock.close()
@@ -826,7 +826,7 @@ class Transport(httpx.BaseTransport):
             ) from error
 
     @staticmethod
-    def _round_trip(
+    def round_trip(
         request: httpx.Request, sock: socket.socket, timeout: float
     ) -> httpx.Response:
         """Send ``request`` over ``sock`` and parse the response.
@@ -870,10 +870,10 @@ class Transport(httpx.BaseTransport):
             if header_end != -1 and len(response_bytes) >= HTTP_RESPONSE_READ_LIMIT:
                 response_bytes = response_bytes[:HTTP_RESPONSE_READ_LIMIT]
                 break
-        return self._parse_response(bytes(response_bytes))
+        return self.parse_response(bytes(response_bytes))
 
     @staticmethod
-    def _parse_response(raw: bytes) -> httpx.Response:
+    def parse_response(raw: bytes) -> httpx.Response:
         """Parse a raw HTTP/1.1 response into an :class:`httpx.Response`."""
         if b"\r\n\r\n" not in raw:
             raise Deploy(
