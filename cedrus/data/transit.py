@@ -6,6 +6,11 @@ They are not persisted directly; the persistence layer stores them
 as JSON via :meth:`to_dict` and reconstructs them via :meth:`from_dict`.
 
 All classes are ``@dataclass(frozen=True, slots=True)``.
+
+Attributes:
+    Context: Input bundle for a generator call.
+    Proposal: One generator proposal for a single requirement.
+    Result: Final output of a generator call with provenance.
 """
 
 from __future__ import annotations
@@ -66,7 +71,8 @@ class Result:
         model: Model identifier (or generator's static name).
         request_id: Provider-supplied request identifier.
         usage: Token-usage metadata.
-        created_at: When the generator returned.
+        created_at: When the generator returned;
+            defaults to ``datetime.now(UTC)`` if not provided.
     """
 
     proposal: Proposal
