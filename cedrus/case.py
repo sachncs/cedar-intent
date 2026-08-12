@@ -2,9 +2,9 @@
 
 A :class:`Case` represents a single Cedar authorization request
 (principal, action, resource, context) plus the expected decision
-(``"Allow"`` or ``"Deny"``). Scenarios are executed through
-:class:`Runner`, which returns a structured :class:`Suite` with
-per-scenario outcomes.
+(``"Allow"`` or ``"Deny"``). The :func:`Run` function evaluates a
+sequence of :class:`Case` objects against compiled Cedar sources
+and returns a structured :class:`Suite` with per-scenario outcomes.
 
 Why scenarios as a separate concept
 ------------------------------------
@@ -23,9 +23,10 @@ without running the Python API directly.
 Attributes:
     Case: A single Cedar authorization scenario.
     Outcome: Result of running a single :class:`Case`.
-    Suite: Aggregate result of a :class:`Runner.run` call.
-    Runner: Scenario runner. Subclass for alternate scenario backends.
+    Suite: Aggregate result of a :func:`Run` call.
     Decision: Literal type for the expected / actual decisions.
+    Run: Evaluate a list of :class:`Case` against Cedar sources and
+        return a :class:`Suite` (the :attr:`Run.result` attribute).
 
 See Also:
     :mod:`cedrus.verify`: Static verification (shadowing / redundancy
@@ -44,67 +45,6 @@ from cedrus.error import Validate
 from cedrus.schema import Schema
 
 Decision = Literal["Allow", "Deny"]
-
-
-def decision_from_str(value: str) -> Decision:
-    """Map a Cedar engine decision string to the :data:`Decision` literal.
-
-    Centralizes the ``"Allow"`` / ``"Deny"`` mapping so the runner
-    doesn't have to know the engine's exact casing / naming.
-
-    Args:
-        value: Decision string from the engine (typically
-            ``auth_result.decision.name``).
-
-    Returns:
-        The corresponding :data:`Decision` literal.
-
-    Raises:
-        Validate: If ``value`` is not a recognized decision.
-    """
-    if value == "Allow":
-        return "Allow"
-    if value == "Deny":
-        return "Deny"
-    raise Validate(f"unknown Cedar decision: {value!r}")
-
-
-def case_from_mapping(item: Mapping[str, Any], index: int) -> Case:
-    """Build a single :class:`Case` from one JSON-style mapping.
-
-    Shared entry point used by :meth:`Case.load` (and any future
-    single-mapping loader) so the field validation lives in one
-    place.
-
-    Args:
-        item: Mapping carrying ``principal``, ``action``,
-            ``resource``, ``context``, ``expected`` and optional
-            ``name``.
-        index: Position of the mapping in its parent sequence; used
-            to build a default name when ``name`` is missing.
-
-    Returns:
-        The constructed :class:`Case`.
-
-    Raises:
-        ValueError: If the mapping is missing a required field or
-            carries an invalid ``expected`` value.
-    """
-    if not isinstance(item, Mapping):
-        raise ValueError(f"scenario entry {index} is not an object")
-    expected = str(item["expected"])
-    if expected not in {"Allow", "Deny"}:
-        raise ValueError(
-            f"scenario {index} expected must be Allow or Deny, got {expected!r}"
-        )
-    return Case(
-        name=str(item.get("name") or f"scenario-{index}"),
-        principal=str(item["principal"]),
-        action=str(item["action"]),
-        resource=str(item["resource"]),
-        context=dict(item.get("context") or {}),
-        expected=expected,  # type: ignore[arg-type]
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,8 +80,8 @@ class Case:
         Polymorphic on the source shape: accepts either a single
         mapping (one scenario) or a sequence of mappings (a list of
         scenarios). The single-mapping form is sugar for
-        ``[cls.load(seq)]`` and is convenient for one-off CLI / API
-        calls.
+        ``[cls.load([source])]`` and is convenient for one-off
+        CLI / API calls.
 
         Args:
             source: Either a single dict or a sequence of dicts with
@@ -156,8 +96,29 @@ class Case:
                 carries an invalid ``expected`` value.
         """
         if isinstance(source, Mapping):
-            return [case_from_mapping(source, 0)]
-        return [case_from_mapping(item, index) for index, item in enumerate(source)]
+            items: Sequence[Mapping[str, Any]] = [source]
+        else:
+            items = source
+        cases: list[Case] = []
+        for index, item in enumerate(items):
+            if not isinstance(item, Mapping):
+                raise ValueError(f"scenario entry {index} is not an object")
+            expected = str(item["expected"])
+            if expected not in {"Allow", "Deny"}:
+                raise ValueError(
+                    f"scenario {index} expected must be Allow or Deny, got {expected!r}"
+                )
+            cases.append(
+                cls(
+                    name=str(item.get("name") or f"scenario-{index}"),
+                    principal=str(item["principal"]),
+                    action=str(item["action"]),
+                    resource=str(item["resource"]),
+                    context=dict(item.get("context") or {}),
+                    expected=expected,  # type: ignore[arg-type]
+                )
+            )
+        return cases
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,42 +177,67 @@ class Suite:
         }
 
 
-class Runner:
-    """Scenario runner. Subclass for alternate scenario backends.
+@dataclass(frozen=True, slots=True)
+class Run:
+    """Evaluate a sequence of :class:`Case` objects against a schema and policies.
 
-    The default implementation evaluates every :class:`Case` against
-    the supplied Cedar sources via :func:`cedarpy.is_authorized`.
-    Subclasses can override :meth:`run` (or just :meth:`evaluate_one`
-    in :attr:`runner_engine`) to plug in a different engine while
-    keeping the public :class:`Outcome` / :class:`Suite` contract.
+    Subclass for alternate engines: override :meth:`evaluate_one`
+    to plug in a different backend (e.g. an in-process mock for
+    hermetic unit tests) while keeping the public :class:`Outcome` /
+    :class:`Suite` contract.
 
     Attributes:
-        schema: The Cedar schema to use for evaluation.
+        cases: The scenarios to evaluate.
+        result: Per-scenario outcomes aggregated into a :class:`Suite`
+            (populated by :meth:`evaluate`; ``None`` until then).
     """
 
-    def __init__(self, schema: Schema) -> None:
-        self.schema = schema
+    cases: Sequence[Case]
+    result: Suite | None = None
 
-    def run(
+    def evaluate(
         self,
+        schema: Schema,
         policies: Sequence[str],
-        cases: Sequence[Case],
     ) -> Suite:
-        """Execute every scenario against the supplied Cedar sources.
+        """Run every :attr:`cases` against ``policies`` and ``schema``.
 
         Args:
+            schema: The Cedar schema to use for evaluation.
             policies: Cedar source for every compiled policy under
                 test.
-            cases: Scenarios to execute.
 
         Returns:
-            A :class:`Suite` containing the outcome of each scenario.
+            The populated :class:`Suite`. Also stored on
+                ``self.result`` so callers can inspect the run after
+                the call returns.
         """
         policy_set = PolicySet.from_str("\n\n".join(policies))
-        results: list[Outcome] = []
-        for scenario in cases:
-            actual, diagnostics = self.evaluate_one(scenario, policy_set)
-            results.append(
+        outcomes: list[Outcome] = []
+        for scenario in self.cases:
+            request: dict[str, Any] = {
+                "principal": scenario.principal,
+                "action": scenario.action,
+                "resource": scenario.resource,
+                "context": scenario.context,
+            }
+            auth_result = is_authorized(
+                request, policy_set, [], schema=schema.handle
+            )
+            actual_str = auth_result.decision.name
+            if actual_str == "Allow":
+                actual: Decision = "Allow"
+            elif actual_str == "Deny":
+                actual = "Deny"
+            else:
+                raise Validate(f"unknown Cedar decision: {actual_str!r}")
+            diagnostics: dict[str, Any] = {}
+            reasons = getattr(
+                getattr(auth_result, "diagnostics", None), "reasons", None
+            )
+            if reasons is not None:
+                diagnostics["reasons"] = list(reasons)
+            outcomes.append(
                 Outcome(
                     scenario=scenario,
                     actual=actual,
@@ -259,32 +245,32 @@ class Runner:
                     diagnostics=diagnostics,
                 )
             )
-        return Suite(
-            passed=all(result.passed for result in results),
-            results=tuple(results),
+        suite = Suite(
+            passed=all(result.passed for result in outcomes),
+            results=tuple(outcomes),
         )
+        self.__dict__["result"] = suite  # bypass frozen __setattr__
+        return suite
 
     def evaluate_one(
         self,
+        schema: Schema,
         scenario: Case,
         policy_set: Any,
-    ) -> tuple[Decision, dict[str, Any]]:
+    ) -> Outcome:
         """Evaluate a single :class:`Case` against ``policy_set``.
 
         The default implementation calls :func:`cedarpy.is_authorized`.
-        Subclasses override this to plug in a different evaluation
-        engine (e.g. an in-process mock for hermetic unit tests).
+        Subclasses override this to plug in a different engine.
 
         Args:
+            schema: The Cedar schema to use.
             scenario: The scenario to evaluate.
             policy_set: An already-built :class:`cedarpy.PolicySet`
                 (or any backend-specific equivalent).
 
         Returns:
-            A ``(actual, diagnostics)`` tuple. ``actual`` is the
-            engine's decision as a :data:`Decision` literal;
-            ``diagnostics`` is a free-form dict (e.g. ``{"reasons":
-            [...]}``).
+            The :class:`Outcome` for ``scenario``.
         """
         request: dict[str, Any] = {
             "principal": scenario.principal,
@@ -293,16 +279,27 @@ class Runner:
             "context": scenario.context,
         }
         auth_result = is_authorized(
-            request, policy_set, [], schema=self.schema.handle
+            request, policy_set, [], schema=schema.handle
         )
-        actual = decision_from_str(auth_result.decision.name)
+        actual_str = auth_result.decision.name
+        if actual_str == "Allow":
+            actual: Decision = "Allow"
+        elif actual_str == "Deny":
+            actual = "Deny"
+        else:
+            raise Validate(f"unknown Cedar decision: {actual_str!r}")
         diagnostics: dict[str, Any] = {}
         reasons = getattr(
             getattr(auth_result, "diagnostics", None), "reasons", None
         )
         if reasons is not None:
             diagnostics["reasons"] = list(reasons)
-        return actual, diagnostics
+        return Outcome(
+            scenario=scenario,
+            actual=actual,
+            passed=actual == scenario.expected,
+            diagnostics=diagnostics,
+        )
 
 
-__all__ = ["Case", "Decision", "Outcome", "Runner", "Suite"]
+__all__ = ["Case", "Decision", "Outcome", "Run", "Suite"]
