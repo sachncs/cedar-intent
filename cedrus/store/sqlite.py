@@ -23,10 +23,10 @@ Schema:
     re-hydrated to the typed objects on read. The serialization goes
     through :meth:`Intent.to_dict`, ``Scope.to_dict`` and
     :meth:`Payload.to_dict` so the wire format lives in one place.
-    Older databases are upgraded in place by :meth:`Backend.migrate`
-    followed by a strict-refusal check in
-    :meth:`Backend.__post_init__` that raises :class:`Store` when any
-    legacy row remains.
+    Older databases are upgraded in place by :meth:`Backend.migrate`,
+    which adds the missing ``*_json`` columns; pre-migration rows are
+    still readable through the typed dataclasses' permissive
+    fallbacks.
 
 Concurrency:
     :class:`Backend` enables ``journal_mode=WAL`` and
@@ -49,7 +49,9 @@ See Also:
     :mod:`cedrus.store.base`: :class:`Repository` Protocol this module
         implements.
     :mod:`cedrus.store.memory`: In-memory repository implementation.
-    :mod:`cedrus.migrate`: Migration helpers for pre-0.6.0 databases.
+    :mod:`cedrus.migrate`: Migration helpers for upgrading pre-0.6.0
+        row data (the schema migration in :meth:`Backend.migrate`
+        adds the missing JSON columns but doesn't repopulate them).
 """
 
 from __future__ import annotations
@@ -185,16 +187,11 @@ class Backend:
     Attributes:
         path: Filesystem location of the SQLite database file. The
             parent directory is created on construction.
-        allow_legacy: When ``True``, skip the legacy-row refusal
-            check in :meth:`__post_init__`. Only the migration CLI
-            should set this; every other caller should leave it
-            ``False`` so a legacy workspace is rejected loudly.
         connection: Open :class:`sqlite3.Connection` to the database.
         lock: Re-entrant lock guarding every mutating call.
     """
 
     path: Path
-    allow_legacy: bool = False
     connection: sqlite3.Connection = field(init=False)
     lock: threading.RLock = field(init=False, repr=False)
 
@@ -213,8 +210,6 @@ class Backend:
         self.connection.execute("PRAGMA busy_timeout = 5000")
         self.connection.execute("PRAGMA synchronous = NORMAL")
         self.migrate()
-        if not self.allow_legacy:
-            self.refuse_legacy_rows()
 
     def column_exists(self, table: str, column: str) -> bool:
         """Return ``True`` when ``table.column`` exists in the schema.
@@ -284,46 +279,6 @@ class Backend:
         if row is None:
             return 0
         return int(row["schema_version"])
-
-    def refuse_legacy_rows(self) -> None:
-        """Refuse to operate on a workspace that still has legacy rows.
-
-        Hard-refuses per the 0.6.0 migration policy: any row whose new
-        ``*_json`` columns are ``NULL`` is treated as a hard error
-        because the verification and deployment paths rely on those
-        columns being populated. The CLI exposes ``cedrus migrate`` to
-        upgrade legacy rows in place.
-
-        Detection is inlined against the SQL columns so it stays
-        authoritative even after the typed-object dataclass refactor
-        (where the typed fields always deserialize via fallbacks).
-
-        Raises:
-            Store: When one or more legacy rows remain.
-        """
-        if self.schema_version() < SCHEMA_VERSION:
-            raise Store(
-                f"workspace at {self.path} has not been migrated to schema "
-                f"version {SCHEMA_VERSION}; run 'cedrus migrate --apply'"
-            )
-        # Schema is at current version; count rows that still have
-        # NULL in any of the 0.6.0 columns.
-        legacy_policies = self.connection.execute(
-            "SELECT COUNT(*) FROM policies WHERE action_scope_json IS NULL"
-        ).fetchone()[0]
-        legacy_drafts = self.connection.execute(
-            "SELECT COUNT(*) FROM drafts "
-            "WHERE intent_json IS NULL "
-            "OR principal_scope_json IS NULL "
-            "OR action_scope_json IS NULL "
-            "OR resource_scope_json IS NULL"
-        ).fetchone()[0]
-        pending = int(legacy_policies) + int(legacy_drafts)
-        if pending:
-            raise Store(
-                f"workspace at {self.path} contains {pending} legacy rows; "
-                "run 'cedrus migrate --apply' to upgrade to the 0.6.0 schema"
-            )
 
     def close(self) -> None:
         """Close the underlying database connection.

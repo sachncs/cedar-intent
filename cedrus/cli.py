@@ -409,8 +409,7 @@ def run_command(args: Namespace) -> tuple[Any, int]:
         return command_init(args.path), 0
     if not workspace_path.exists():
         raise Config(f"workspace directory does not exist: {workspace_path}")
-    allow_legacy = args.command == "migrate"
-    workspace = Workspace.open(workspace_path, allow_legacy=allow_legacy)
+    workspace = Workspace.open(workspace_path)
     try:
         if args.command == "domain":
             return command_domain(workspace, args), 0

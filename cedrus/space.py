@@ -95,31 +95,23 @@ class Workspace:
     storage_path: Path
 
     @classmethod
-    def open(cls, path: Path, *, allow_legacy: bool = False) -> Workspace:
+    def open(cls, path: Path) -> Workspace:
         """Open an existing workspace at ``path``.
 
         Args:
             path: Filesystem path of the workspace root.
-            allow_legacy: When ``True``, open the workspace even when it
-                still carries pre-0.6.0 legacy rows. Only the
-                ``cedrus migrate`` command should use this flag;
-                every other caller should leave it ``False`` so a
-                legacy workspace is rejected loudly rather than
-                silently operated on with broken schema assumptions.
 
         Returns:
             A :class:`Workspace` backed by a SQLite repository.
 
         Raises:
             Space: If the path does not exist.
-            Store: If the workspace is legacy and
-                ``allow_legacy`` is ``False``.
         """
         root = Path(path).resolve()
         if not root.exists() or not root.is_dir():
             raise Space(f"workspace root not found: {root}")
         storage_path = root / ".cedrus" / DEFAULT_STORAGE_FILENAME
-        repository = Backend(storage_path, allow_legacy=allow_legacy)
+        repository = Backend(storage_path)
         return cls(root=root, repository=repository, storage_path=storage_path)
 
     @classmethod
