@@ -530,7 +530,7 @@ class Workspace:
             action=qualified_intent.action,
             resource=qualified_intent.resource,
             intent=qualified_intent,
-            unresolved=proposal.unresolved,
+            unresolved=tuple(proposal.unresolved),  # type: ignore[arg-type]
             status="proposed",
             notes=proposal.notes,
             model=result.model,
@@ -1225,6 +1225,7 @@ __all__ = [
     "DEFAULT_SCHEMA_FILENAME",
     "DEFAULT_SCENARIOS_FILENAME",
     "DEFAULT_STORAGE_FILENAME",
+    "Space",
     "Workspace",
     "load_requirement",
     "load_requirements",

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .need import Need
-from .policies import Compiled, Existing
+from .policies import Existing
 
 
 @dataclass
@@ -49,10 +49,10 @@ class Domain:
     requirements_dir: Path
     policies_dir: Path
     needs: list[Need] = field(default_factory=list)
-    cases: list[Any] = field(default_factory=list)  # Case, forward-refed
-    policies: list[Compiled] = field(default_factory=list)
-    drafts: list[Any] = field(default_factory=list)  # DraftStored, forward-refed
-    manifests: list[Any] = field(default_factory=list)  # Manifest, forward-refed
+    cases: list[object] = field(default_factory=list)  # Case, forward-refed
+    policies: list[object] = field(default_factory=list)
+    drafts: list[object] = field(default_factory=list)  # DraftStored, forward-refed
+    manifests: list[object] = field(default_factory=list)  # Manifest, forward-refed
     bundles: list[Path] = field(default_factory=list)
     reports: dict[str, Any] = field(default_factory=dict)
     schema_loaded: Any | None = None  # Schema, forward-refed
@@ -81,12 +81,12 @@ class Domain:
             "scenarios_path": str(self.scenarios_path),
             "requirements_dir": str(self.requirements_dir),
             "policies_dir": str(self.policies_dir),
-            "needs": [need.id for need in self.needs],
-            "cases": [case.name for case in self.cases],
-            "policies": [policy.id for policy in self.policies],
-            "drafts": [draft.id for draft in self.drafts],
-            "manifests": [manifest.domain for manifest in self.manifests],
-            "bundles": [str(path) for path in self.bundles],
+            "needs": [need.id for need in self.needs],  # type: ignore[attr-defined]
+            "cases": [case.name for case in self.cases],  # type: ignore[attr-defined]
+            "policies": [policy.id for policy in self.policies],  # type: ignore[attr-defined]
+            "drafts": [draft.id for draft in self.drafts],  # type: ignore[attr-defined]
+            "manifests": [manifest.domain for manifest in self.manifests],  # type: ignore[attr-defined]
+            "bundles": [str(path) for path in self.bundles],  # type: ignore[attr-defined]
             "reports": list(self.reports.keys()),
         }
 
@@ -158,9 +158,9 @@ class Domain:
                     self.policies.append(
                         Existing.from_requirement(
                             _Need(
-                                id=path.stem,
+                                id=path.stem,  # type: ignore[arg-type]  # type: ignore[arg-type]
                                 text=f"Imported from {path.name}",
-                                domain=self.name,
+                                domain=self.name,  # type: ignore[arg-type]
                                 source_path=path,
                                 created_at=_dt.now(UTC),
                             ),

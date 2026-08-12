@@ -178,7 +178,7 @@ def test_litellm_generator_extracts_proposal(schema: Schema) -> None:
     assert isinstance(result, Result)
     assert result.proposal.intent.effect == "permit"
     assert result.proposal.intent.action.name == "viewPhoto"
-    assert result.usage["total_tokens"] == 15
+    assert result.usage.total == 15
 
 
 def test_litellm_generator_rejects_invalid_json(schema: Schema) -> None:
@@ -274,7 +274,7 @@ def test_litellm_generator_handles_fallbacks(schema: Schema) -> None:
         result = generator.generate(make_context(schema))
         assert completion.call_args.kwargs["fallbacks"] == ["backup"]
         assert bool(result.proposal.unresolved)
-    assert result.proposal.unresolved == ("x",)
+    assert result.proposal.unresolved.items == ("x",)
 
 
 def test_litellm_generator_handles_missing_choices(schema: Schema) -> None:
@@ -315,7 +315,7 @@ def test_litellm_generator_extracts_pydantic_usage(schema: Schema) -> None:
     with patch("cedrus.generate.litellm.litellm.completion") as completion:
         completion.return_value = response
         result = generator.generate(make_context(schema))
-    assert result.usage == {"total_tokens": 42, "prompt_tokens": 7}
+    assert result.usage.to_dict() == {"prompt": 7, "completion": 0, "total": 42}
 
 
 def test_litellm_generator_ignores_non_text_content(schema: Schema) -> None:

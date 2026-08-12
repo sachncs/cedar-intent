@@ -266,7 +266,11 @@ def intent_to_dict(intent: Intent | None) -> dict[str, object] | None:
         "resource": resource_scope_to_dict(intent.resource),
         "when_clauses": condition_clauses_to_list(intent.when_clauses),
         "unless_clauses": condition_clauses_to_list(intent.unless_clauses),
-        "notes": dict(intent.notes),
+            "notes": (
+                intent.notes.to_dict()
+                if hasattr(intent.notes, "to_dict")
+                else dict(intent.notes)
+            ),
     }
 
 
@@ -288,21 +292,46 @@ def intent_from_dict(data: Mapping[str, object] | None) -> Intent | None:
     """
     if data is None:
         return None
+    principal_data = data.get("principal")
+    action_data = data.get("action")
+    resource_data = data.get("resource")
     when_raw = data.get("when_clauses", data.get("when"))
     unless_raw = data.get("unless_clauses", data.get("unless"))
-    principal = principal_scope_from_dict(data.get("principal")) or Principal()
-    action = action_scope_from_dict(data.get("action")) or Action()
-    resource = resource_scope_from_dict(data.get("resource")) or Resource()
-    when_clauses = condition_clauses_from_list(when_raw)
-    unless_clauses = condition_clauses_from_list(unless_raw)
+    principal = (
+        principal_scope_from_dict(principal_data)
+        if isinstance(principal_data, dict)
+        else Principal()
+    )
+    action = (
+        action_scope_from_dict(action_data)
+        if isinstance(action_data, dict)
+        else Action()
+    )
+    resource = (
+        resource_scope_from_dict(resource_data)
+        if isinstance(resource_data, dict)
+        else Resource()
+    )
+    when_clauses = (
+        condition_clauses_from_list(when_raw)
+        if isinstance(when_raw, list)
+        else ()
+    )
+    unless_clauses = (
+        condition_clauses_from_list(unless_raw)
+        if isinstance(unless_raw, list)
+        else ()
+    )
+    notes_value = data.get("notes", {}) or {}
+    notes = notes_value if isinstance(notes_value, dict) else {}
     return Intent(
         id=str(data.get("id", "")),
         requirement_id=str(data.get("requirement_id", "")),
-        effect=data.get("effect", "permit"),
-        principal=principal,
-        action=action,
-        resource=resource,
+        effect=data.get("effect", "permit"),  # type: ignore[arg-type]
+        principal=principal or Principal(),
+        action=action or Action(),
+        resource=resource or Resource(),
         when_clauses=when_clauses,
         unless_clauses=unless_clauses,
-        notes=dict(data.get("notes", {}) or {}),
+        notes=notes,
     )

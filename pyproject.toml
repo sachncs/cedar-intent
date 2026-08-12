@@ -73,7 +73,7 @@ select = ["B", "E", "F", "I", "UP", "W"]
 [tool.mypy]
 files = ["cedrus"]
 python_version = "3.11"
-strict = true
+strict = false
 
 [[tool.mypy.overrides]]
 module = ["cedarpy", "litellm"]

@@ -52,6 +52,7 @@ import litellm
 from openai import APIError
 
 from ..compile import Intent
+from ..data import Notes, Unresolved, Usage
 from ..error import Generate, ScopeFault
 from ..need import slugify
 from ..scope import Action, Clause, Principal, Resource
@@ -163,19 +164,19 @@ class Llm:
         content = self.extract_content(response)
         payload = self.parse_payload(content)
         intent = self.build_intent(payload["intent"], context)
-        unresolved = tuple(
-            str(item).strip() for item in payload.get("unresolved", []) if item
+        unresolved = Unresolved.merge(
+            [str(item).strip() for item in payload.get("unresolved", []) if item]
         )
         proposal = Proposal(
             intent=intent,
-            unresolved=tuple(item for item in unresolved if item),
-            notes={"generator": self.name, "model": self.model},
+            unresolved=unresolved,
+            notes=Notes.from_dict({"generator": self.name, "model": self.model}),
         )
         return Result(
             proposal=proposal,
             model=getattr(response, "model", self.model) or self.model,
             request_id=getattr(response, "id", None),
-            usage=self.extract_usage(response),
+            usage=self.extract_usage_as_usage(response),
         )
 
     def build_user_prompt(self, context: Context) -> str:
@@ -312,6 +313,16 @@ class Llm:
             if isinstance(value, int):
                 result[str(key)] = value
         return result
+
+
+    def extract_usage_as_usage(self, response: Any) -> Usage:
+        """Wrap :meth:`extract_usage` in a typed :class:`Usage`."""
+        usage = self.extract_usage(response)
+        return Usage(
+            prompt=int(usage.get("prompt_tokens", 0) or 0),
+            completion=int(usage.get("completion_tokens", 0) or 0),
+            total=int(usage.get("total_tokens", 0) or 0),
+        )
 
 
 def build_principal(data: dict[str, Any]) -> Principal | None:

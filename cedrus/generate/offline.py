@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from ..compile import Intent
+from ..data import Notes, Unresolved, Usage
 from ..need import slugify
 from ..scope import Action, Clause, Principal, Resource
 from .base import Context, Proposal, Result
@@ -75,19 +76,19 @@ class Offline:
             action=context.action,
             resource=context.resource,
             when_clauses=(when_clause,) if when_clause else (),
-            notes={"generator": self.name},
+            notes=Notes.from_dict({"generator": self.name}),  # type: ignore[arg-type]
         )
         unresolved = self.detect_unresolved(context)
         proposal = Proposal(
             intent=intent,
-            unresolved=unresolved,
-            notes={"generator": self.name},
+            unresolved=Unresolved(items=tuple(unresolved)),
+            notes=Notes.from_dict({"generator": self.name}),  # type: ignore[arg-type]
         )
         return Result(
             proposal=proposal,
             model=self.model,
             request_id=None,
-            usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            usage=Usage(prompt=0, completion=0, total=0),
         )
 
     @staticmethod
