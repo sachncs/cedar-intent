@@ -1,10 +1,18 @@
 """SQLite-backed implementation of the Repository Protocol.
 
 Uses only the standard library ``sqlite3`` module. The database schema
-is created on demand and migrations are idempotent.
+is created on demand and the schema migration is idempotent.
+
+This module exposes the SQL primitives (``fetch``, ``execute``,
+``transaction``, ``column_exists``, ``migrate``) that the typed
+objects (``Need``, ``Stored``, ``DraftStored``, ``ReportStored``,
+``Record``) call from their ``save`` / ``get`` / ``list`` / ``latest``
+/ ``update`` / ``upsert`` methods. The backend itself does not own
+any CRUD — see :mod:`cedrus.store.base` for the typed-object
+methods that do.
 
 Schema:
-    Six tables back the entity types exposed by the Protocol:
+    The normalized schema (version 3) has 12 tables:
 
     * ``meta`` — single-row metadata table recording the current
       schema version. The version is set in the same transaction as
@@ -18,15 +26,13 @@ Schema:
     * ``reports`` (id AUTOINCREMENT PRIMARY KEY, policy_id logical)
     * ``deployments`` (id PRIMARY KEY, domain indexed)
 
-    The typed intent and per-slot scopes on ``policies`` and ``drafts``
-    are stored as serialized JSON in dedicated ``*_json`` columns and
-    re-hydrated to the typed objects on read. The serialization goes
-    through :meth:`Intent.to_dict`, ``Scope.to_dict`` and
-    :meth:`Payload.to_dict` so the wire format lives in one place.
-    Older databases are upgraded in place by :meth:`Backend.migrate`,
-    which adds the missing ``*_json`` columns; pre-migration rows are
-    still readable through the typed dataclasses' permissive
-    fallbacks.
+    The typed intent and per-slot scopes on ``policies`` and
+    ``drafts`` are stored in their own normalized tables
+    (``intents``, ``principals``, ``actions``, ``resources``,
+    ``clauses``, ``clause_attributes``, ``intent_when_clauses``,
+    ``intent_unless_clauses``, ``intent_notes``) and joined by
+    foreign keys; the typed objects' own ``to_data`` /
+    ``parse`` methods handle the round-trip.
 
 Concurrency:
     :class:`Backend` enables ``journal_mode=WAL`` and
@@ -47,11 +53,10 @@ Attributes:
 
 See Also:
     :mod:`cedrus.store.base`: :class:`Repository` Protocol this module
-        implements.
+        implements, plus the typed-object CRUD methods that drive
+        the SQL primitives exposed here.
     :mod:`cedrus.store.memory`: In-memory repository implementation.
-    :mod:`cedrus.migrate`: Migration helpers for upgrading pre-0.6.0
-        row data (the schema migration in :meth:`Backend.migrate`
-        adds the missing JSON columns but doesn't repopulate them).
+    :mod:`cedrus.data.persist`: Newer typed persistence rows.
 """
 
 from __future__ import annotations
@@ -264,6 +269,14 @@ KNOWN_TABLES = frozenset(
 @dataclass
 class Backend:
     """SQLite-backed :class:`~cedrus.store.base.Repository`.
+
+    Exposes only the SQL primitives (``fetch``, ``execute``,
+    ``transaction``, ``column_exists``, ``migrate``) that the typed
+    objects use. CRUD lives on :class:`~cedrus.store.base.Need` /
+    :class:`~cedrus.store.base.Stored` /
+    :class:`~cedrus.store.base.DraftStored` /
+    :class:`~cedrus.store.base.ReportStored` /
+    :class:`~cedrus.deploy.Record`.
 
     Attributes:
         path: Filesystem location of the SQLite database file. The
