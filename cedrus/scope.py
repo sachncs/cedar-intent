@@ -231,7 +231,7 @@ class Principal(Scope):
             The reconstructed :class:`Principal`.
         """
         return cls(
-            kind=data.get("kind", cls.ANY),
+            kind=data.get("kind", "any"),
             type_name=data.get("type_name"),
             entity_id=data.get("entity_id"),
             group_type=data.get("group_type"),
@@ -353,7 +353,7 @@ class Action(Scope):
             The reconstructed :class:`Action`.
         """
         return cls(
-            kind=data.get("kind", cls.ANY),
+            kind=data.get("kind", "any"),
             name=data.get("name"),
             group=data.get("group"),
             namespace=data.get("namespace"),
@@ -481,7 +481,7 @@ class Resource(Scope):
             The reconstructed :class:`Resource`.
         """
         return cls(
-            kind=data.get("kind", cls.ANY),
+            kind=data.get("kind", "any"),
             type_name=data.get("type_name"),
             entity_id=data.get("entity_id"),
             parent_type=data.get("parent_type"),
