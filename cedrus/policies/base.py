@@ -26,6 +26,17 @@ Thread safety:
 
 Attributes:
     Kind: Abstract base for every policy object in cedrus.
+
+See Also:
+    :mod:`cedrus.policies.draft`: :class:`Draft` policy subclass.
+    :mod:`cedrus.policies.existing`: :class:`Existing` policy
+        subclass.
+    :mod:`cedrus.policies.compiled`: :class:`Compiled` policy
+        subclass.
+    :mod:`cedrus.compile`: :class:`Intent` and the polymorphic
+        :meth:`Intent.compile` route this module defers to.
+    :mod:`cedrus.validate`: :class:`Validator` and :class:`Vreport`
+        this module defers to.
 """
 
 from __future__ import annotations
@@ -73,6 +84,9 @@ class Kind(ABC):
         """Return the policy kind discriminator.
 
         Subclasses return ``"draft"``, ``"existing"``, or ``"compiled"``.
+
+        Returns:
+            One of the three kind discriminator strings.
         """
 
     def to_intent(self) -> Intent:
