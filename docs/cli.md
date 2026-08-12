@@ -220,6 +220,31 @@ cedar-intent deploy push --domain hr \
 cedar-intent --json deploy history --domain hr
 ```
 
+## migrate
+
+```text
+cedar-intent migrate [--apply | --check]
+```
+
+Upgrade a workspace created before cedar-intent 0.6.0 to the current
+schema. The 0.6.0 schema adds per-slot scope JSON columns and typed
+intent metadata to every policy and draft, so pre-0.6.0 workspaces
+refuse to open until the migration has run.
+
+- Default (no flag): print the number of legacy rows and exit 0.
+- `--apply`: perform the migration in place.
+- `--check`: exit 1 when legacy rows are present (suitable for CI).
+- `--json`: emit a JSON envelope with `pending` and (after `--apply`)
+  `upgraded`, `pending_before`, `pending_after`.
+
+```bash
+# CI gate
+cedar-intent --json migrate --check || echo "workspace needs migration"
+
+# Apply the migration
+cedar-intent migrate --apply
+```
+
 ## Scope flags
 
 The `policy` subcommands share a common set of scope arguments. The

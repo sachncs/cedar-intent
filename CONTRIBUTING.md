@@ -104,3 +104,17 @@ The CI pipeline will publish the package to PyPI.
 Reviews focus on correctness, clarity, and tests. Expect to revise.
 Maintainers may request changes or close pull requests that do not
 align with the project direction.
+
+## Security touchpoints
+
+When you modify one of the security-critical files below, the review
+checklist expands to include the listed concerns.
+
+| File | Review checklist |
+|------|-------------------|
+| `cedar_intent/deployment.py` | DNS pinning closes SSRF rebind window; no body bytes in errors; redirects disabled by default; idempotency key recorded; retries bounded; symlink targets refused; atomic writes use fsync. |
+| `cedar_intent/verification.py` | Structured AST parser (cedarpy) replaces regex; malformed policies emit `malformed-policy` finding; condition signatures normalized via canonical JSON. |
+| `cedar_intent/generator/litellm.py` | User content fenced in `<<<...>>>` delimiters; system prompt explicitly forbids instructions inside markers. |
+| `cedar_intent/workspace.py` | `intent_from_draft` returns None or raises WorkspaceError on corrupt stored JSON; never synthesizes a permissive `permit(any/any/any)` fallback. `find_action_namespace` raises on ambiguous action names. |
+| `cedar_intent/storage/sqlite.py` | `column_exists` validates table against allow-list; transactions wrap multi-statement writes; `check_same_thread=False` paired with RLock; WAL + busy_timeout PRAGMAs. |
+| `cedar_intent/cli.py` | Top-level catch wraps non-CedarIntentError exceptions in JSON envelope; `parse_headers` rejects CR/LF and reserved names; `validate_identifier` rejects path-traversal-shaped inputs. |

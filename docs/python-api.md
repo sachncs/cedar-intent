@@ -297,3 +297,40 @@ import cedar_intent
 
 print(cedar_intent.__version__)
 ```
+
+## Deployment: SSRF guard and pinned transport
+
+The `DeploymentClient` rejects targets in loopback, link-local, and
+RFC1918 ranges by default. Each connection is pinned to the IP
+address resolved at SSRF-check time so a DNS rebind between the
+guard and the request cannot redirect the deployment into a private
+network. Redirects are disabled by default.
+
+```python
+from cedar_intent import DeploymentClient, DeploymentError
+
+client = DeploymentClient(
+    timeout=30,
+    allow_private_targets=False,
+    allow_loopback=False,
+)
+
+# Default guard rejects loopback, link-local, and RFC1918.
+record = client.deploy(manifest, "https://policy-service.example.com/deploy")
+
+# Tests can opt into loopback:
+test_client = DeploymentClient(
+    allow_loopback=True,
+    timeout=5,
+)
+record = test_client.deploy(manifest, "http://127.0.0.1:8080/deploy")
+
+# Internal deployments to a private network require the explicit opt-in:
+internal_client = DeploymentClient(allow_private_targets=True)
+record = internal_client.deploy(manifest, "http://policy.svc.cluster.local/deploy")
+```
+
+If the guard rejects a target, the deployment raises
+`DeploymentError` with the blocked network. Response bodies are read
+in bounded chunks and never embedded in error messages; only a
+SHA-256 of the body is recorded on the `DeploymentRecord`.

@@ -107,8 +107,43 @@ the current policy set.
 ## Limitations
 
 - Scope-dominance analysis is limited to exact signature matches.
+  A forbid that is strictly broader than a permit (for example,
+  forbid at `resource is Folder::"*"` while the permit is scoped to
+  `resource == Folder::"hr/payroll"`) is **not** detected as
+  shadowing. This is a known limitation; an out-of-band review is
+  required to catch broader-scope forbids.
 - Effect-equivalence across permit and forbid is not analyzed.
 - Transitive effects (for example, two permits whose union is
   redundant) are not detected.
 - Numeric, attribute-based, and template-linked policies are not
   analyzed for coverage in this release.
+
+## What we don't catch (security touchpoints)
+
+The verifier does not analyze:
+
+- **DNS rebinding or SSRF in deployment.** See
+  [`SECURITY.md`](../SECURITY.md) and
+  [`docs/deployment.md`](deployment.md).
+- **LLM prompt injection.** The generator fences user content in the
+  prompt and instructs the model to treat markers as data, but a
+  hostile requirement text or schema JSON can still bias the model.
+  Review every generated policy in a pull request.
+- **Auth on HTTP deploy targets.** The deployment client does not
+  authenticate by default; you must supply credentials via
+  `--header`.
+- **Bundle tampering.** The bundle hash in the manifest provides
+  corruption detection, not authenticated integrity. Add a keyed
+  signature in the deploy metadata when tamper evidence is required.
+- **Action groups declared with cycle or self-reference.** A group
+  that contains itself produces a stack overflow at coverage time.
+
+## Malformed policy handling
+
+When cedarpy cannot parse a policy, the verifier emits a
+`malformed-policy` finding of severity `warning` rather than falling
+back to a permissive default. Older versions of the verifier silently
+classified unparseable policies as `permit(any, any, any)`; that
+behaviour has been removed because it suppressed coverage failures
+and hid shadowing. The `verify --strict` CI gate will fail builds
+that contain a malformed policy.
