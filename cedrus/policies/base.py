@@ -11,48 +11,56 @@ type must satisfy:
   pass (returns a placeholder intent rather than propagating
   :class:`Fault`).
 
-Lifecycle
----------
+Lifecycle:
+    * :class:`~cedrus.policies.draft.Draft` - the result of a
+      generator proposal; carries scope objects and an optional intent.
+    * :class:`~cedrus.policies.existing.Existing` - imported from raw
+      Cedar source; carries the source and an optional parsed intent.
+    * :class:`~cedrus.policies.compiled.Compiled` - the result of a
+      successful :meth:`~cedrus.space.Space.apply`; carries the
+      intent that produced the Cedar and the formatted source.
 
-* :class:`Draft` - the result of a generator proposal; carries
-  scope objects and an optional intent.
-* :class:`Existing` - imported from raw Cedar source; carries
-  the source and an optional parsed intent.
-* :class:`Compiled` - the result of a successful :meth:`Workspace.apply`;
-  carries the intent that produced the Cedar and the formatted source.
+Thread safety:
+    All policy dataclasses are ``frozen=True, slots=True``. They are
+    immutable and safe to share across threads.
 
-Thread safety
--------------
-
-All policy dataclasses are ``frozen=True, slots=True``. They are
-immutable and safe to share across threads.
+Attributes:
+    Kind: Abstract base for every policy object in cedrus.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from ..case import Case, Runner, Suite
-from ..compile import Intent, Source, compile_intent
-from ..error import Fault
-from ..need import Need
-from ..schema import Schema
-from ..scope import Action, Principal, Resource
-from ..validate import Vreport, validate_cedar
+from cedrus.case import Case, Runner, Suite
+from cedrus.compile import Intent, Source, compile_intent
+from cedrus.error import Fault
+from cedrus.need import Need
+from cedrus.schema import Schema
+from cedrus.scope import Action, Principal, Resource
+from cedrus.validate import Vreport, validate_cedar
 
 
 @dataclass(frozen=True, slots=True)
 class Kind(ABC):
     """Abstract base for every policy object in cedrus.
 
+    Every policy is one of three kinds — :class:`Draft`,
+    :class:`Existing`, :class:`Compiled` — and inherits the four
+    stable fields (``id``, :attr:`requirement`, :attr:`cedar`,
+    :attr:`created_at`) plus the lifecycle hooks
+    (:meth:`kind`, :meth:`to_intent`, :meth:`compile`, :meth:`validate`,
+    :meth:`test`, :meth:`to_dict`).
+
     Attributes:
         id: Policy identifier.
         requirement: The originating requirement.
         cedar: Cedar source text (may be empty for uncompiled policies).
-        created_at: Timestamp at which the object was constructed.
+        created_at: Timestamp at which the object was constructed;
+            defaults to ``datetime.now(UTC)`` when not provided.
     """
 
     id: str
@@ -74,7 +82,7 @@ class Kind(ABC):
         raises :class:`Fault` to make the contract explicit; this
         signals to callers that the policy does not yet carry a typed
         intent (for example, an :class:`Existing` whose
-        :attr:`Existing.parsed_intent` is ``None``).
+        :attr:`Existing.parsed_intent` is ``None`).
         """
         raise Fault(
             f"{type(self).__name__}.to_intent() must be implemented by the subclass"
@@ -85,11 +93,13 @@ class Kind(ABC):
 
         Used by verification routines that must inspect every policy
         without triggering :class:`Fault` for unparsed existing
-        policies.
+        policies. The placeholder carries no scopes (``any``
+        everywhere) and records the missing-intent message in
+        ``notes`` so verification still has a typed object to consume.
 
-        The fallback intent carries no scopes (``any`` everywhere) and a
-        note recording the missing-intent message so verification still
-        has a typed object to consume.
+        Returns:
+            The policy's :class:`Intent`, or a placeholder when
+            :meth:`to_intent` raises :class:`Fault`.
         """
         try:
             return self.to_intent()
@@ -114,6 +124,10 @@ class Kind(ABC):
 
         Returns:
             The compiled :class:`Source`.
+
+        Raises:
+            Fault: If :meth:`to_intent` cannot materialize an intent
+                for this policy.
         """
         return compile_intent(self.to_intent())
 
@@ -143,21 +157,22 @@ class Kind(ABC):
 
         Args:
             schema: Cedar schema for scenario evaluation.
-            scenarios: Scenarios to execute.
+            scenarios: Scenarios to execute against this policy's Cedar.
             entities: Optional entities to expose to the engine.
 
         Returns:
             A :class:`Suite` summarizing the results.
         """
-        return Runner(schema).run(
-            [self.cedar],
-            scenarios,
-        )
+        return Runner(schema).run([self.cedar], scenarios)
 
     def to_dict(self) -> Mapping[str, object]:
         """Return a JSON-friendly representation of this policy.
 
         Subclasses extend this with kind-specific fields.
+
+        Returns:
+            A dict with the shared ``id``, ``kind``,
+            ``requirement_id``, ``domain`` and ``cedar`` keys.
         """
         return {
             "id": self.id,
