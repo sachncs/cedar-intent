@@ -43,16 +43,6 @@ Concurrency:
 
 Attributes:
     Sqlite: SQLite-backed :class:`Repository` implementation.
-    requirement_from_row: Build a :class:`Need` from a ``requirements``
-        SQLite row dict.
-    policy_from_row: Build a :class:`Stored` from a ``policies`` SQLite
-        row dict.
-    draft_from_row: Build a :class:`DraftStored` from a ``drafts``
-        SQLite row dict.
-    report_from_row: Build a :class:`ReportStored` from a ``reports``
-        SQLite row dict.
-    deployment_from_row: Build a :class:`~cedrus.deploy.Record` from a
-        ``deployments`` SQLite row dict.
 
 See Also:
     :mod:`cedrus.store.base`: :class:`Repository` Protocol this module
@@ -179,151 +169,6 @@ ALTER_DRAFT_COLUMNS = (
 KNOWN_TABLES = frozenset(
     {"requirements", "policies", "drafts", "reports", "deployments", "meta"}
 )
-
-
-# ---------------------------------------------------------------------------
-# Row adapters
-# ---------------------------------------------------------------------------
-
-
-def requirement_from_row(row: dict[str, Any]) -> Need:
-    """Build a :class:`Need` from a SQLite requirements row.
-
-    Args:
-        row: Dict produced by ``SELECT * FROM requirements``.
-
-    Returns:
-        The reconstructed :class:`Need`.
-    """
-    from pathlib import Path
-
-    return Need(
-        id=row["id"],
-        text=row["text"],
-        domain=row["domain"],
-        source_path=Path(row["source_path"]),
-        created_at=datetime.fromisoformat(row["created_at"]),
-    )
-
-
-def policy_from_row(row: dict[str, Any]) -> Stored:
-    """Build a :class:`Stored` from a SQLite policies row.
-
-    Args:
-        row: Dict produced by ``SELECT * FROM policies``.
-
-    Returns:
-        The reconstructed :class:`Stored`.
-    """
-    return Stored(
-        id=row["id"],
-        domain=row["domain"],
-        requirement_id=row["requirement_id"],
-        intent=(
-            Intent.from_dict(json.loads(row["intent_json"]))
-            if row["intent_json"]
-            else None
-        ),
-        cedar=row["cedar"],
-        status=row["status"],
-        created_at=datetime.fromisoformat(row["created_at"]),
-        updated_at=datetime.fromisoformat(row["updated_at"]),
-        action=(
-            Action.from_dict(json.loads(row["action_scope_json"]))
-            if row["action_scope_json"]
-            else None
-        ),
-    )
-
-
-def draft_from_row(row: dict[str, Any]) -> DraftStored:
-    """Build a :class:`DraftStored` from a SQLite drafts row.
-
-    Args:
-        row: Dict produced by ``SELECT * FROM drafts``.
-
-    Returns:
-        The reconstructed :class:`DraftStored`.
-    """
-    intent_payload = row["intent_json"]
-    principal_payload = row["principal_scope_json"]
-    action_payload = row["action_scope_json"]
-    resource_payload = row["resource_scope_json"]
-    return DraftStored(
-        id=row["id"],
-        policy_id=row["policy_id"],
-        model=row["model"],
-        request_id=row["request_id"],
-        unresolved=tuple(json.loads(row["unresolved_json"])),
-        cedar=row["cedar"],
-        created_at=datetime.fromisoformat(row["created_at"]),
-        intent=(
-            Intent.from_dict(json.loads(intent_payload))
-            if intent_payload
-            else Intent(
-                id=row["id"],
-                requirement_id=row["policy_id"] or "",
-                effect="permit",
-                principal=Principal(),
-                action=Action(),
-                resource=Resource(),
-            )
-        ),
-        principal=(
-            Principal.from_dict(json.loads(principal_payload))
-            if principal_payload
-            else Principal()
-        ),
-        action=(
-            Action.from_dict(json.loads(action_payload))
-            if action_payload
-            else Action()
-        ),
-        resource=(
-            Resource.from_dict(json.loads(resource_payload))
-            if resource_payload
-            else Resource()
-        ),
-    )
-
-
-def report_from_row(row: dict[str, Any]) -> ReportStored:
-    """Build a :class:`ReportStored` from a SQLite reports row.
-
-    Args:
-        row: Dict produced by ``SELECT * FROM reports``.
-
-    Returns:
-        The reconstructed :class:`ReportStored`.
-    """
-    return ReportStored(
-        policy_id=row["policy_id"],
-        kind=row["kind"],
-        passed=bool(row["passed"]),
-        payload=Payload.from_dict(json.loads(row["payload_json"])),
-        created_at=datetime.fromisoformat(row["created_at"]),
-    )
-
-
-def deployment_from_row(row: dict[str, Any]) -> Record:
-    """Build a :class:`~cedrus.deploy.Record` from a SQLite deployments row.
-
-    Args:
-        row: Dict produced by ``SELECT * FROM deployments``.
-
-    Returns:
-        The reconstructed :class:`Record`.
-    """
-    return Record(
-        id=row["id"],
-        domain=row["domain"],
-        target=row["target"],
-        target_kind=row["target_kind"],
-        bundle_hash=row["bundle_hash"],
-        status=row["status"],
-        response=dict(json.loads(row["response_json"])),
-        created_at=datetime.fromisoformat(row["created_at"]),
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -533,7 +378,15 @@ class Sqlite:
         ).fetchone()
         if row is None:
             raise Store(f"requirement {requirement_id!r} not found")
-        return requirement_from_row(dict(row))
+        from pathlib import Path
+
+        return Need(
+            id=row["id"],
+            text=row["text"],
+            domain=row["domain"],
+            source_path=Path(row["source_path"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
 
     def list_requirements(self, domain: str | None = None) -> Sequence[Need]:
         """Return all requirements, optionally filtered by ``domain``.
@@ -553,7 +406,18 @@ class Sqlite:
             rows = self.connection.execute(
                 "SELECT * FROM requirements WHERE domain = ? ORDER BY id", (domain,)
             ).fetchall()
-        return [requirement_from_row(dict(row)) for row in rows]
+        from pathlib import Path
+
+        return [
+            Need(
+                id=row["id"],
+                text=row["text"],
+                domain=row["domain"],
+                source_path=Path(row["source_path"]),
+                created_at=datetime.fromisoformat(row["created_at"]),
+            )
+            for row in rows
+        ]
 
     def remove_requirement(self, requirement_id: str) -> None:
         """Remove the requirement with ``requirement_id``.
@@ -630,7 +494,25 @@ class Sqlite:
         ).fetchone()
         if row is None:
             raise Store(f"policy {policy_id!r} not found")
-        return policy_from_row(dict(row))
+        return Stored(
+            id=row["id"],
+            domain=row["domain"],
+            requirement_id=row["requirement_id"],
+            intent=(
+                Intent.from_dict(json.loads(row["intent_json"]))
+                if row["intent_json"]
+                else None
+            ),
+            cedar=row["cedar"],
+            status=row["status"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            action=(
+                Action.from_dict(json.loads(row["action_scope_json"]))
+                if row["action_scope_json"]
+                else None
+            ),
+        )
 
     def list_policies(self, domain: str | None = None) -> Sequence[Stored]:
         """Return all policies, optionally filtered by ``domain``.
@@ -650,7 +532,28 @@ class Sqlite:
             rows = self.connection.execute(
                 "SELECT * FROM policies WHERE domain = ? ORDER BY id", (domain,)
             ).fetchall()
-        return [policy_from_row(dict(row)) for row in rows]
+        return [
+            Stored(
+                id=row["id"],
+                domain=row["domain"],
+                requirement_id=row["requirement_id"],
+                intent=(
+                    Intent.from_dict(json.loads(row["intent_json"]))
+                    if row["intent_json"]
+                    else None
+                ),
+                cedar=row["cedar"],
+                status=row["status"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+                action=(
+                    Action.from_dict(json.loads(row["action_scope_json"]))
+                    if row["action_scope_json"]
+                    else None
+                ),
+            )
+            for row in rows
+        ]
 
     def remove_policy(self, policy_id: str) -> None:
         """Remove the policy with ``policy_id``.
@@ -672,7 +575,8 @@ class Sqlite:
         """Append ``draft`` to the draft history.
 
         The intent and per-slot scopes are serialized to JSON for
-        storage and rehydrated by :func:`draft_from_row` on read.
+        storage and rehydrated inline in :meth:`latest_draft` /
+        :meth:`list_drafts` on read.
 
         Args:
             draft: Draft row to record.
@@ -768,7 +672,46 @@ class Sqlite:
         ).fetchone()
         if row is None:
             raise Store(f"no drafts for policy {policy_id!r}")
-        return draft_from_row(dict(row))
+        intent_payload = row["intent_json"]
+        principal_payload = row["principal_scope_json"]
+        action_payload = row["action_scope_json"]
+        resource_payload = row["resource_scope_json"]
+        return DraftStored(
+            id=row["id"],
+            policy_id=row["policy_id"],
+            model=row["model"],
+            request_id=row["request_id"],
+            unresolved=tuple(json.loads(row["unresolved_json"])),
+            cedar=row["cedar"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            intent=(
+                Intent.from_dict(json.loads(intent_payload))
+                if intent_payload
+                else Intent(
+                    id=row["id"],
+                    requirement_id=row["policy_id"] or "",
+                    effect="permit",
+                    principal=Principal(),
+                    action=Action(),
+                    resource=Resource(),
+                )
+            ),
+            principal=(
+                Principal.from_dict(json.loads(principal_payload))
+                if principal_payload
+                else Principal()
+            ),
+            action=(
+                Action.from_dict(json.loads(action_payload))
+                if action_payload
+                else Action()
+            ),
+            resource=(
+                Resource.from_dict(json.loads(resource_payload))
+                if resource_payload
+                else Resource()
+            ),
+        )
 
     def list_drafts(self, policy_id: str | None = None) -> Sequence[DraftStored]:
         """Return all drafts, optionally filtered by ``policy_id``.
@@ -789,14 +732,58 @@ class Sqlite:
                 "SELECT * FROM drafts WHERE policy_id = ? ORDER BY created_at",
                 (policy_id,),
             ).fetchall()
-        return [draft_from_row(dict(row)) for row in rows]
+        result = []
+        for row in rows:
+            intent_payload = row["intent_json"]
+            principal_payload = row["principal_scope_json"]
+            action_payload = row["action_scope_json"]
+            resource_payload = row["resource_scope_json"]
+            result.append(
+                DraftStored(
+                    id=row["id"],
+                    policy_id=row["policy_id"],
+                    model=row["model"],
+                    request_id=row["request_id"],
+                    unresolved=tuple(json.loads(row["unresolved_json"])),
+                    cedar=row["cedar"],
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                    intent=(
+                        Intent.from_dict(json.loads(intent_payload))
+                        if intent_payload
+                        else Intent(
+                            id=row["id"],
+                            requirement_id=row["policy_id"] or "",
+                            effect="permit",
+                            principal=Principal(),
+                            action=Action(),
+                            resource=Resource(),
+                        )
+                    ),
+                    principal=(
+                        Principal.from_dict(json.loads(principal_payload))
+                        if principal_payload
+                        else Principal()
+                    ),
+                    action=(
+                        Action.from_dict(json.loads(action_payload))
+                        if action_payload
+                        else Action()
+                    ),
+                    resource=(
+                        Resource.from_dict(json.loads(resource_payload))
+                        if resource_payload
+                        else Resource()
+                    ),
+                )
+            )
+        return result
 
     def record_report(self, report: ReportStored) -> None:
         """Append ``report`` to the report history.
 
         The typed :class:`Payload` is serialized to JSON for storage
-        and rehydrated by :func:`report_from_row` on read. ``passed``
-        is persisted as ``0``/``1`` to match the column type.
+        and rehydrated inline in :meth:`latest_report` on read.
+        ``passed`` is persisted as ``0``/``1`` to match the column type.
 
         Args:
             report: Report row to record. ``created_at`` is required;
@@ -838,7 +825,13 @@ class Sqlite:
         ).fetchone()
         if row is None:
             raise Store(f"no {kind} report for policy {policy_id!r}")
-        return report_from_row(dict(row))
+        return ReportStored(
+            policy_id=row["policy_id"],
+            kind=row["kind"],
+            passed=bool(row["passed"]),
+            payload=Payload.from_dict(json.loads(row["payload_json"])),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
 
     def record_deployment(self, deployment: Record) -> None:
         """Append ``deployment`` to the deployment history.
@@ -906,14 +899,19 @@ class Sqlite:
                 "SELECT * FROM deployments WHERE domain = ? ORDER BY created_at",
                 (domain,),
             ).fetchall()
-        return [deployment_from_row(dict(row)) for row in rows]
+        return [
+            Record(
+                id=row["id"],
+                domain=row["domain"],
+                target=row["target"],
+                target_kind=row["target_kind"],
+                bundle_hash=row["bundle_hash"],
+                status=row["status"],
+                response=dict(json.loads(row["response_json"])),
+                created_at=datetime.fromisoformat(row["created_at"]),
+            )
+            for row in rows
+        ]
 
 
-__all__ = [
-    "Sqlite",
-    "deployment_from_row",
-    "draft_from_row",
-    "policy_from_row",
-    "report_from_row",
-    "requirement_from_row",
-]
+__all__ = ["Sqlite"]
