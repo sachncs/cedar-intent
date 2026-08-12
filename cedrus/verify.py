@@ -308,7 +308,7 @@ class Verifier:
         malformed: list[tuple[Any, str]] = []
         for policy in policies:
             try:
-                extraction = self._extract_one(policy)
+                extraction = self.extract_one(policy)
             except Parse as error:
                 malformed.append((policy, str(error)))
                 continue
@@ -328,17 +328,17 @@ class Verifier:
                     ),
                 )
             )
-        findings.extend(self._detect_shadowing(extracted))
-        findings.extend(self._detect_redundancy(extracted))
-        covered_action_names, uncovered_action_names = self._action_coverage(
+        findings.extend(self.detect_shadowing(extracted))
+        findings.extend(self.detect_redundancy(extracted))
+        covered_action_names, uncovered_action_names = self.action_coverage(
             extracted, action_names
         )
         covered_requirements, uncovered_requirements = (
-            self._requirement_coverage(extracted, requirement_ids)
+            self.requirement_coverage(extracted, requirement_ids)
         )
         entity_type_set = set(entity_type_names)
         findings.extend(
-            self._missing_coverage_finding(
+            self.missing_coverage_finding(
                 "uncovered-action",
                 domain,
                 sorted(uncovered_action_names),
@@ -346,7 +346,7 @@ class Verifier:
             )
         )
         findings.extend(
-            self._missing_coverage_finding(
+            self.missing_coverage_finding(
                 "uncovered-requirement",
                 domain,
                 sorted(uncovered_requirements),
@@ -354,10 +354,10 @@ class Verifier:
             )
         )
         findings.extend(
-            self._missing_coverage_finding(
+            self.missing_coverage_finding(
                 "uncovered-entity-type",
                 domain,
-                sorted(entity_type_set - self._collect_entity_types(extracted)),
+                sorted(entity_type_set - self.collect_entity_types(extracted)),
                 "No policy references entity type {items}.",
             )
         )
@@ -374,7 +374,7 @@ class Verifier:
         """Extract scope signature from a single policy.
 
         Public hook so callers can build their own analyses; the
-        internal ``_extract_one`` does the actual work.
+        internal ``extract_one`` does the actual work.
 
         Args:
             policy: Policy-like object to extract.
@@ -385,7 +385,7 @@ class Verifier:
         Raises:
             Parse: When cedarpy cannot parse the policy.
         """
-        return self._extract_one(policy)
+        return self.extract_one(policy)
 
     def shadow(self, policies: Sequence[Any]) -> list[Finding]:
         """Detect shadowed permits.
@@ -396,8 +396,8 @@ class Verifier:
         Returns:
             A list of shadowing findings (empty when none found).
         """
-        return self._detect_shadowing(
-            [(policy, self._extract_one(policy)) for policy in policies]
+        return self.detect_shadowing(
+            [(policy, self.extract_one(policy)) for policy in policies]
         )
 
     def redundant(self, policies: Sequence[Any]) -> list[Finding]:
@@ -409,8 +409,8 @@ class Verifier:
         Returns:
             A list of redundancy findings (empty when none found).
         """
-        return self._detect_redundancy(
-            [(policy, self._extract_one(policy)) for policy in policies]
+        return self.detect_redundancy(
+            [(policy, self.extract_one(policy)) for policy in policies]
         )
 
     def types(self, policies: Sequence[Any]) -> set[str]:
@@ -422,8 +422,8 @@ class Verifier:
         Returns:
             Set of entity type identifiers referenced anywhere.
         """
-        return self._collect_entity_types(
-            [(policy, self._extract_one(policy)) for policy in policies]
+        return self.collect_entity_types(
+            [(policy, self.extract_one(policy)) for policy in policies]
         )
 
     def coverage_action(
@@ -441,8 +441,8 @@ class Verifier:
             Two disjoint sets of ``(namespace, action_id)`` tuples:
             covered and uncovered.
         """
-        return self._action_coverage(
-            [(policy, self._extract_one(policy)) for policy in policies],
+        return self.action_coverage(
+            [(policy, self.extract_one(policy)) for policy in policies],
             names,
         )
 
@@ -461,8 +461,8 @@ class Verifier:
             Two disjoint sets of requirement ids: covered and
             uncovered.
         """
-        return self._requirement_coverage(
-            [(policy, self._extract_one(policy)) for policy in policies],
+        return self.requirement_coverage(
+            [(policy, self.extract_one(policy)) for policy in policies],
             ids,
         )
 
@@ -483,15 +483,15 @@ class Verifier:
         Returns:
             A list of :class:`Finding` (empty when ``items`` is empty).
         """
-        return self._missing_coverage_finding(kind, "", items, template)
+        return self.missing_coverage_finding(kind, "", items, template)
 
-    def _extract_one(self, policy: Any) -> Extraction:
+    def extract_one(self, policy: Any) -> Extraction:
         return parse_ast(
             Extraction.policy_cedar_text(policy),
             self.schema.actions_by_namespace(),
         )
 
-    def _detect_shadowing(
+    def detect_shadowing(
         self,
         policies: Sequence[tuple[Any, Extraction]],
     ) -> list[Finding]:
@@ -540,7 +540,7 @@ class Verifier:
                     )
         return findings
 
-    def _detect_redundancy(
+    def detect_redundancy(
         self,
         policies: Sequence[tuple[Any, Extraction]],
     ) -> list[Finding]:
@@ -591,7 +591,7 @@ class Verifier:
                 seen[extraction.signature] = Extraction.policy_id_of(policy)
         return findings
 
-    def _action_coverage(
+    def action_coverage(
         self,
         policies: Sequence[tuple[Any, Extraction]],
         action_names: Sequence[tuple[str, str]],
@@ -634,7 +634,7 @@ class Verifier:
                 covered.add(pair)
         return covered, set(action_names) - covered
 
-    def _requirement_coverage(
+    def requirement_coverage(
         self,
         policies: Sequence[tuple[Any, Extraction]],
         requirement_ids: Sequence[str],
@@ -643,7 +643,7 @@ class Verifier:
         covered = {Extraction.policy_requirement_id_of(policy) for policy, _ in policies}
         return covered & set(requirement_ids), set(requirement_ids) - covered
 
-    def _collect_entity_types(
+    def collect_entity_types(
         self,
         policies: Sequence[tuple[Any, Extraction]],
     ) -> set[str]:
@@ -661,7 +661,7 @@ class Verifier:
                     types.add(name)
         return types
 
-    def _missing_coverage_finding(
+    def missing_coverage_finding(
         self,
         kind: str,
         domain: str,
