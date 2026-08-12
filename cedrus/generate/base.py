@@ -37,6 +37,24 @@ See Also:
     :mod:`cedrus.generate.litellm`: LiteLLM-backed generator.
     :mod:`cedrus.data.transit`: Source of the data-layer types
         re-exported here.
+
+Examples:
+    Implementing a custom generator::
+
+        class EchoGenerator:
+            name = "echo"
+            model = "echo"
+
+            def generate(self, context: Context) -> Result:
+                proposal = Proposal(intent=...)
+                return Result(
+                    proposal=proposal,
+                    model=self.model,
+                    request_id="local",
+                    usage=Usage(prompt=0, completion=0, total=0),
+                )
+
+        assert isinstance(EchoGenerator(), Generator)
 """
 
 from __future__ import annotations
