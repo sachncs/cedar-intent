@@ -51,6 +51,42 @@ ONLINE_ENV_VAR = "CEDAR_INTENT_ONLINE"
 MODEL_ENV_VAR = "CEDAR_INTENT_MODEL"
 
 
+def _positive_finite_float(value: str) -> float:
+    """argparse type for positive finite floats (reject inf/nan/<=0)."""
+    try:
+        number = float(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"expected a number, got {value!r}") from error
+    if number != number or number in (float("inf"), float("-inf")) or number <= 0:
+        raise argparse.ArgumentTypeError(
+            f"value must be a positive finite number, got {value!r}"
+        )
+    return number
+
+
+def _non_negative_int(value: str) -> int:
+    """argparse type for non-negative integers."""
+    try:
+        number = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}") from error
+    if number < 0:
+        raise argparse.ArgumentTypeError(
+            f"value must be non-negative, got {value!r}"
+        )
+    return number
+
+
+def _positive_int(value: str) -> int:
+    """argparse type for positive integers."""
+    number = _non_negative_int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError(
+            f"value must be positive, got {value!r}"
+        )
+    return number
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level argument parser with every subcommand wired in."""
     parser = argparse.ArgumentParser(
@@ -165,9 +201,9 @@ def add_policy_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
     generate_parser.add_argument(
         "--offline", action="store_true", help="Use OfflineGenerator."
     )
-    generate_parser.add_argument("--timeout", type=float, default=60)
-    generate_parser.add_argument("--retries", type=int, default=2)
-    generate_parser.add_argument("--max-tokens", type=int, default=4096)
+    generate_parser.add_argument("--timeout", type=_positive_finite_float, default=60)
+    generate_parser.add_argument("--retries", type=_non_negative_int, default=2)
+    generate_parser.add_argument("--max-tokens", type=_positive_int, default=4096)
 
     apply_parser = sub_pol.add_parser(
         "apply", help="Validate and persist a previously generated draft."
@@ -238,7 +274,7 @@ def add_deploy_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
     push.add_argument(
         "--target", required=True, help="Local path or http(s) URL."
     )
-    push.add_argument("--timeout", type=float, default=30)
+    push.add_argument("--timeout", type=_positive_finite_float, default=30)
     push.add_argument(
         "--header",
         action="append",
@@ -282,21 +318,67 @@ def main(argv: Sequence[str] | None = None) -> int:
     Returns:
         Process exit code: ``0`` on success, ``1`` when any
         :class:`~cedar_intent.errors.CedarIntentError` is raised,
-        ``2`` for argparse usage errors.
+        ``2`` for argparse usage errors or unexpected exceptions.
     """
     parser = build_parser()
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exit_event:
+        # argparse calls sys.exit on usage errors; surface the exit
+        # code so the test/CI can observe it without catching
+        # SystemExit.
+        return int(exit_event.code) if exit_event.code is not None else 2
     try:
         result, exit_code = run_command(args)
     except CedarIntentError as error:
-        print(f"cedar-intent: error: {error}", file=sys.stderr)
-        return 1
+        return _report_error(args, error)
+    except Exception as error:
+        return _report_unexpected_error(args, error)
     if result is not None:
         if args.json:
             print(json.dumps(result, indent=2, default=str))
         else:
             print(humanize(result))
     return exit_code
+
+
+def _report_error(args: Namespace, error: CedarIntentError) -> int:
+    """Emit a structured error envelope and return the exit code."""
+    message = str(error)
+    if getattr(args, "json", False):
+        envelope = {
+            "error": {
+                "type": type(error).__name__,
+                "message": message,
+            }
+        }
+        print(json.dumps(envelope, indent=2, default=str), file=sys.stderr)
+    else:
+        print(f"cedar-intent: error: {message}", file=sys.stderr)
+    return 1
+
+
+def _report_unexpected_error(args: Namespace, error: BaseException) -> int:
+    """Wrap unexpected exceptions so CI never sees a raw stack trace."""
+    if getattr(args, "json", False):
+        envelope = {
+            "error": {
+                "type": type(error).__name__,
+                "message": str(error),
+                "unexpected": True,
+            }
+        }
+        print(json.dumps(envelope, indent=2, default=str), file=sys.stderr)
+    else:
+        print(
+            f"cedar-intent: internal error: {type(error).__name__}: {error}",
+            file=sys.stderr,
+        )
+        print(
+            "Run with --log-level debug for a full traceback or file an issue.",
+            file=sys.stderr,
+        )
+    return 1
 
 
 def run_command(args: Namespace) -> tuple[Any, int]:
@@ -365,6 +447,7 @@ def command_init(path: str) -> dict[str, Any]:
 def command_domain(workspace: Workspace, args: Namespace) -> Any:
     """Handle ``domain add`` and ``domain list`` subcommands."""
     if args.domain_command == "add":
+        validate_identifier(args.name, "domain name")
         schema_path = workspace.init_domain(args.name)
         return {"domain": args.name, "schema": str(schema_path)}
     if args.domain_command == "list":
@@ -382,6 +465,7 @@ def command_domain(workspace: Workspace, args: Namespace) -> Any:
 def command_requirement(workspace: Workspace, args: Namespace) -> Any:
     """Handle ``requirement add`` and ``requirement list`` subcommands."""
     if args.requirement_command == "add":
+        validate_identifier(args.domain, "domain name")
         if not args.path.exists():
             raise ConfigError(f"requirement file not found: {args.path}")
         target = workspace.requirements_directory(args.domain) / args.path.name
@@ -397,6 +481,8 @@ def command_requirement(workspace: Workspace, args: Namespace) -> Any:
 
 def command_policy(workspace: Workspace, args: Namespace) -> Any:
     """Handle ``policy draft``, ``policy generate``, and ``policy apply`` subcommands."""
+    validate_identifier(args.domain, "domain name")
+    validate_identifier(args.requirement_id, "requirement id")
     schema = workspace.load_schema(args.domain)
     if args.policy_command == "draft":
         draft = workspace.create_draft(
@@ -442,6 +528,7 @@ def command_policy(workspace: Workspace, args: Namespace) -> Any:
 
 def command_export(workspace: Workspace, args: Namespace) -> Any:
     """Export the domain's compiled Cedar to ``args.output``."""
+    validate_identifier(args.domain, "domain name")
     schema = workspace.load_schema(args.domain)
     workspace.validate_policies(args.domain, schema)
     output = workspace.export_domain(args.domain, args.output)
@@ -476,6 +563,7 @@ def command_check(workspace: Workspace, args: Namespace) -> Any:
 
 def command_verify(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
     """Run verification for ``args.domain`` and return its report."""
+    validate_identifier(args.domain, "domain name")
     schema = workspace.load_schema(args.domain)
     report = workspace.verify_domain(args.domain, schema)
     exit_code = 1 if args.strict and not report.passed else 0
@@ -512,6 +600,11 @@ def command_migrate(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
 
 def command_deploy(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
     """Handle the three ``deploy`` subcommands."""
+    # ``deploy history`` accepts an optional domain filter; only
+    # validate when the user actually supplied one.
+    domain = getattr(args, "domain", None)
+    if domain:
+        validate_identifier(domain, "domain name")
     if args.deploy_command == "push":
         headers = parse_headers(getattr(args, "header", []) or [])
         record = workspace.deploy(
@@ -535,14 +628,64 @@ def command_deploy(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
 
 
 def parse_headers(raw: list[str]) -> dict[str, str]:
-    """Parse ``["Name: Value", ...]`` into a header dictionary."""
+    """Parse ``["Name: Value", ...]`` into a header dictionary.
+
+    Raises:
+        ConfigError: When a header is missing a colon, has an empty
+            name, contains CR/LF in either name or value, or has a
+            name longer than 256 characters / value longer than 8192.
+    """
     parsed: dict[str, str] = {}
     for entry in raw:
         if ":" not in entry:
             raise ConfigError(f"invalid header (expected 'Name: Value'): {entry!r}")
         name, _, value = entry.partition(":")
-        parsed[name.strip()] = value.strip()
+        name = name.strip()
+        value = value.strip()
+        if not name:
+            raise ConfigError("header name must be non-empty")
+        if "\r" in name or "\n" in name or "\r" in value or "\n" in value:
+            raise ConfigError(
+                f"header contains CR/LF (CVE-style injection): {entry!r}"
+            )
+        if len(name) > 256:
+            raise ConfigError(f"header name {name!r} exceeds 256 characters")
+        if len(value) > 8192:
+            raise ConfigError(f"header value for {name!r} exceeds 8192 characters")
+        parsed[name] = value
     return parsed
+
+
+def validate_identifier(name: str, kind: str) -> str:
+    """Validate that ``name`` is a safe workspace identifier.
+
+    Identifiers are used in filesystem paths (domain names, requirement
+    ids) so anything outside a conservative alphabet is rejected to
+    prevent path traversal or NUL injection.
+
+    Args:
+        name: Identifier supplied by the user.
+        kind: Human-readable kind for error messages
+            (e.g., ``"domain"`` or ``"requirement id"``).
+
+    Returns:
+        The validated identifier (unchanged).
+
+    Raises:
+        ConfigError: When ``name`` is empty, too long, or contains
+            characters outside ``[A-Za-z0-9._-]``.
+    """
+    if not name or not name.strip():
+        raise ConfigError(f"{kind} must be non-empty")
+    if len(name) > 64:
+        raise ConfigError(f"{kind} must be at most 64 characters")
+    for ch in name:
+        if not (ch.isalnum() or ch in "._-"):
+            raise ConfigError(
+                f"{kind} {name!r} contains illegal character {ch!r}; "
+                "use only letters, digits, '.', '_', and '-'"
+            )
+    return name
 
 
 def deployment_to_dict(record: Any) -> dict[str, Any]:

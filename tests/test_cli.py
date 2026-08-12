@@ -433,8 +433,9 @@ def test_main_missing_workspace_returns_one(tmp_path: Path) -> None:
 
 
 def test_main_unknown_command(tmp_path: Path) -> None:
-    with pytest.raises(SystemExit):
-        main(["--workspace", str(tmp_path), "nope"])
+    """Unknown commands return exit code 2 (argparse usage error)."""
+    exit_code = main(["--workspace", str(tmp_path), "nope"])
+    assert exit_code == 2
 
 
 def test_run_command_unknown_command_raises(tmp_path: Path) -> None:
