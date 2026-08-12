@@ -6,8 +6,12 @@ created on demand and migrations are idempotent.
 Schema
 ------
 
-Five tables back the five entity types exposed by the Protocol:
+Six tables back the entity types exposed by the Protocol:
 
+* ``meta`` — single-row metadata table recording the current schema
+  version. The version is set in the same transaction as the
+  schema change, so a partially-migrated database either has its
+  declared version or does not exist at all.
 * ``requirements`` (id PRIMARY KEY)
 * ``policies`` (id PRIMARY KEY, requirement_id REFERENCES requirements(id)
   ON DELETE SET NULL)
@@ -23,21 +27,28 @@ intent and per-slot scopes. Older databases are upgraded in place by
 in :meth:`SqliteRepository.__post_init__` that raises
 :class:`StorageError` when any legacy row remains.
 
-Thread safety
--------------
+Concurrency
+-----------
 
-``sqlite3.Connection`` serializes access internally. The
-:class:`SqliteRepository` is safe for concurrent use from multiple
-threads in the same process only when callers serialize the calls
-themselves; for parallel use, open one repository per thread. Cross-
-process access to the same database file is supported by SQLite but
-requires a per-process :class:`SqliteRepository` instance.
+``SqliteRepository`` enables ``journal_mode=WAL`` and
+``busy_timeout=5000`` so concurrent readers do not block writers and
+transient lock contention waits instead of raising immediately. The
+class connects with ``check_same_thread=False`` and guards every
+mutating call with an ``RLock``, so the same instance can be shared
+between threads. The Python GIL plus SQLite's connection-level
+serialization make this safe; the RLock is documentation as much as
+defense.
+
+For parallel use across processes, each process should open its own
+:class:`SqliteRepository` instance; SQLite's WAL mode handles the
+cross-process locking.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -51,6 +62,10 @@ from ..migrations import detect_legacy_rows
 from ..requirements import Requirement
 from ..scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
 from .base import StoredDraft, StoredPolicy, StoredReport
+
+#: Current schema version. Bump whenever the SQLite schema changes in
+#: a way that requires row data to be migrated.
+SCHEMA_VERSION = 2
 
 SCHEMA_STATEMENTS = (
     """
@@ -113,6 +128,11 @@ SCHEMA_STATEMENTS = (
         created_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS meta (
+        schema_version INTEGER PRIMARY KEY
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_policies_domain ON policies(domain)",
     "CREATE INDEX IF NOT EXISTS idx_drafts_policy ON drafts(policy_id)",
     "CREATE INDEX IF NOT EXISTS idx_reports_policy ON reports(policy_id)",
@@ -135,6 +155,15 @@ _ALTER_DRAFT_COLUMNS = (
 )
 
 
+#: Tables whose names are allowed in dynamic SQL. Anything outside
+#: this allow-list is rejected, preventing the f-string interpolation
+#: in :meth:`SqliteRepository.column_exists` from becoming a SQL
+#: injection vector.
+_KNOWN_TABLES = frozenset(
+    {"requirements", "policies", "drafts", "reports", "deployments", "meta"}
+)
+
+
 @dataclass
 class SqliteRepository:
     """SQLite-backed repository.
@@ -147,14 +176,22 @@ class SqliteRepository:
 
     path: Path
     connection: sqlite3.Connection = field(init=False)
+    lock: threading.RLock = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(self.path)
+        self.connection = sqlite3.connect(self.path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
+        self.lock = threading.RLock()
         # Foreign keys are off by default in sqlite3; enable them so the
         # ON DELETE SET NULL clause on policies.requirement_id fires.
         self.connection.execute("PRAGMA foreign_keys = ON")
+        # Production-grade PRAGMA set: WAL for concurrent readers,
+        # busy_timeout for transient contention, synchronous=NORMAL
+        # for the standard durability/speed trade-off.
+        self.connection.execute("PRAGMA journal_mode = WAL")
+        self.connection.execute("PRAGMA busy_timeout = 5000")
+        self.connection.execute("PRAGMA synchronous = NORMAL")
         self.migrate()
         self.refuse_legacy_rows()
 
@@ -162,19 +199,31 @@ class SqliteRepository:
         """Return ``True`` when ``table.column`` exists in the schema.
 
         Args:
-            table: Table name to inspect.
+            table: Table name to inspect. Must be a known table name
+                (``requirements``, ``policies``, ``drafts``, ``reports``,
+                ``deployments``, ``meta``); anything else raises
+                :class:`StorageError` rather than interpolating user
+                input into a SQL statement.
             column: Column name to look up.
+
+        Raises:
+            StorageError: If ``table`` is not a known table.
         """
+        if table not in _KNOWN_TABLES:
+            raise StorageError(f"unknown table for column_exists: {table!r}")
         rows = self.connection.execute(
-            f"PRAGMA table_info({table})"
+            "SELECT name FROM pragma_table_info(?) WHERE name = ?", (table, column)
         ).fetchall()
-        return any(row["name"] == column for row in rows)
+        return bool(rows)
 
     def migrate(self) -> None:
         """Create schema objects and add 0.6.0 columns when missing.
 
         Idempotent: every ``CREATE`` uses ``IF NOT EXISTS`` and every
-        ``ALTER`` is guarded by :meth:`column_exists`.
+        ``ALTER`` is guarded by :meth:`column_exists`. The schema
+        version is set inside the same transaction as the schema
+        changes, so a partially-migrated database either has its
+        declared version or does not exist at all.
         """
         with self.connection:
             for statement in SCHEMA_STATEMENTS:
@@ -187,6 +236,30 @@ class SqliteRepository:
                 column = statement.split("ADD COLUMN")[-1].split()[0]
                 if not self.column_exists("drafts", column):
                     self.connection.execute(statement)
+            self._stamp_schema_version()
+
+    def _stamp_schema_version(self) -> None:
+        """Insert or update the ``meta.schema_version`` row in this transaction."""
+        row = self.connection.execute("SELECT schema_version FROM meta").fetchone()
+        if row is None:
+            self.connection.execute(
+                "INSERT INTO meta (schema_version) VALUES (?)", (SCHEMA_VERSION,)
+            )
+        elif row["schema_version"] != SCHEMA_VERSION:
+            self.connection.execute(
+                "UPDATE meta SET schema_version = ?", (SCHEMA_VERSION,)
+            )
+
+    def schema_version(self) -> int:
+        """Return the schema version recorded in the ``meta`` table.
+
+        Returns ``0`` when the database has not yet been stamped (which
+        means an empty or pre-0.6.0 database).
+        """
+        row = self.connection.execute("SELECT schema_version FROM meta").fetchone()
+        if row is None:
+            return 0
+        return int(row["schema_version"])
 
     def refuse_legacy_rows(self) -> None:
         """Refuse to operate on a workspace that still has legacy rows.
@@ -200,12 +273,20 @@ class SqliteRepository:
         Raises:
             StorageError: When one or more legacy rows remain.
         """
-        pending = detect_legacy_rows(self)
-        if pending:
-            raise StorageError(
-                f"workspace at {self.path} contains {pending} legacy rows; "
-                "run 'cedar-intent migrate --apply' to upgrade to the 0.6.0 schema"
-            )
+        if self.schema_version() >= SCHEMA_VERSION:
+            pending = detect_legacy_rows(self)
+            if pending:
+                raise StorageError(
+                    f"workspace at {self.path} contains {pending} legacy rows; "
+                    "run 'cedar-intent migrate --apply' to upgrade to the 0.6.0 schema"
+                )
+            return
+        # Schema version not yet at current; treat the database as
+        # legacy until the migration runs.
+        raise StorageError(
+            f"workspace at {self.path} has not been migrated to schema "
+            f"version {SCHEMA_VERSION}; run 'cedar-intent migrate --apply'"
+        )
 
     def close(self) -> None:
         """Close the underlying database connection.
@@ -213,7 +294,10 @@ class SqliteRepository:
         Idempotent: subsequent calls are no-ops because the underlying
         :class:`sqlite3.Connection.close` is itself idempotent.
         """
-        self.connection.close()
+        try:
+            self.connection.close()
+        except sqlite3.ProgrammingError:
+            pass
 
     def add_requirement(self, requirement: Requirement) -> None:
         """Add or replace ``requirement`` in the store.
