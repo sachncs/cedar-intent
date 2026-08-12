@@ -60,6 +60,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from cedrus.compile import Intent
 from cedrus.data import Payload
 from cedrus.deploy import Record
+from cedrus.error import Store
 from cedrus.need import Need
 from cedrus.scope import Action, Principal, Resource
 
@@ -359,6 +360,10 @@ class DraftStored:
                 "request_id": self.request_id,
                 "cedar": self.cedar,
                 "created_at": self.created_at.isoformat(),
+                "intent_id": self.intent.id,
+                "principal_id": self.intent.principal.id,
+                "action_id": self.intent.action.id,
+                "resource_id": self.intent.resource.id,
             },
             **intent_data,
             "principals": intent_data.get("principals", []),
@@ -616,18 +621,16 @@ class ReportStored:
         )
         if not rows:
             raise Store(f"no {kind} report for policy {policy_id!r}")
-        report = cls.parse({"reports": rows[0]})
         payload_rows = repo.fetch(
-            "SELECT key, value FROM report_payload WHERE report_id = ? "
-            "ORDER BY position",
+            "SELECT key, value, position FROM report_payload "
+            "WHERE report_id = ? ORDER BY position",
             (rows[0]["id"],),
         )
-        return cls(
-            policy_id=report.policy_id,
-            kind=report.kind,
-            passed=report.passed,
-            payload=Payload(data=tuple((r["key"], r["value"]) for r in payload_rows)),
-            created_at=report.created_at,
+        return cls.parse(
+            {
+                "reports": rows[0],
+                "report_payload": payload_rows,
+            }
         )
 
 
@@ -654,7 +657,7 @@ def write_intent(repo: Backend, rows: dict[str, Any]) -> None:
     for action in rows.get("actions", ()):
         repo.execute(
             "INSERT OR REPLACE INTO actions "
-            "(id, kind, name, group) "
+            "(id, kind, name, action_group) "
             "VALUES (:id, :kind, :name, :action_group)",
             action,
         )

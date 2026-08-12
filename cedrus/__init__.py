@@ -140,6 +140,7 @@ from cedrus.schema import Schema
 from cedrus.scope import Action, Clause, Principal, Resource, Scope
 from cedrus.space import Space
 from cedrus.store import Backend, Memory, Repository
+from cedrus.data import Payload
 from cedrus.validate import Validator, Vreport
 from cedrus.verify import Extraction, Finding, Report, Verifier
 
@@ -175,6 +176,7 @@ __all__ = [
     "Need",
     "Offline",
     "Outcome",
+    "Payload",
     "Pin",
     "Principal",
     "Proposal",
