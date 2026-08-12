@@ -23,20 +23,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from .error import Compile
-from .scope import (
-    Action,
-    Clause,
-    Principal,
-    Resource,
-    action_scope_from_dict,
-    action_scope_to_dict,
-    condition_clauses_from_list,
-    condition_clauses_to_list,
-    principal_scope_from_dict,
-    principal_scope_to_dict,
-    resource_scope_from_dict,
-    resource_scope_to_dict,
-)
+from .scope import Action, Clause, Principal, Resource
 
 Effect = Literal["permit", "forbid"]
 
@@ -47,7 +34,7 @@ class Intent:
 
     An intent is the contract between a generator (human or LLM) and the
     deterministic compiler. A valid intent must round-trip through
-    :func:`compile_intent` to produce Cedar that validates against the
+    :class:`Compiler` to produce Cedar that validates against the
     supplied schema.
 
     Attributes:
@@ -77,6 +64,88 @@ class Intent:
             raise Compile(f"intent {self.id} has invalid effect {self.effect!r}")
         if not self.id or not self.id.strip():
             raise Compile("policy intent id must be non-empty")
+
+    def compile(self) -> Source:
+        """Compile this intent to Cedar source text.
+
+        Delegates to :class:`Compiler`. Subclass :class:`Compiler` to
+        customize the rendering strategy.
+        """
+        return Compiler().compile(self)
+
+    def to_dict(self) -> dict[str, object]:
+        """Return the canonical wire-format dict for this intent.
+
+        Accepts both the canonical ``when_clauses``/``unless_clauses``
+        shape and the legacy short form (``when``/``unless`` carrying
+        a list of body strings).
+        """
+        return {
+            "id": self.id,
+            "requirement_id": self.requirement_id,
+            "effect": self.effect,
+            "principal": self.principal.to_dict(),
+            "action": self.action.to_dict(),
+            "resource": self.resource.to_dict(),
+            "when_clauses": [c.to_dict() for c in self.when_clauses],
+            "unless_clauses": [c.to_dict() for c in self.unless_clauses],
+            "notes": (
+                self.notes.to_dict()
+                if hasattr(self.notes, "to_dict")
+                else dict(self.notes)
+            ),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Intent:
+        """Reconstruct an Intent from its canonical wire-format dict.
+
+        Accepts both the canonical ``when_clauses``/``unless_clauses``
+        shape and the legacy short form (``when``/``unless`` carrying a
+        list of body strings) so rows stored by earlier cedrus
+        versions still load.
+        """
+        principal_data = data.get("principal")
+        action_data = data.get("action")
+        resource_data = data.get("resource")
+        when_raw = data.get("when_clauses", data.get("when"))
+        unless_raw = data.get("unless_clauses", data.get("unless"))
+        principal = (
+            Principal.from_dict(principal_data)
+            if isinstance(principal_data, dict)
+            else Principal()
+        )
+        action = (
+            Action.from_dict(action_data) if isinstance(action_data, dict) else Action()
+        )
+        resource = (
+            Resource.from_dict(resource_data)
+            if isinstance(resource_data, dict)
+            else Resource()
+        )
+        when_clauses = (
+            tuple(Clause.from_dict(dict(item)) for item in when_raw)
+            if isinstance(when_raw, list)
+            else ()
+        )
+        unless_clauses = (
+            tuple(Clause.from_dict(dict(item)) for item in unless_raw)
+            if isinstance(unless_raw, list)
+            else ()
+        )
+        notes_value = data.get("notes", {}) or {}
+        notes = notes_value if isinstance(notes_value, dict) else {}
+        return cls(
+            id=str(data.get("id", "")),
+            requirement_id=str(data.get("requirement_id", "")),
+            effect=str(data.get("effect", "permit")),
+            principal=principal,
+            action=action,
+            resource=resource,
+            when_clauses=when_clauses,
+            unless_clauses=unless_clauses,
+            notes=notes,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,107 +310,5 @@ __all__ = [
     "Source",
     "Effect",
     "Intent",
-    "compile_intent",
-    "intent_from_dict",
-    "intent_to_dict",
-    "render_action",
-    "render_principal",
-    "render_resource",
+    "Compiler",
 ]
-
-
-def intent_to_dict(intent: Intent | None) -> dict[str, object] | None:
-    """Serialize a :class:`Intent` to a JSON-friendly dict.
-
-    The canonical wire format uses ``when_clauses`` and
-    ``unless_clauses`` keys with ``[{"body": ..., "attributes": ...},
-    ...]`` values so the verification layer can recover both the body
-    and any operator-supplied attributes.
-
-    Args:
-        intent: Intent to serialize, or ``None``.
-
-    Returns:
-        A plain ``dict`` mirroring the intent's fields, or ``None``
-        when ``intent`` is ``None``.
-    """
-    if intent is None:
-        return None
-    return {
-        "id": intent.id,
-        "requirement_id": intent.requirement_id,
-        "effect": intent.effect,
-        "principal": principal_scope_to_dict(intent.principal),
-        "action": action_scope_to_dict(intent.action),
-        "resource": resource_scope_to_dict(intent.resource),
-        "when_clauses": condition_clauses_to_list(intent.when_clauses),
-        "unless_clauses": condition_clauses_to_list(intent.unless_clauses),
-            "notes": (
-                intent.notes.to_dict()
-                if hasattr(intent.notes, "to_dict")
-                else dict(intent.notes)
-            ),
-    }
-
-
-def intent_from_dict(data: Mapping[str, object] | None) -> Intent | None:
-    """Deserialize a :class:`Intent` from a JSON-friendly dict.
-
-    Accepts both the canonical ``when_clauses``/``unless_clauses``
-    shape and the legacy short form (``when``/``unless`` carrying a
-    list of body strings) so rows stored by earlier cedrus
-    versions still load.
-
-    Args:
-        data: Mapping previously produced by :func:`intent_to_dict`,
-            or ``None``.
-
-    Returns:
-        The reconstructed :class:`Intent`, or ``None`` when
-        ``data`` is ``None``.
-    """
-    if data is None:
-        return None
-    principal_data = data.get("principal")
-    action_data = data.get("action")
-    resource_data = data.get("resource")
-    when_raw = data.get("when_clauses", data.get("when"))
-    unless_raw = data.get("unless_clauses", data.get("unless"))
-    principal = (
-        principal_scope_from_dict(principal_data)
-        if isinstance(principal_data, dict)
-        else Principal()
-    )
-    action = (
-        action_scope_from_dict(action_data)
-        if isinstance(action_data, dict)
-        else Action()
-    )
-    resource = (
-        resource_scope_from_dict(resource_data)
-        if isinstance(resource_data, dict)
-        else Resource()
-    )
-    when_clauses = (
-        condition_clauses_from_list(when_raw)
-        if isinstance(when_raw, list)
-        else ()
-    )
-    unless_clauses = (
-        condition_clauses_from_list(unless_raw)
-        if isinstance(unless_raw, list)
-        else ()
-    )
-    notes_value = data.get("notes", {}) or {}
-    notes = notes_value if isinstance(notes_value, dict) else {}
-    return Intent(
-        id=str(data.get("id", "")),
-        requirement_id=str(data.get("requirement_id", "")),
-        effect=data.get("effect", "permit"),  # type: ignore[arg-type]
-        principal=principal or Principal(),
-        action=action or Action(),
-        resource=resource or Resource(),
-        when_clauses=when_clauses,
-        unless_clauses=unless_clauses,
-        notes=notes,
-    )

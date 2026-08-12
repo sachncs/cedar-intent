@@ -1,13 +1,13 @@
 """Tests for workspace atomicity and dedup.
 
-Covers the three Workspace hardening items from audit O-6, O-9, O-12:
+Covers the three Space hardening items from audit O-6, O-9, O-12:
 
-- Workspace.apply wraps validation report + scenario test report +
+- Space.apply wraps validation report + scenario test report +
   policy upsert in a single transaction. If a scenario fails, no
   report or policy is persisted.
-- Workspace.init_domain writes schema.json atomically (temp file +
+- Space.init_domain writes schema.json atomically (temp file +
   rename), so a crash mid-write can never leave a truncated file.
-- Workspace.import_existing_policies raises Space on
+- Space.import_existing_policies raises Space on
   duplicate file stems instead of silently merging them via upsert.
 """
 
@@ -27,7 +27,7 @@ from cedrus import (
     Principal,
     Resource,
     Space,
-    Workspace,
+    Space,
 )
 
 
@@ -41,7 +41,7 @@ def _make_requirement(domain: str = "hr", identifier: str = "HR-001") -> Need:
     )
 
 
-def _init_domain(workspace: Workspace) -> None:
+def _init_domain(workspace: Space) -> None:
     """Initialise a domain with a PhotoFlash schema for the apply test."""
     workspace.init_domain("hr")
     schema_path = workspace.schema_path("hr")
@@ -53,13 +53,13 @@ def _init_domain(workspace: Workspace) -> None:
     )
 
 
-# ---- Workspace.apply atomicity -----------------------------------------------
+# ---- Space.apply atomicity -----------------------------------------------
 
 
 def test_apply_persists_validation_report_and_policy_in_one_transaction(
     tmp_path: Path,
 ) -> None:
-    workspace = Workspace.create(tmp_path / "acme")
+    workspace = Space.create(tmp_path / "acme")
     _init_domain(workspace)
     schema = workspace.load_schema("hr")
     requirement = _make_requirement()
@@ -94,7 +94,7 @@ def test_apply_persists_validation_report_and_policy_in_one_transaction(
 
 def test_apply_rolls_back_when_scenario_fails(tmp_path: Path) -> None:
     """A failed scenario must roll back the validation report and the policy."""
-    workspace = Workspace.create(tmp_path / "acme")
+    workspace = Space.create(tmp_path / "acme")
     _init_domain(workspace)
     schema = workspace.load_schema("hr")
     requirement = _make_requirement()
@@ -156,7 +156,7 @@ def test_apply_rolls_back_when_scenario_fails(tmp_path: Path) -> None:
 
 def test_apply_passes_when_scenario_succeeds(tmp_path: Path) -> None:
     """Passing scenario persists all reports and the compiled policy."""
-    workspace = Workspace.create(tmp_path / "acme")
+    workspace = Space.create(tmp_path / "acme")
     _init_domain(workspace)
     schema = workspace.load_schema("hr")
     requirement = _make_requirement()
@@ -207,12 +207,12 @@ def test_apply_passes_when_scenario_succeeds(tmp_path: Path) -> None:
     assert {row[0] for row in report_kinds} == {"test", "validation"}
 
 
-# ---- Workspace.init_domain atomicity ----------------------------------------
+# ---- Space.init_domain atomicity ----------------------------------------
 
 
 def test_init_domain_writes_schema_atomically(tmp_path: Path) -> None:
     """No partial schema.json is left behind on disk after init_domain."""
-    workspace = Workspace.create(tmp_path / "acme")
+    workspace = Space.create(tmp_path / "acme")
     _init_domain(workspace)
     schema_path = workspace.schema_path("hr")
     assert schema_path.exists()
@@ -225,7 +225,7 @@ def test_init_domain_writes_schema_atomically(tmp_path: Path) -> None:
 
 def test_init_domain_idempotent(tmp_path: Path) -> None:
     """Calling init_domain twice leaves the existing schema untouched."""
-    workspace = Workspace.create(tmp_path / "acme")
+    workspace = Space.create(tmp_path / "acme")
     _init_domain(workspace)
     schema_path = workspace.schema_path("hr")
     original = schema_path.read_text(encoding="utf-8")
@@ -234,7 +234,7 @@ def test_init_domain_idempotent(tmp_path: Path) -> None:
     assert schema_path.read_text(encoding="utf-8") == original
 
 
-# ---- Workspace.import_existing_policies dedup ------------------------------
+# ---- Space.import_existing_policies dedup ------------------------------
 
 
 def test_import_existing_policies_rejects_duplicate_stems(
@@ -247,7 +247,7 @@ def test_import_existing_policies_rejects_duplicate_stems(
     future feature (recursive globbing, symlink following) that
     could yield duplicates.
     """
-    workspace = Workspace.create(tmp_path / "acme")
+    workspace = Space.create(tmp_path / "acme")
     _init_domain(workspace)
     policies_dir = workspace.policies_directory("hr")
     policies_dir.mkdir(parents=True, exist_ok=True)
@@ -269,7 +269,7 @@ def test_import_existing_policies_rejects_duplicate_stems(
 
 
 def test_import_existing_policies_imports_unique_files(tmp_path: Path) -> None:
-    workspace = Workspace.create(tmp_path / "acme")
+    workspace = Space.create(tmp_path / "acme")
     _init_domain(workspace)
     policies_dir = workspace.policies_directory("hr")
     policies_dir.mkdir(parents=True, exist_ok=True)

@@ -1,4 +1,4 @@
-"""Tests for the Workspace orchestrator."""
+"""Tests for the Space orchestrator."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from cedrus import (
     Principal,
     Resource,
     Space,
-    Workspace,
+    Space,
 )
 
 PHOTOFLASH_SCHEMA = {
@@ -40,17 +40,17 @@ PHOTOFLASH_SCHEMA = {
 }
 
 
-def make_workspace_with_domain(tmp_path: Path) -> Workspace:
+def make_workspace_with_domain(tmp_path: Path) -> Space:
     root = tmp_path
     domain = root / "hr"
     (domain / "requirements").mkdir(parents=True)
     (domain / "policies").mkdir(parents=True)
     (domain / "schema.json").write_text(json.dumps(PHOTOFLASH_SCHEMA), encoding="utf-8")
-    return Workspace.open(root)
+    return Space.open(root)
 
 
 def test_workspace_open_always_uses_sqlite(tmp_path: Path) -> None:
-    workspace = Workspace.open(tmp_path)
+    workspace = Space.open(tmp_path)
     try:
         assert workspace.repository.__class__.__name__ == "Sqlite"
     finally:
@@ -59,11 +59,11 @@ def test_workspace_open_always_uses_sqlite(tmp_path: Path) -> None:
 
 def test_workspace_open_missing_root_raises(tmp_path: Path) -> None:
     with pytest.raises(Space):
-        Workspace.open(tmp_path / "missing")
+        Space.open(tmp_path / "missing")
 
 
 def test_workspace_create_initialises_storage(tmp_path: Path) -> None:
-    workspace = Workspace.create(tmp_path)
+    workspace = Space.create(tmp_path)
     try:
         assert (tmp_path / ".cedrus" / "store.db").exists()
     finally:
@@ -71,7 +71,7 @@ def test_workspace_create_initialises_storage(tmp_path: Path) -> None:
 
 
 def test_init_domain_creates_layout(tmp_path: Path) -> None:
-    workspace = Workspace.in_memory(tmp_path)
+    workspace = Space.in_memory(tmp_path)
     try:
         schema_path = workspace.init_domain("hr")
         assert schema_path.exists()
@@ -82,7 +82,7 @@ def test_init_domain_creates_layout(tmp_path: Path) -> None:
 
 
 def test_init_domain_does_not_overwrite_existing_schema(tmp_path: Path) -> None:
-    workspace = Workspace.in_memory(tmp_path)
+    workspace = Space.in_memory(tmp_path)
     try:
         workspace.init_domain("hr")
         custom = {"Custom": {"entityTypes": {"User": {}}, "actions": {"view": {}}}}
@@ -308,7 +308,7 @@ def test_workspace_apply_with_scenarios(tmp_path: Path) -> None:
                 resource=Resource(kind="specific", type_name="Photo", entity_id="p1"),
             ),
         )
-        scenarios = workspace.load_scenarios("hr")
+        scenarios = workspace.load("hr")
         compiled = workspace.apply(draft, schema, scenarios=scenarios)
         assert compiled.cedar.startswith("permit")
         report = workspace.repository.latest_report("hr-hr-042", "test")
@@ -359,7 +359,7 @@ def test_workspace_apply_with_failing_scenarios(tmp_path: Path) -> None:
                 resource=Resource(kind="any"),
             ),
         )
-        scenarios = workspace.load_scenarios("hr")
+        scenarios = workspace.load("hr")
         with pytest.raises(Space):
             workspace.apply(draft, schema, scenarios=scenarios)
     finally:
@@ -503,7 +503,7 @@ def test_workspace_export_domain_no_policies_raises(tmp_path: Path) -> None:
 def test_workspace_scenarios_helper_handles_missing_file(tmp_path: Path) -> None:
     workspace = make_workspace_with_domain(tmp_path)
     try:
-        scenarios = workspace.load_scenarios("hr")
+        scenarios = workspace.load("hr")
         assert scenarios == []
     finally:
         workspace.close()
@@ -514,7 +514,7 @@ def test_workspace_scenarios_helper_rejects_bad_payload(tmp_path: Path) -> None:
     try:
         workspace.scenarios_path("hr").write_text("{}", encoding="utf-8")
         with pytest.raises(Space):
-            workspace.load_scenarios("hr")
+            workspace.load("hr")
     finally:
         workspace.close()
 
@@ -539,5 +539,5 @@ def test_workspace_upsert_compiled_with_unknown_intent(tmp_path: Path) -> None:
 
 
 def test_workspace_in_memory_close_is_noop(tmp_path: Path) -> None:
-    workspace = Workspace.in_memory(tmp_path)
+    workspace = Space.in_memory(tmp_path)
     workspace.close()

@@ -20,106 +20,249 @@ generator.
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 from .error import ScopeFault
 
 Expression = str | bool | int | float | dict[str, Any] | list[Any]
 
 
+class Scope(ABC):
+    """Abstract base for every scope shape.
+
+    Each Cedar policy slot accepts a scope of a specific kind; this
+    ABC defines the contract that the four concrete scope types
+    (:class:`Principal`, :class:`Action`, :class:`Resource`,
+    :class:`Clause`) implement.
+    """
+
+    @abstractmethod
+    def clause(self) -> str:
+        """Return the Cedar source fragment this scope renders to."""
+
+    @abstractmethod
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-friendly representation of this scope."""
+
+    @classmethod
+    @abstractmethod
+    def from_dict(cls, data: dict[str, Any]) -> Scope:
+        """Reconstruct a scope from its JSON-friendly representation."""
+
+
+def _validate_kind(value: str, allowed: frozenset[str]) -> None:
+    """Raise :class:`ScopeFault` if ``value`` is not in ``allowed``."""
+    if value not in allowed:
+        raise ScopeFault(
+            f"invalid kind {value!r}; expected one of {sorted(allowed)}"
+        )
+
+
+def _validate_id(value: str | None, field: str) -> None:
+    """Raise :class:`ScopeFault` if ``value`` is empty when required."""
+    if value is not None and not value.strip():
+        raise ScopeFault(f"{field} must be non-empty when set")
+
+
 @dataclass(frozen=True, slots=True)
-class Principal:
+class Principal(Scope):
     """Scope applied to the ``principal`` slot of a Cedar policy.
 
     Attributes:
-        kind: One of ``"any"``, ``"type"``, ``"specific"``, ``"in_group"``,
-            or ``"is_type"``.
+        kind: One of the ``Principal.VARIETIES`` constants.
         type_name: Entity type name (for ``type``, ``specific``, ``is_type``).
         entity_id: Entity id (for ``specific``).
         group_type: Group entity type (for ``in_group``).
         group_id: Group entity id (for ``in_group``).
     """
 
-    kind: Literal["any", "type", "specific", "in_group", "is_type"] = "any"
+    ANY: str = "any"
+    TYPE: str = "type"
+    SPECIFIC: str = "specific"
+    IN_GROUP: str = "in_group"
+    IS_TYPE: str = "is_type"
+    VARIETIES: frozenset[str] = frozenset({ANY, TYPE, SPECIFIC, IN_GROUP, IS_TYPE})
+
+    kind: str = ANY
     type_name: str | None = None
     entity_id: str | None = None
     group_type: str | None = None
     group_id: str | None = None
 
     def __post_init__(self) -> None:
-        if self.kind == "any":
-            return
-        if self.kind in {"type", "is_type"} and not self.type_name:
-            raise ScopeFault(f"{self.kind!r} principal requires type_name")
-        if self.kind == "specific":
-            if not self.type_name or not self.entity_id:
-                raise ScopeFault("'specific' principal requires type_name and entity_id")
-        if self.kind == "in_group":
-            if not self.group_type or not self.group_id:
-                raise ScopeFault("'in_group' principal requires group_type and group_id")
+        _validate_kind(self.kind, self.VARIETIES)
+        _validate_id(self.type_name, "type_name")
+        _validate_id(self.entity_id, "entity_id")
+        _validate_id(self.group_type, "group_type")
+        _validate_id(self.group_id, "group_id")
+
+    def clause(self) -> str:
+        """Render the Cedar fragment for this principal slot."""
+        if self.kind == self.ANY:
+            return "principal"
+        if self.kind == self.SPECIFIC:
+            import json
+
+            return f'principal == {self.type_name}::{json.dumps(self.entity_id)}'
+        if self.kind == self.TYPE:
+            return f"principal == {self.type_name}"
+        if self.kind == self.IS_TYPE:
+            return f"principal is {self.type_name}"
+        # self.kind == self.IN_GROUP
+        return f"principal in {self.group_type}::{json.dumps(self.group_id)}"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-friendly representation of this principal."""
+        return {
+            "kind": self.kind,
+            "type_name": self.type_name,
+            "entity_id": self.entity_id,
+            "group_type": self.group_type,
+            "group_id": self.group_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Principal:
+        """Reconstruct a Principal from its JSON-friendly representation."""
+        return cls(
+            kind=data.get("kind", cls.ANY),
+            type_name=data.get("type_name"),
+            entity_id=data.get("entity_id"),
+            group_type=data.get("group_type"),
+            group_id=data.get("group_id"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
-class Action:
+class Action(Scope):
     """Scope applied to the ``action`` slot of a Cedar policy.
 
     Attributes:
-        kind: One of ``"any"``, ``"named"``, or ``"in_group"``.
+        kind: One of the ``Action.VARIETIES`` constants.
         name: Action name (for ``named``).
-        group: Action group (for ``in_group``).
-        namespace: Namespace prefix applied at compile time.
+        group: Action group name (for ``in_group``).
     """
 
-    kind: Literal["any", "named", "in_group"] = "any"
+    ANY: str = "any"
+    NAMED: str = "named"
+    IN_GROUP: str = "in_group"
+    VARIETIES: frozenset[str] = frozenset({ANY, NAMED, IN_GROUP})
+
+    kind: str = ANY
     name: str | None = None
     group: str | None = None
-    namespace: str | None = None
 
     def __post_init__(self) -> None:
-        if self.kind == "any":
-            return
-        if self.kind == "named" and not self.name:
-            raise ScopeFault("'named' action requires name")
-        if self.kind == "in_group" and not self.group:
-            raise ScopeFault("'in_group' action requires group")
+        _validate_kind(self.kind, self.VARIETIES)
+        _validate_id(self.name, "name")
+        _validate_id(self.group, "group")
+
+    def clause(self) -> str:
+        """Render the Cedar fragment for this action slot."""
+        if self.kind == self.ANY:
+            return "action"
+        if self.kind == self.NAMED:
+            import json
+
+            return f'action == Action::{json.dumps(self.name)}'
+        # self.kind == self.IN_GROUP
+        import json
+
+        return f'action in Action::{json.dumps(self.group)}'
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-friendly representation of this action."""
+        return {
+            "kind": self.kind,
+            "name": self.name,
+            "group": self.group,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Action:
+        """Reconstruct an Action from its JSON-friendly representation."""
+        return cls(
+            kind=data.get("kind", cls.ANY),
+            name=data.get("name"),
+            group=data.get("group"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
-class Resource:
+class Resource(Scope):
     """Scope applied to the ``resource`` slot of a Cedar policy.
 
     Attributes:
-        kind: One of ``"any"``, ``"type"``, ``"specific"``, ``"in_parent"``, or ``"is_type"``.
-        type_name: Entity type name (for ``type``, ``specific``, ``is_type``, ``in_parent``).
+        kind: One of the ``Resource.VARIETIES`` constants.
+        type_name: Entity type name (for ``type``, ``specific``, ``is_type``).
         entity_id: Entity id (for ``specific``).
         parent_type: Parent entity type (for ``in_parent``).
         parent_id: Parent entity id (for ``in_parent``).
     """
 
-    kind: Literal["any", "type", "specific", "in_parent", "is_type"] = "any"
+    ANY: str = "any"
+    TYPE: str = "type"
+    SPECIFIC: str = "specific"
+    IN_PARENT: str = "in_parent"
+    IS_TYPE: str = "is_type"
+    VARIETIES: frozenset[str] = frozenset({ANY, TYPE, SPECIFIC, IN_PARENT, IS_TYPE})
+
+    kind: str = ANY
     type_name: str | None = None
     entity_id: str | None = None
     parent_type: str | None = None
     parent_id: str | None = None
 
     def __post_init__(self) -> None:
-        if self.kind == "any":
-            return
-        if self.kind in {"type", "is_type"} and not self.type_name:
-            raise ScopeFault(f"{self.kind!r} resource requires type_name")
-        if self.kind == "specific":
-            if not self.type_name or not self.entity_id:
-                raise ScopeFault("'specific' resource requires type_name and entity_id")
-        if self.kind == "in_parent":
-            if not self.type_name or not self.parent_type or not self.parent_id:
-                raise ScopeFault(
-                    "'in_parent' resource requires type_name, parent_type, and parent_id"
-                )
+        _validate_kind(self.kind, self.VARIETIES)
+        _validate_id(self.type_name, "type_name")
+        _validate_id(self.entity_id, "entity_id")
+        _validate_id(self.parent_type, "parent_type")
+        _validate_id(self.parent_id, "parent_id")
+
+    def clause(self) -> str:
+        """Render the Cedar fragment for this resource slot."""
+        if self.kind == self.ANY:
+            return "resource"
+        if self.kind == self.SPECIFIC:
+            import json
+
+            return f'resource == {self.type_name}::{json.dumps(self.entity_id)}'
+        if self.kind == self.TYPE:
+            return f"resource == {self.type_name}"
+        if self.kind == self.IS_TYPE:
+            return f"resource is {self.type_name}"
+        # self.kind == self.IN_PARENT
+        import json
+
+        return f'resource in {self.parent_type}::{json.dumps(self.parent_id)}'
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-friendly representation of this resource."""
+        return {
+            "kind": self.kind,
+            "type_name": self.type_name,
+            "entity_id": self.entity_id,
+            "parent_type": self.parent_type,
+            "parent_id": self.parent_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Resource:
+        """Reconstruct a Resource from its JSON-friendly representation."""
+        return cls(
+            kind=data.get("kind", cls.ANY),
+            type_name=data.get("type_name"),
+            entity_id=data.get("entity_id"),
+            parent_type=data.get("parent_type"),
+            parent_id=data.get("parent_id"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
-class Clause:
+class Clause(Scope):
     """A single ``when`` or ``unless`` clause carried by a draft.
 
     Attributes:
@@ -134,172 +277,23 @@ class Clause:
         if not self.body or not self.body.strip():
             raise ScopeFault("condition clause body must be non-empty")
 
+    def clause(self) -> str:
+        """Return the clause body (which IS the Cedar source fragment)."""
+        return self.body
 
-__all__ = [
-    "Action",
-    "Clause",
-    "Expression",
-    "Principal",
-    "Resource",
-]
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-friendly representation of this clause."""
+        return {
+            "body": self.body,
+            "attributes": dict(self.attributes),
+        }
 
-
-# Codec helpers (merged from scope_json.py)
-
-def principal_scope_to_dict(scope: Principal | None) -> dict[str, Any] | None:
-    """Serialize a :class:`Principal` to a JSON-friendly dict.
-
-    Args:
-        scope: Principal scope, or ``None``.
-
-    Returns:
-        A plain ``dict`` mirroring the scope's fields, or ``None`` when
-        the input is ``None``.
-    """
-    if scope is None:
-        return None
-    return {
-        "kind": scope.kind,
-        "type_name": scope.type_name,
-        "entity_id": scope.entity_id,
-        "group_type": scope.group_type,
-        "group_id": scope.group_id,
-    }
-
-
-def principal_scope_from_dict(data: dict[str, Any] | None) -> Principal | None:
-    """Deserialize a :class:`Principal` from a JSON-friendly dict.
-
-    Args:
-        data: Mapping previously produced by
-            :func:`principal_scope_to_dict`, or ``None``.
-
-    Returns:
-        The reconstructed :class:`Principal`, or ``None`` when
-        ``data`` is ``None``.
-    """
-    if data is None:
-        return None
-    return Principal(
-        kind=data.get("kind", "any"),
-        type_name=data.get("type_name") or None,
-        entity_id=data.get("entity_id") or None,
-        group_type=data.get("group_type") or None,
-        group_id=data.get("group_id") or None,
-    )
-
-
-def action_scope_to_dict(scope: Action | None) -> dict[str, Any] | None:
-    """Serialize an :class:`Action` to a JSON-friendly dict.
-
-    Args:
-        scope: Action scope, or ``None``.
-
-    Returns:
-        A plain ``dict`` mirroring the scope's fields, or ``None``.
-    """
-    if scope is None:
-        return None
-    return {
-        "kind": scope.kind,
-        "name": scope.name,
-        "group": scope.group,
-        "namespace": scope.namespace,
-    }
-
-
-def action_scope_from_dict(data: dict[str, Any] | None) -> Action | None:
-    """Deserialize an :class:`Action` from a JSON-friendly dict.
-
-    Args:
-        data: Mapping previously produced by
-            :func:`action_scope_to_dict`, or ``None``.
-
-    Returns:
-        The reconstructed :class:`Action`, or ``None``.
-    """
-    if data is None:
-        return None
-    return Action(
-        kind=data.get("kind", "any"),
-        name=data.get("name") or None,
-        group=data.get("group") or None,
-        namespace=data.get("namespace") or None,
-    )
-
-
-def resource_scope_to_dict(scope: Resource | None) -> dict[str, Any] | None:
-    """Serialize a :class:`Resource` to a JSON-friendly dict.
-
-    Args:
-        scope: Resource scope, or ``None``.
-
-    Returns:
-        A plain ``dict`` mirroring the scope's fields, or ``None``.
-    """
-    if scope is None:
-        return None
-    return {
-        "kind": scope.kind,
-        "type_name": scope.type_name,
-        "entity_id": scope.entity_id,
-        "parent_type": scope.parent_type,
-        "parent_id": scope.parent_id,
-    }
-
-
-def resource_scope_from_dict(data: dict[str, Any] | None) -> Resource | None:
-    """Deserialize a :class:`Resource` from a JSON-friendly dict.
-
-    Args:
-        data: Mapping previously produced by
-            :func:`resource_scope_to_dict`, or ``None``.
-
-    Returns:
-        The reconstructed :class:`Resource`, or ``None``.
-    """
-    if data is None:
-        return None
-    return Resource(
-        kind=data.get("kind", "any"),
-        type_name=data.get("type_name") or None,
-        entity_id=data.get("entity_id") or None,
-        parent_type=data.get("parent_type") or None,
-        parent_id=data.get("parent_id") or None,
-    )
-
-
-def condition_clauses_to_list(
-    clauses: tuple[Clause, ...],
-) -> list[dict[str, Any]]:
-    """Serialize a tuple of condition clauses to a JSON list."""
-    return [{"body": clause.body, "attributes": dict(clause.attributes)} for clause in clauses]
-
-
-def condition_clauses_from_list(
-    data: list[dict[str, Any]] | None,
-) -> tuple[Clause, ...]:
-    """Deserialize a JSON list back into a tuple of condition clauses.
-
-    Accepts both the canonical shape
-    (``[{"body": "...", "attributes": {...}}, ...]``) and the legacy
-    short form (``["body string", ...]``) for backward compatibility.
-    """
-    if not data:
-        return ()
-    clauses: list[Clause] = []
-    for item in data:
-        if isinstance(item, str):
-            clauses.append(Clause(body=item))
-        elif isinstance(item, dict) and "body" in item:
-            attrs = item.get("attributes") or {}
-            clauses.append(
-                Clause(
-                    body=item["body"],
-                    attributes=dict(attrs) if isinstance(attrs, dict) else {},
-                )
-            )
-    return tuple(clauses)
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Clause:
+        """Reconstruct a Clause from its JSON-friendly representation."""
+        attrs_raw = data.get("attributes") or {}
+        attrs: dict[str, Expression] = dict(attrs_raw) if isinstance(attrs_raw, dict) else {}
+        return cls(body=str(data.get("body", "")), attributes=attrs)
 
 
 __all__ = [
@@ -308,13 +302,5 @@ __all__ = [
     "Expression",
     "Principal",
     "Resource",
-    "action_scope_from_dict",
-    "action_scope_to_dict",
-    "condition_clauses_from_list",
-    "condition_clauses_to_list",
-    "principal_scope_from_dict",
-    "principal_scope_to_dict",
-    "resource_scope_from_dict",
-    "resource_scope_to_dict",
+    "Scope",
 ]
-

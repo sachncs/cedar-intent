@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from cedrus import Need, load_requirement, load_requirements, render_requirement
+from cedrus import Need, load, loads, render
 from cedrus.error import Require
 from cedrus.need import (
     derive_domain,
@@ -58,7 +58,7 @@ def test_parse_front_matter_malformed_raises(tmp_path: Path) -> None:
     path = tmp_path / "bad.md"
     path.write_text("---\nnot_a_valid_line\n---\n\nBody", encoding="utf-8")
     with pytest.raises(Require):
-        load_requirement(path)
+        load(path)
 
 
 def test_slugify_handles_punctuation_and_case() -> None:
@@ -81,40 +81,40 @@ def test_derive_domain_defaults_for_root_level(tmp_path: Path) -> None:
     assert derive_domain(target, tmp_path) == "default"
 
 
-def test_load_requirement_from_file(tmp_path: Path) -> None:
+def test_load_from_file(tmp_path: Path) -> None:
     path = tmp_path / "hr" / "HR-042.md"
     path.parent.mkdir(parents=True)
     path.write_text(
         "---\nid: HR-042\ndomain: hr\n---\n\nBody text.\n", encoding="utf-8"
     )
-    requirement = load_requirement(path, workspace_root=tmp_path)
+    requirement = load(path, workspace_root=tmp_path)
     assert requirement.id == "HR-042"
     assert requirement.domain == "hr"
     assert "Body text." in requirement.text
 
 
-def test_load_requirement_without_domain_uses_path(tmp_path: Path) -> None:
+def test_load_without_domain_uses_path(tmp_path: Path) -> None:
     path = tmp_path / "hr" / "requirements" / "HR-100.md"
     path.parent.mkdir(parents=True)
     path.write_text("Body", encoding="utf-8")
-    requirement = load_requirement(path, workspace_root=tmp_path)
+    requirement = load(path, workspace_root=tmp_path)
     assert requirement.domain == "hr"
     assert requirement.id == "HR-100"
 
 
-def test_load_requirement_missing_raises(tmp_path: Path) -> None:
+def test_load_missing_raises(tmp_path: Path) -> None:
     with pytest.raises(Require):
-        load_requirement(tmp_path / "nope.md")
+        load(tmp_path / "nope.md")
 
 
-def test_load_requirement_empty_body_raises(tmp_path: Path) -> None:
+def test_load_empty_body_raises(tmp_path: Path) -> None:
     path = tmp_path / "bad.md"
     path.write_text("---\nid: X\ndomain: hr\n---\n\n   \n", encoding="utf-8")
     with pytest.raises(Require):
-        load_requirement(path)
+        load(path)
 
 
-def test_load_requirements_returns_sorted_list(tmp_path: Path) -> None:
+def test_loads_returns_sorted_list(tmp_path: Path) -> None:
     directory = tmp_path
     for identifier in ("HR-003", "HR-001", "HR-002"):
         path = directory / f"{identifier}.md"
@@ -122,13 +122,13 @@ def test_load_requirements_returns_sorted_list(tmp_path: Path) -> None:
             f"---\nid: {identifier}\ndomain: hr\n---\n\nBody {identifier}\n",
             encoding="utf-8",
         )
-    requirements = load_requirements(directory)
+    requirements = loads(directory)
     assert [req.id for req in requirements] == ["HR-001", "HR-002", "HR-003"]
 
 
-def test_load_requirements_missing_directory_raises(tmp_path: Path) -> None:
+def test_loads_missing_directory_raises(tmp_path: Path) -> None:
     with pytest.raises(Require):
-        load_requirements(tmp_path / "missing")
+        loads(tmp_path / "missing")
 
 
 def test_requirement_validation_enforces_non_empty_fields() -> None:
@@ -158,8 +158,8 @@ def test_requirement_validation_enforces_non_empty_fields() -> None:
         )
 
 
-def test_render_requirement_round_trip(requirement: Need) -> None:
-    rendered = render_requirement(requirement)
+def test_render_round_trip(requirement: Need) -> None:
+    rendered = render(requirement)
     assert f"id: {requirement.id}" in rendered
     assert f"domain: {requirement.domain}" in rendered
     assert requirement.text in rendered

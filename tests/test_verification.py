@@ -14,7 +14,7 @@ from cedrus import (
     Report,
     Resource,
     extract_entity_types,
-    verify_policies,
+    verify,
 )
 
 
@@ -102,7 +102,7 @@ def make_policy(
     )
 
 
-def test_verify_policies_passes_when_clean() -> None:
+def test_verify_passes_when_clean() -> None:
     policies = [
         make_policy(
             "HR-001",
@@ -111,7 +111,7 @@ def test_verify_policies_passes_when_clean() -> None:
             resource=Resource(kind="is_type", type_name="Foo::Photo"),
         )
     ]
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001"],
@@ -127,14 +127,14 @@ def test_verify_policies_passes_when_clean() -> None:
     assert report.actions_uncovered == ()
 
 
-def test_verify_policies_reports_missing_requirement() -> None:
+def test_verify_reports_missing_requirement() -> None:
     policies = [
         make_policy(
             "HR-001",
             action=Action(kind="named", name="view"),
         )
     ]
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001", "HR-002"],
@@ -146,14 +146,14 @@ def test_verify_policies_reports_missing_requirement() -> None:
     assert any(finding.kind == "uncovered-requirement" for finding in report.findings)
 
 
-def test_verify_policies_reports_missing_action() -> None:
+def test_verify_reports_missing_action() -> None:
     policies = [
         make_policy(
             "HR-001",
             action=Action(kind="named", name="view"),
         )
     ]
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001", "HR-002"],
@@ -166,7 +166,7 @@ def test_verify_policies_reports_missing_action() -> None:
     assert any(finding.kind == "uncovered-action" for finding in report.findings)
 
 
-def test_verify_policies_reports_missing_entity_type() -> None:
+def test_verify_reports_missing_entity_type() -> None:
     policies = [
         make_policy(
             "HR-001",
@@ -175,7 +175,7 @@ def test_verify_policies_reports_missing_entity_type() -> None:
             resource=Resource(kind="is_type", type_name="Foo::Photo"),
         )
     ]
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001"],
@@ -187,7 +187,7 @@ def test_verify_policies_reports_missing_entity_type() -> None:
     assert "uncovered-entity-type" in kinds
 
 
-def test_verify_policies_detects_shadowing() -> None:
+def test_verify_detects_shadowing() -> None:
     forbid = make_policy(
         "HR-002",
         effect="forbid",
@@ -202,7 +202,7 @@ def test_verify_policies_detects_shadowing() -> None:
         action=Action(kind="named", name="view"),
         resource=Resource(kind="any"),
     )
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=[permit, forbid],
         requirement_ids=["HR-001", "HR-002"],
@@ -216,7 +216,7 @@ def test_verify_policies_detects_shadowing() -> None:
     assert shadow.relatedpolicy_id == "HR-002"
 
 
-def test_verify_policies_does_not_shadow_any_with_specific_forbid() -> None:
+def test_verify_does_not_shadow_any_with_specific_forbid() -> None:
     """A forbid on Alice must not shadow a permit on any principal."""
     forbid = make_policy(
         "HR-002",
@@ -234,7 +234,7 @@ def test_verify_policies_does_not_shadow_any_with_specific_forbid() -> None:
         action=Action(kind="named", name="view"),
         resource=Resource(kind="is_type", type_name="Foo::Photo"),
     )
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=[permit, forbid],
         requirement_ids=["HR-001", "HR-002"],
@@ -248,7 +248,7 @@ def test_verify_policies_does_not_shadow_any_with_specific_forbid() -> None:
     )
 
 
-def test_verify_policies_detects_redundancy() -> None:
+def test_verify_detects_redundancy() -> None:
     permit_a = make_policy(
         "HR-001",
         action=Action(kind="named", name="view"),
@@ -257,7 +257,7 @@ def test_verify_policies_detects_redundancy() -> None:
         "HR-002",
         action=Action(kind="named", name="view"),
     )
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=[permit_a, permit_b],
         requirement_ids=["HR-001", "HR-002"],
@@ -270,7 +270,7 @@ def test_verify_policies_detects_redundancy() -> None:
     assert redundancy.policy_id in {"HR-001", "HR-002"}
 
 
-def test_verify_policies_does_not_flag_different_conditions_as_redundant() -> None:
+def test_verify_does_not_flag_different_conditions_as_redundant() -> None:
     """Two policies with the same scope but different conditions are not redundant."""
     permit_admin = make_policy(
         "HR-001",
@@ -283,7 +283,7 @@ def test_verify_policies_does_not_flag_different_conditions_as_redundant() -> No
         "HR-002",
         cedar='permit (principal, action == Action::"view", resource);',
     )
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=[permit_admin, permit_anyone],
         requirement_ids=["HR-001", "HR-002"],
@@ -293,7 +293,7 @@ def test_verify_policies_does_not_flag_different_conditions_as_redundant() -> No
     assert not any(finding.kind == "redundancy" for finding in report.findings)
 
 
-def test_verify_policies_distinguishes_distinct_scopes() -> None:
+def test_verify_distinguishes_distinct_scopes() -> None:
     permit_a = make_policy(
         "HR-001",
         principal=Principal(kind="any"),
@@ -306,7 +306,7 @@ def test_verify_policies_distinguishes_distinct_scopes() -> None:
         action=Action(kind="named", name="view"),
         resource=Resource(kind="is_type", type_name="Foo::Photo"),
     )
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=[permit_a, permit_b],
         requirement_ids=["HR-001", "HR-002"],
@@ -316,8 +316,8 @@ def test_verify_policies_distinguishes_distinct_scopes() -> None:
     assert not any(finding.kind == "redundancy" for finding in report.findings)
 
 
-def test_verify_policies_to_dict_serializes_findings() -> None:
-    report = verify_policies(
+def test_verify_to_dict_serializes_findings() -> None:
+    report = verify(
         domain="hr",
         policies=[],
         requirement_ids=["HR-001"],
@@ -339,7 +339,7 @@ def test_action_coverage_expands_groups() -> None:
         )
     ]
     actions_by_namespace = {"Foo": {"readers": ("view", "delete", "edit")}}
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001"],
@@ -368,7 +368,7 @@ def test_action_coverage_handles_same_action_in_two_namespaces() -> None:
             cedar='permit (principal, action == Hr::Action::"view", resource);',
         )
     ]
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001"],
@@ -405,7 +405,7 @@ def test_scope_signature_distinguishes_principal_kinds() -> None:
     assert any_scope.kind != type_scope.kind
 
 
-def test_verify_policies_records_finding_severity_warning() -> None:
+def test_verify_records_finding_severity_warning() -> None:
     forbid = make_policy(
         "HR-002",
         effect="forbid",
@@ -419,7 +419,7 @@ def test_verify_policies_records_finding_severity_warning() -> None:
         action=Action(kind="named", name="view"),
         resource=Resource(kind="any"),
     )
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=[permit, forbid],
         requirement_ids=["HR-001", "HR-002"],
@@ -439,7 +439,7 @@ def test_malformed_policy_emits_warning() -> None:
             cedar="this is not valid Cedar at all",
         )
     ]
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001"],
@@ -472,7 +472,7 @@ def test_conditions_with_equivalent_ast_are_not_redundant() -> None:
             ),
         ),
     ]
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001", "HR-002"],
@@ -503,7 +503,7 @@ def test_conditions_with_different_ast_have_different_signatures() -> None:
             ),
         ),
     ]
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001", "HR-002"],

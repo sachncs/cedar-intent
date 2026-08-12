@@ -49,7 +49,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from .case import Case, Suite, load_scenarios, run_scenarios
+from .case import Case, Suite, Runner
 from .compile import Intent, compile_intent
 from .deploy import (
     Bundler,
@@ -258,7 +258,7 @@ class Workspace:
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, list):
             raise Space(f"scenarios file must contain a list: {path}")
-        return load_scenarios(data)
+        return Case.load(data)
 
     def add_requirement_file(self, path: Path) -> Need:
         """Load a single requirement from ``path`` and persist it.
@@ -863,7 +863,10 @@ class Workspace:
         ]
         if not policies:
             raise Space(f"no compiled policies for domain {domain!r}")
-        return run_scenarios(policies, list(entities), scenarios, schema=schema)
+        effective_schema = schema or Schema.from_mapping(
+            {"": {"entityTypes": {}, "actions": {}}}
+        )
+        return Runner(effective_schema).run(policies, scenarios)
 
     def export_domain(self, domain: str, output: Path) -> Path:
         """Write a Cedar bundle for ``domain`` to ``output``.

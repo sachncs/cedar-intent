@@ -7,8 +7,7 @@ import pytest
 from cedrus import (
     Case,
     Schema,
-    load_scenarios,
-    run_scenarios,
+    run,
 )
 
 VALID_POLICY = (
@@ -47,8 +46,8 @@ def test_scenario_rejects_empty_name() -> None:
         )
 
 
-def test_load_scenarios_handles_missing_keys() -> None:
-    scenarios = load_scenarios(
+def test_load_handles_missing_keys() -> None:
+    scenarios = Case.load(
         [
             {
                 "name": "ok",
@@ -63,13 +62,13 @@ def test_load_scenarios_handles_missing_keys() -> None:
     assert scenarios[0].expected == "Allow"
 
 
-def test_load_scenarios_rejects_non_mapping() -> None:
+def test_load_rejects_non_mapping() -> None:
     with pytest.raises(ValueError):
-        load_scenarios(["not a dict"])  # type: ignore[list-item]
+        Case.load(["not a dict"])  # type: ignore[list-item]
 
 
-def test_load_scenarios_assigns_default_names() -> None:
-    scenarios = load_scenarios(
+def test_load_assigns_default_names() -> None:
+    scenarios = Case.load(
         [
             {
                 "principal": 'User::"alice"',
@@ -83,7 +82,7 @@ def test_load_scenarios_assigns_default_names() -> None:
     assert scenarios[0].name == "scenario-0"
 
 
-def test_run_scenarios_allow_and_deny(schema: Schema) -> None:
+def test_run_allow_and_deny(schema: Schema) -> None:
     scenarios = [
         Case(
             name="alice-can-view",
@@ -102,7 +101,7 @@ def test_run_scenarios_allow_and_deny(schema: Schema) -> None:
             expected="Deny",
         ),
     ]
-    report = run_scenarios([VALID_POLICY, FORBID_POLICY], [], scenarios, schema=schema)
+    report = run([VALID_POLICY, FORBID_POLICY], [], scenarios, schema=schema)
     assert report.passed
     assert {result.scenario.name for result in report.results} == {
         "alice-can-view",
@@ -110,7 +109,7 @@ def test_run_scenarios_allow_and_deny(schema: Schema) -> None:
     }
 
 
-def test_run_scenarios_records_failures(schema: Schema) -> None:
+def test_run_records_failures(schema: Schema) -> None:
     scenarios = [
         Case(
             name="wrong-expectation",
@@ -121,12 +120,12 @@ def test_run_scenarios_records_failures(schema: Schema) -> None:
             expected="Deny",
         )
     ]
-    report = run_scenarios([VALID_POLICY], [], scenarios, schema=schema)
+    report = run([VALID_POLICY], [], scenarios, schema=schema)
     assert not report.passed
     assert report.results[0].passed is False
 
 
-def test_run_scenarios_without_schema_uses_default() -> None:
+def test_run_without_schema_uses_default() -> None:
     scenarios = [
         Case(
             name="deny-default",
@@ -137,5 +136,5 @@ def test_run_scenarios_without_schema_uses_default() -> None:
             expected="Deny",
         )
     ]
-    report = run_scenarios([FORBID_POLICY], [], scenarios)
+    report = run([FORBID_POLICY], [], scenarios)
     assert report.passed

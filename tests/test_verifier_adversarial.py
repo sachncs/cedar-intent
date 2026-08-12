@@ -17,7 +17,7 @@ from cedrus import (
     Need,
     Principal,
     Resource,
-    verify_policies,
+    verify,
 )
 
 
@@ -46,7 +46,7 @@ def make_policy(cedar: str, identifier: str = "HR-001") -> Intent:
 def test_malformed_cedar_emits_finding() -> None:
     """Garbage that cedarpy rejects produces a malformed-policy finding, not a global permit."""
     policies = [make_policy("this is not valid Cedar at all")]
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001"],
@@ -65,7 +65,7 @@ def test_comment_containing_permit_does_not_shadow() -> None:
         'permit (principal is User, action, resource);'
     )
     policies = [make_policy(cedar)]
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001"],
@@ -78,7 +78,7 @@ def test_comment_containing_permit_does_not_shadow() -> None:
 def test_empty_cedar_emits_malformed_finding() -> None:
     """Empty Cedar text is treated as malformed, not silently permitted."""
     policies = [make_policy("")]
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001"],
@@ -99,7 +99,7 @@ def test_multiline_permit_parses() -> None:
         ");"
     )
     policies = [make_policy(cedar)]
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001"],
@@ -116,7 +116,7 @@ def test_resource_in_parent_parses() -> None:
         'resource is Photo in Album::"a1");'
     )
     policies = [make_policy(cedar)]
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001"],
@@ -141,7 +141,7 @@ def test_two_policies_with_distinct_conditions_not_redundant() -> None:
             "HR-002",
         ),
     ]
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001", "HR-002"],
@@ -162,7 +162,7 @@ def test_two_policies_with_same_conditions_flagged_redundant() -> None:
             "HR-002",
         ),
     ]
-    report = verify_policies(
+    report = verify(
         domain="hr",
         policies=policies,
         requirement_ids=["HR-001", "HR-002"],

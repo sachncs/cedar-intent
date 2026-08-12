@@ -5,7 +5,7 @@ their own (incompatible) intent JSON format. The canonical format now
 lives in :mod:`cedrus.scope` and both layers round-trip
 through it. These tests pin the contract:
 
-* ``intent_to_dict``/``intent_from_dict`` are inverses.
+* ``_dummy_to_dict``/``_dummy_from_dict`` are inverses.
 * The canonical wire format uses ``when_clauses``/``unless_clauses``.
 * Readers accept the legacy ``when``/``unless`` short form for
   backward compatibility with stored rows.
@@ -19,16 +19,8 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from cedrus import Intent, Workspace
-from cedrus.compile import (
-    Action,
-    Clause,
-    Principal,
-    Resource,
-    intent_from_dict,
-    intent_to_dict,
-)
-from cedrus.compile import Intent as CompilerPolicyIntent  # noqa: F401
+from cedrus import Intent, Space
+from cedrus.compile import Action, Clause, Principal, Resource
 
 
 def _make_intent() -> Intent:
@@ -51,8 +43,8 @@ def _make_intent() -> Intent:
     )
 
 
-def test_intent_to_dict_uses_canonical_keys() -> None:
-    payload = intent_to_dict(_make_intent())
+def test__dummy_to_dict_uses_canonical_keys() -> None:
+    payload = intent.to_dict(_make_intent())
     assert payload is not None
     assert "when_clauses" in payload
     assert "unless_clauses" in payload
@@ -62,9 +54,9 @@ def test_intent_to_dict_uses_canonical_keys() -> None:
 
 def test_intent_round_trip_through_dict() -> None:
     original = _make_intent()
-    payload = intent_to_dict(original)
+    payload = intent.to_dict(original)
     assert payload is not None
-    rebuilt = intent_from_dict(payload)
+    rebuilt = Intent.from_dict(payload)
     assert rebuilt is not None
     assert rebuilt.id == original.id
     assert rebuilt.requirement_id == original.requirement_id
@@ -80,15 +72,15 @@ def test_intent_round_trip_through_dict() -> None:
 def test_intent_round_trip_through_json() -> None:
     """Round-trip through json.dumps/loads (the path storage uses)."""
     original = _make_intent()
-    payload = intent_to_dict(original)
+    payload = intent.to_dict(original)
     assert payload is not None
     raw = json.dumps(payload, sort_keys=True)
-    rebuilt = intent_from_dict(json.loads(raw))
+    rebuilt = Intent.from_dict(json.loads(raw))
     assert rebuilt is not None
     assert rebuilt == original
 
 
-def test_intent_from_dict_accepts_legacy_when_unless() -> None:
+def test__dummy_from_dict_accepts_legacy_when_unless() -> None:
     """The legacy short form ``when``/``unless`` is still readable."""
     legacy = {
         "id": "HR-001",
@@ -101,14 +93,14 @@ def test_intent_from_dict_accepts_legacy_when_unless() -> None:
         "unless": [],
         "notes": {},
     }
-    intent = intent_from_dict(legacy)
+    intent = Intent.from_dict(legacy)
     assert intent is not None
     assert len(intent.when_clauses) == 1
     assert intent.when_clauses[0].body == "principal == User::\"alice\""
     assert intent.unless_clauses == ()
 
 
-def test_intent_from_dict_accepts_short_form_string_array() -> None:
+def test__dummy_from_dict_accepts_short_form_string_array() -> None:
     """``condition_clauses_from_list`` accepts strings and dicts."""
     from cedrus.compile import condition_clauses_from_list
 
@@ -124,13 +116,13 @@ def test_intent_from_dict_accepts_short_form_string_array() -> None:
     )
 
 
-def test_intent_to_dict_none_returns_none() -> None:
-    assert intent_to_dict(None) is None
-    assert intent_from_dict(None) is None
+def test__dummy_to_dict_none_returns_none() -> None:
+    assert intent.to_dict(None) is None
+    assert Intent.from_dict(None) is None
 
 
 def test_workspace_stored_draft_round_trip(tmp_path: Path) -> None:
-    """Workspace-built DraftStored round-trips through intent_from_dict.
+    """Space-built DraftStored round-trips through _dummy_from_dict.
 
     This is the integration check: build_stored_draft (workspace.py)
     writes with the canonical format, intent_from_draft (workspace.py)
@@ -174,7 +166,7 @@ def test_workspace_stored_draft_round_trip(tmp_path: Path) -> None:
     assert stored.intent_json is not None
     payload = json.loads(stored.intent_json)
     assert "when_clauses" in payload
-    rebuilt = intent_from_dict(payload)
+    rebuilt = Intent.from_dict(payload)
     assert rebuilt is not None
     assert rebuilt.id == intent.id
     assert rebuilt.when_clauses == intent.when_clauses
@@ -189,7 +181,7 @@ def test_sqlite_storage_uses_canonical_keys(tmp_path: Path) -> None:
         Resource,
     )
 
-    workspace = Workspace.create(tmp_path / "acme")
+    workspace = Space.create(tmp_path / "acme")
     workspace.repository.add_requirement(
         Need(
             id="HR-042",
@@ -240,10 +232,10 @@ def test_sqlite_storage_uses_canonical_keys(tmp_path: Path) -> None:
 
 
 def test_migration_uses_canonical_keys(tmp_path: Path) -> None:
-    """migrate_legacy_rows writes the canonical format on upgrade."""
-    from cedrus.migrate import migrate_legacy_rows
+    """migrate writes the canonical format on upgrade."""
+    from cedrus.migrate import migrate
 
-    workspace = Workspace.create(tmp_path / "acme")
+    workspace = Space.create(tmp_path / "acme")
     db = workspace.repository.path
     now = datetime.now(UTC).isoformat()
     with sqlite3.connect(db) as conn:
@@ -283,7 +275,7 @@ def test_migration_uses_canonical_keys(tmp_path: Path) -> None:
         )
         conn.execute("DELETE FROM meta")
         conn.commit()
-    upgraded = migrate_legacy_rows(workspace.repository)
+    upgraded = migrate(workspace.repository)
     assert upgraded >= 1
     with sqlite3.connect(db) as conn:
         row = conn.execute(

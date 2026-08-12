@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ..case import Case, Suite, run_scenarios
+from ..case import Case, Runner, Suite
 from ..compile import Intent
 from ..error import Fault
 from ..need import Need
@@ -71,12 +71,7 @@ class Compiled(Kind):
         Returns:
             A :class:`Suite` summarizing the outcomes.
         """
-        return run_scenarios(
-            [self.cedar],
-            list(entities or []),
-            scenarios,
-            schema=schema,
-        )
+        return Runner(schema).run([self.cedar], scenarios)
 
     def validate(self, schema: Schema) -> Vreport:
         """Validate this policy against ``schema``.

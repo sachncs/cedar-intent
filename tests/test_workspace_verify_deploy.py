@@ -16,7 +16,7 @@ from cedrus import (
     Principal,
     Report,
     Resource,
-    Workspace,
+    Space,
 )
 
 PHOTOFLASH_SCHEMA = {
@@ -34,12 +34,12 @@ PHOTOFLASH_SCHEMA = {
 }
 
 
-def make_workspace_with_domain(tmp_path: Path) -> Workspace:
+def make_workspace_with_domain(tmp_path: Path) -> Space:
     domain = tmp_path / "hr"
     (domain / "requirements").mkdir(parents=True)
     (domain / "policies").mkdir(parents=True)
     (domain / "schema.json").write_text(json.dumps(PHOTOFLASH_SCHEMA), encoding="utf-8")
-    return Workspace.open(tmp_path)
+    return Space.open(tmp_path)
 
 
 def make_requirement(identifier: str, tmp_path: Path) -> Need:

@@ -3,8 +3,8 @@
 These tests construct a hand-crafted pre-0.6.0 SQLite database (no
 action_scope_json, no draft intent/scope JSON) and exercise:
 
-- detect_legacy_rows counts the legacy rows
-- migrate_legacy_rows populates the new columns
+- detect counts the legacy rows
+- migrate populates the new columns
 - Sqlite.__post_init__ refuses to open a legacy database
 - cedrus migrate CLI exits with the right code in each mode
 """
@@ -20,22 +20,22 @@ from pathlib import Path
 
 import pytest
 
-from cedrus import Workspace
+from cedrus import Space
 from cedrus.error import Store
-from cedrus.migrate import detect_legacy_rows, migrate_legacy_rows
+from cedrus.migrate import detect, migrate
 
 
 @pytest.fixture
-def legacy_workspace(tmp_path: Path) -> Workspace:
+def legacy_workspace(tmp_path: Path) -> Space:
     """Build a pre-0.6.0 SQLite workspace fixture.
 
     The fixture writes rows that lack the action_scope_json column
     (policies) and the intent_json + scope JSON columns (drafts), so
-    detect_legacy_rows returns a positive count.
+    detect returns a positive count.
     """
     workspace_root = tmp_path / "acme"
     workspace_root.mkdir()
-    workspace = Workspace.create(workspace_root)
+    workspace = Space.create(workspace_root)
     db = workspace.repository.path
     now = datetime.now(UTC).isoformat()
     with sqlite3.connect(db) as connection:
@@ -78,9 +78,9 @@ def legacy_workspace(tmp_path: Path) -> Workspace:
     return workspace
 
 
-def test_detect_legacy_rows_returns_positive(legacy_workspace: Workspace) -> None:
-    """detect_legacy_rows reports the legacy policy and draft count."""
-    pending = detect_legacy_rows(legacy_workspace.repository)
+def test_detect_returns_positive(legacy_workspace: Space) -> None:
+    """detect reports the legacy policy and draft count."""
+    pending = detect(legacy_workspace.repository)
     assert pending >= 1
 
 
@@ -90,7 +90,7 @@ def test_sqlite_repository_refuses_to_open_legacy_db(
     """Opening a legacy database raises Store."""
     workspace_root = tmp_path / "acme"
     workspace_root.mkdir()
-    Workspace.create(workspace_root)
+    Space.create(workspace_root)
     db = workspace_root / ".cedrus" / "store.db"
     now = datetime.now(UTC).isoformat()
     with sqlite3.connect(db) as connection:
@@ -118,19 +118,19 @@ def test_sqlite_repository_refuses_to_open_legacy_db(
         connection.execute("DELETE FROM meta")
         connection.commit()
     with pytest.raises(Store):
-        Workspace.open(workspace_root)
+        Space.open(workspace_root)
 
 
-def test_migrate_legacy_rows_populates_columns(legacy_workspace: Workspace) -> None:
-    """migrate_legacy_rows writes the missing JSON columns."""
+def test_migrate_populates_columns(legacy_workspace: Space) -> None:
+    """migrate writes the missing JSON columns."""
     repository = legacy_workspace.repository
-    upgraded = migrate_legacy_rows(repository)
+    upgraded = migrate(repository)
     assert upgraded >= 1
-    assert detect_legacy_rows(repository) == 0
+    assert detect(repository) == 0
 
 
 def test_migrate_cli_default_reports_count(
-    legacy_workspace: Workspace, tmp_path: Path
+    legacy_workspace: Space, tmp_path: Path
 ) -> None:
     """``cedrus migrate`` prints the pending count and exits 0."""
     workspace_root = legacy_workspace.root
@@ -145,7 +145,7 @@ def test_migrate_cli_default_reports_count(
 
 
 def test_migrate_cli_check_returns_nonzero_on_legacy(
-    legacy_workspace: Workspace,
+    legacy_workspace: Space,
 ) -> None:
     """``cedrus migrate --check`` exits 1 when legacy rows exist."""
     result = subprocess.run(
@@ -166,7 +166,7 @@ def test_migrate_cli_check_returns_nonzero_on_legacy(
 
 
 def test_migrate_cli_check_returns_zero_after_apply(
-    legacy_workspace: Workspace,
+    legacy_workspace: Space,
 ) -> None:
     """``--check`` exits 0 after a successful ``--apply``."""
     workspace_root = legacy_workspace.root
@@ -202,7 +202,7 @@ def test_migrate_cli_check_returns_zero_after_apply(
     assert check.returncode == 0
 
 
-def test_migrate_cli_json_shape(legacy_workspace: Workspace) -> None:
+def test_migrate_cli_json_shape(legacy_workspace: Space) -> None:
     """``--json`` output contains the pending count."""
     result = subprocess.run(
         [

@@ -35,7 +35,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from ..case import Case, Suite, run_scenarios
+from ..case import Case, Runner, Suite
 from ..compile import Intent, Source, compile_intent
 from ..error import Fault
 from ..need import Need
@@ -136,7 +136,7 @@ class Kind(ABC):
     def test(
         self,
         schema: Schema,
-        scenarios: list[Case],
+        scenarios: Sequence[Case],
         entities: list[Mapping[str, object]] | None = None,
     ) -> Suite:
         """Run authorization scenarios through the Cedar engine.
@@ -149,11 +149,9 @@ class Kind(ABC):
         Returns:
             A :class:`Suite` summarizing the results.
         """
-        return run_scenarios(
+        return Runner(schema).run(
             [self.cedar],
-            list(entities or []),
             scenarios,
-            schema=schema,
         )
 
     def to_dict(self) -> Mapping[str, object]:

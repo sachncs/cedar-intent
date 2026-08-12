@@ -3,8 +3,8 @@
 A :class:`Case` represents a single Cedar authorization request
 (principal, action, resource, context) plus the expected decision
 (``"Allow"`` or ``"Deny"``). Scenarios are executed through
-:func:`run_scenarios`, which returns a structured :class:`Suite`
-with per-scenario outcomes.
+:class:`Runner`, which returns a structured :class:`Suite` with
+per-scenario outcomes.
 
 Why scenarios as a separate concept
 ------------------------------------
@@ -61,6 +61,38 @@ class Case:
         if self.expected not in {"Allow", "Deny"}:
             raise ValueError(f"scenario {self.name} expected must be Allow or Deny")
 
+    @classmethod
+    def load(cls, mapping: Sequence[Mapping[str, Any]]) -> list[Case]:
+        """Build :class:`Case` objects from a JSON-friendly mapping.
+
+        Args:
+            mapping: Sequence of dictionaries with ``principal``, ``action``,
+                ``resource``, ``context``, ``expected``, and optional ``name``.
+
+        Returns:
+            The list of parsed scenarios.
+        """
+        cases: list[Case] = []
+        for index, item in enumerate(mapping):
+            if not isinstance(item, Mapping):
+                raise ValueError(f"scenario entry {index} is not an object")
+            expected = str(item["expected"])
+            if expected not in {"Allow", "Deny"}:
+                raise ValueError(
+                    f"scenario {index} expected must be Allow or Deny, got {expected!r}"
+                )
+            cases.append(
+                cls(
+                    name=str(item.get("name") or f"scenario-{index}"),
+                    principal=str(item["principal"]),
+                    action=str(item["action"]),
+                    resource=str(item["resource"]),
+                    context=dict(item.get("context") or {}),
+                    expected=expected,  # type: ignore[arg-type]
+                )
+            )
+        return cases
+
 
 @dataclass(frozen=True, slots=True)
 class Outcome:
@@ -97,116 +129,63 @@ class Suite:
         }
 
 
-def load_scenarios(mapping: Sequence[Mapping[str, Any]]) -> list[Case]:
-    """Build :class:`Case` objects from a JSON-friendly mapping.
-
-    Args:
-        mapping: Sequence of dictionaries with ``principal``, ``action``,
-            ``resource``, ``context``, ``expected``, and optional ``name``.
-
-    Returns:
-        The list of parsed scenarios.
-    """
-    scenarios: list[Case] = []
-    for index, item in enumerate(mapping):
-        if not isinstance(item, Mapping):
-            raise ValueError(f"scenario entry {index} is not an object")
-        expected = str(item["expected"])
-        if expected not in {"Allow", "Deny"}:
-            raise ValueError(
-                f"scenario {index} expected must be Allow or Deny, got {expected!r}"
-            )
-        scenarios.append(
-            Case(
-                name=str(item.get("name") or f"scenario-{index}"),
-                principal=str(item["principal"]),
-                action=str(item["action"]),
-                resource=str(item["resource"]),
-                context=dict(item.get("context") or {}),
-                expected=expected,  # type: ignore[arg-type]
-            )
-        )
-    return scenarios
-
-
-
-
 class Runner:
-    """Scenario runner. Subclass for alternate scenario backends."""
+    """Scenario runner. Subclass for alternate scenario backends.
+
+    Attributes:
+        schema: The Cedar schema to use for evaluation.
+    """
 
     def __init__(self, schema: Schema) -> None:
         self.schema = schema
 
-    def run(self, cases: list) -> Suite:
-        """Run every case and return a Suite."""
-        return run_scenarios(
-            [case.cedar for case in cases],
-            entities=[],
-            scenarios=list(cases),
-            schema=self.schema,
-        )
+    def run(
+        self,
+        policies: Sequence[str],
+        cases: Sequence[Case],
+    ) -> Suite:
+        """Execute every scenario against the supplied Cedar sources.
 
+        Args:
+            policies: Cedar source for every compiled policy under test.
+            cases: Scenarios to execute.
 
-def run_scenarios(
-    policies: Sequence[str],
-    entities: Sequence[Mapping[str, Any]],
-    scenarios: Sequence[Case],
-    schema: Schema | None = None,
-) -> Suite:
-    """Execute a set of scenarios against compiled policies.
-
-    Args:
-        policies: Cedar source for every compiled policy to test.
-        entities: Entities to expose to the Cedar engine during evaluation.
-        scenarios: Scenarios to execute.
-        schema: Optional schema; an empty schema is used when omitted.
-
-    Returns:
-        A :class:`Suite` containing the outcome of each scenario.
-    """
-    effective_schema = schema
-    if effective_schema is None:
-        try:
-            effective_schema = Schema.from_mapping(
-                {"": {"entityTypes": {}, "actions": {}}}
+        Returns:
+            A :class:`Suite` containing the outcome of each scenario.
+        """
+        policy_set = PolicySet.from_str("\n\n".join(policies))
+        entity_list: list[dict[str, Any]] = []
+        results: list[Outcome] = []
+        for scenario in cases:
+            request: dict[str, Any] = {
+                "principal": scenario.principal,
+                "action": scenario.action,
+                "resource": scenario.resource,
+                "context": scenario.context,
+            }
+            auth_result = is_authorized(
+                request, policy_set, entity_list, schema=self.schema.handle
             )
-        except Validate as error:  # pragma: no cover - defensive
-            raise RuntimeError("default schema failed") from error
-    policy_set = PolicySet.from_str("\n\n".join(policies))
-    entity_list: list[dict[str, Any]] = [dict(entity) for entity in entities]
-    results: list[Outcome] = []
-    for scenario in scenarios:
-        request: dict[str, Any] = {
-            "principal": scenario.principal,
-            "action": scenario.action,
-            "resource": scenario.resource,
-            "context": scenario.context,
-        }
-        auth_result = is_authorized(
-            request, policy_set, entity_list, schema=effective_schema.handle
-        )
-        actual = "Allow" if auth_result.decision.name == "Allow" else "Deny"
-        actual_decision: Decision = actual  # type: ignore[assignment]
-        diagnostics: dict[str, Any] = {}
-        reasons = getattr(getattr(auth_result, "diagnostics", None), "reasons", None)
-        if reasons is not None:
-            diagnostics["reasons"] = list(reasons)
-        results.append(
-            Outcome(
-                scenario=scenario,
-                actual=actual_decision,
-                passed=actual == scenario.expected,
-                diagnostics=diagnostics,
+            actual_str = auth_result.decision.name
+            actual: Decision = "Allow" if actual_str == "Allow" else "Deny"
+            diagnostics: dict[str, Any] = {}
+            reasons = getattr(
+                getattr(auth_result, "diagnostics", None), "reasons", None
             )
+            if reasons is not None:
+                diagnostics["reasons"] = list(reasons)
+            results.append(
+                Outcome(
+                    scenario=scenario,
+                    actual=actual,
+                    passed=actual == scenario.expected,
+                    diagnostics=diagnostics,
+                )
+            )
+        return Suite(
+            passed=all(result.passed for result in results),
+            results=tuple(results),
         )
-    return Suite(passed=all(result.passed for result in results), results=tuple(results))
 
 
-__all__ = [
-    "Decision",
-    "Case",
-    "Outcome",
-    "Suite",
-    "load_scenarios",
-    "run_scenarios",
-]
+__all__ = ["Case", "Decision", "Outcome", "Runner", "Suite"]

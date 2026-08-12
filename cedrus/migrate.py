@@ -37,15 +37,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Protocol
 
 from .compile import Intent
-from .scope import (
-    Action,
-    Clause,
-    Principal,
-    Resource,
-    action_scope_to_dict,
-    principal_scope_to_dict,
-    resource_scope_to_dict,
-)
+from .scope import Action, Clause, Principal, Resource
 
 if TYPE_CHECKING:
     from .store.base import DraftStored, Stored
@@ -228,11 +220,11 @@ def dumps(scope: Any) -> str:
     from .compile import intent_to_dict
 
     if isinstance(scope, Principal):
-        return json.dumps(principal_scope_to_dict(scope), sort_keys=True)
+        return json.dumps(scope.to_dict(), sort_keys=True)
     if isinstance(scope, Action):
-        return json.dumps(action_scope_to_dict(scope), sort_keys=True)
+        return json.dumps(scope.to_dict(), sort_keys=True)
     if isinstance(scope, Resource):
-        return json.dumps(resource_scope_to_dict(scope), sort_keys=True)
+        return json.dumps(scope.to_dict(), sort_keys=True)
     if isinstance(scope, Intent):
         return json.dumps(intent_to_dict(scope), sort_keys=True)
     if isinstance(scope, Clause):
