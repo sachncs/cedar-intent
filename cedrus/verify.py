@@ -356,11 +356,16 @@ class Verifier:
                 "No compiled policy addresses requirement {items}.",
             )
         )
+        qualified_referenced = {
+            self.schema.qualify_type_name(name)
+            for name in self.collect_entity_types(extracted)
+        }
+        qualified_referenced.discard(None)
         findings.extend(
             self.missing_coverage_finding(
                 "uncovered-entity-type",
                 domain,
-                sorted(entity_type_set - self.collect_entity_types(extracted)),
+                sorted(entity_type_set - qualified_referenced),
                 "No policy references entity type {items}.",
             )
         )
