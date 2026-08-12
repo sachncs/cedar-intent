@@ -52,12 +52,6 @@ class Memory:
     reports: list[ReportStored] = field(default_factory=list)
     deployments: list[Record] = field(default_factory=list)
 
-    def __post_init__(self) -> None:
-        # Legacy detection is a no-op for in-memory repositories; the
-        # schema is always current. Kept here for protocol parity with
-        # the SQLite backend.
-        self._legacy_count: int = 0
-
     def add_requirement(self, requirement: Need) -> None:
         """Add or replace ``requirement`` in the store.
 

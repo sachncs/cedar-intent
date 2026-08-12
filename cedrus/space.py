@@ -34,7 +34,7 @@ Thread safety
 
 A single :class:`Workspace` instance is safe for concurrent use from
 multiple threads only when the underlying :class:`Repository` supports
-it. The default :class:`Sqlite` serializes access through
+it. The default :class:`Backend` serializes access through
 its connection; for heavy parallel use, prefer one workspace per
 thread.
 """
@@ -65,10 +65,10 @@ from .schema import Schema
 from .scope import Action, Principal, Resource
 from .store import (
     DraftStored,
+    Backend,
     Memory,
     ReportStored,
     Repository,
-    Sqlite,
     Stored,
 )
 from .validate import Vreport, validate_cedar
@@ -119,7 +119,7 @@ class Workspace:
         if not root.exists() or not root.is_dir():
             raise Space(f"workspace root not found: {root}")
         storage_path = root / ".cedrus" / DEFAULT_STORAGE_FILENAME
-        repository = Sqlite(storage_path, allow_legacy=allow_legacy)
+        repository = Backend(storage_path, allow_legacy=allow_legacy)
         return cls(root=root, repository=repository, storage_path=storage_path)
 
     @classmethod
@@ -136,7 +136,7 @@ class Workspace:
         root.mkdir(parents=True, exist_ok=True)
         (root / ".cedrus").mkdir(exist_ok=True)
         storage_path = root / ".cedrus" / DEFAULT_STORAGE_FILENAME
-        repository = Sqlite(storage_path)
+        repository = Backend(storage_path)
         return cls(root=root, repository=repository, storage_path=storage_path)
 
     @classmethod

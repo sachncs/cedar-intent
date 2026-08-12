@@ -79,7 +79,7 @@ from .policies import Compiled, Draft, Existing, Kind
 from .schema import Schema
 from .scope import Action, Clause, Principal, Resource, Scope
 from .space import Space
-from .store import Memory, Repository, Sqlite
+from .store import Backend, Memory, Repository
 from .validate import Validator, Vreport
 from .verify import Extraction, Finding, Report, Verifier
 
@@ -127,9 +127,9 @@ __all__ = [
     "Scope",
     "ScopeFault",
     "Source",
+    "Backend",
     "Space",
     "SpaceError",
-    "Sqlite",
     "Store",
     "Suite",
     "Transport",

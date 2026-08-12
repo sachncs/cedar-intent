@@ -8,10 +8,10 @@ from pathlib import Path
 import pytest
 
 from cedrus import (
+    Backend,
     Memory,
     Record,
     Repository,
-    Sqlite,
     Store,
 )
 from cedrus.compile import Action, Intent, Principal, Resource

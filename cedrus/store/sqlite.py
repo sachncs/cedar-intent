@@ -23,12 +23,13 @@ Schema:
     re-hydrated to the typed objects on read. The serialization goes
     through :meth:`Intent.to_dict`, ``Scope.to_dict`` and
     :meth:`Payload.to_dict` so the wire format lives in one place.
-    Older databases are upgraded in place by :meth:`Sqlite.migrate`
-    followed by a strict-refusal check in :meth:`Sqlite.__post_init__`
-    that raises :class:`Store` when any legacy row remains.
+    Older databases are upgraded in place by :meth:`Backend.migrate`
+    followed by a strict-refusal check in
+    :meth:`Backend.__post_init__` that raises :class:`Store` when any
+    legacy row remains.
 
 Concurrency:
-    ``Sqlite`` enables ``journal_mode=WAL`` and
+    :class:`Backend` enables ``journal_mode=WAL`` and
     ``busy_timeout=5000`` so concurrent readers do not block writers
     and transient lock contention waits instead of raising
     immediately. The class connects with ``check_same_thread=False``
@@ -38,11 +39,11 @@ Concurrency:
     is documentation as much as defense.
 
     For parallel use across processes, each process should open its
-    own :class:`Sqlite` instance; SQLite's WAL mode handles the
+    own :class:`Backend` instance; SQLite's WAL mode handles the
     cross-process locking.
 
 Attributes:
-    Sqlite: SQLite-backed :class:`Repository` implementation.
+    Backend: SQLite-backed :class:`Repository` implementation.
 
 See Also:
     :mod:`cedrus.store.base`: :class:`Repository` Protocol this module
@@ -164,7 +165,7 @@ ALTER_DRAFT_COLUMNS = (
 
 #: Tables whose names are allowed in dynamic SQL. Anything outside
 #: this allow-list is rejected, preventing the f-string interpolation
-#: in :meth:`Sqlite.column_exists` from becoming a SQL injection
+#: in :meth:`Backend.column_exists` from becoming a SQL injection
 #: vector.
 KNOWN_TABLES = frozenset(
     {"requirements", "policies", "drafts", "reports", "deployments", "meta"}
@@ -172,13 +173,13 @@ KNOWN_TABLES = frozenset(
 
 
 # ---------------------------------------------------------------------------
-# Sqlite repository
+# SQLite repository
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class Sqlite:
-    """SQLite-backed repository.
+class Backend:
+    """SQLite-backed :class:`~cedrus.store.base.Repository`.
 
     Attributes:
         path: Filesystem location of the SQLite database file. The
@@ -188,6 +189,7 @@ class Sqlite:
             should set this; every other caller should leave it
             ``False`` so a legacy workspace is rejected loudly.
         connection: Open :class:`sqlite3.Connection` to the database.
+        lock: Re-entrant lock guarding every mutating call.
     """
 
     path: Path
@@ -378,7 +380,6 @@ class Sqlite:
         ).fetchone()
         if row is None:
             raise Store(f"requirement {requirement_id!r} not found")
-        from pathlib import Path
 
         return Need(
             id=row["id"],
@@ -406,7 +407,6 @@ class Sqlite:
             rows = self.connection.execute(
                 "SELECT * FROM requirements WHERE domain = ? ORDER BY id", (domain,)
             ).fetchall()
-        from pathlib import Path
 
         return [
             Need(
@@ -914,4 +914,4 @@ class Sqlite:
         ]
 
 
-__all__ = ["Sqlite"]
+__all__ = ["Backend"]

@@ -2,13 +2,13 @@
 
 from .base import DraftStored, ReportStored, Repository, Stored
 from .memory import Memory
-from .sqlite import Sqlite
+from .sqlite import Backend
 
 __all__ = [
-    "Memory",
-    "Repository",
-    "Sqlite",
+    "Backend",
     "DraftStored",
-    "Stored",
+    "Memory",
     "ReportStored",
+    "Repository",
+    "Stored",
 ]
