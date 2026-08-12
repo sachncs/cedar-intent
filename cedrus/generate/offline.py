@@ -24,6 +24,12 @@ Heuristics:
 
 Attributes:
     Offline: Deterministic generator that requires no network calls.
+
+See Also:
+    :mod:`cedrus.generate.base`: :class:`Generator` Protocol that
+        :class:`Offline` implements.
+    :mod:`cedrus.generate.litellm`: LLM-backed generator for
+        production drafting.
 """
 
 from __future__ import annotations
