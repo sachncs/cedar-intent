@@ -498,52 +498,6 @@ def command_requirement(workspace: Workspace, args: Namespace) -> Any:
     raise Config(f"unknown requirement command: {args.requirement_command}")
 
 
-def command_init(path: str) -> dict[str, Any]:
-    """Initialize a new workspace and report the absolute path."""
-    text = path.strip()
-    if not text or text in {".", "/"}:
-        raise Config("init --path must be a non-empty directory path")
-    target = Path(text)
-    workspace = Workspace.create(target)
-    workspace.close()
-    return {"initialized": str(target.resolve())}
-
-
-def command_domain(workspace: Workspace, args: Namespace) -> Any:
-    """Handle ``domain add`` and ``domain list`` subcommands."""
-    if args.domain_command == "add":
-        validate_identifier(args.name, "domain name")
-        schema_path = workspace.init_domain(args.name)
-        return {"domain": args.name, "schema": str(schema_path)}
-    if args.domain_command == "list":
-        domains = sorted(
-            {
-                str(path.parent.name)
-                for path in workspace.root.glob("*/schema.json")
-                if path.parent.name not in {".cedrus", ""}
-            }
-        )
-        return {"domains": domains}
-    raise Config(f"unknown domain command: {args.domain_command}")
-
-
-def command_requirement(workspace: Workspace, args: Namespace) -> Any:
-    """Handle ``requirement add`` and ``requirement list`` subcommands."""
-    if args.requirement_command == "add":
-        validate_identifier(args.domain, "domain name")
-        if not args.path.exists():
-            raise Config(f"requirement file not found: {args.path}")
-        target = workspace.requirements_directory(args.domain) / args.path.name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(args.path.read_text(encoding="utf-8"), encoding="utf-8")
-        requirement = workspace.add_requirement_file(target)
-        return {"id": requirement.id, "domain": requirement.domain}
-    if args.requirement_command == "list":
-        items = workspace.list_requirements(args.domain)
-        return {"requirements": [item.id for item in items]}
-    raise Config(f"unknown requirement command: {args.requirement_command}")
-
-
 def command_policy(workspace: Workspace, args: Namespace) -> Any:
     """Handle ``policy draft``, ``policy generate``, and ``policy apply`` subcommands.
 
