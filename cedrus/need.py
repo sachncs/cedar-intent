@@ -70,6 +70,20 @@ class Need:
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
+    def to_data(self) -> dict[str, Any]:
+        """Return the ``requirements`` row dict for this :class:`Need`.
+
+        Returns:
+            A dict keyed by ``requirements`` column name.
+        """
+        return {
+            "id": self.id,
+            "domain": self.domain,
+            "text": self.text,
+            "source_path": str(self.source_path),
+            "created_at": self.created_at.isoformat(),
+        }
+
 
 def parse_front_matter(source: str) -> tuple[Mapping[str, str], str]:
     """Split a Markdown document into ``(front_matter, body)``.

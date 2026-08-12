@@ -133,6 +133,32 @@ class Stored:
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
 
+    def to_rows(self) -> dict[str, Any]:
+        """Return the multi-row dict for this :class:`Stored`.
+
+        Includes the main ``policies`` row plus the
+        :meth:`Intent.to_data` dict (when ``self.intent`` is set).
+
+        Returns:
+            A dict with ``"policies"`` row and optional
+            ``"intents"`` / typed-object / composition rows.
+        """
+        rows: dict[str, Any] = {
+            "policies": {
+                "id": self.id,
+                "domain": self.domain,
+                "requirement_id": self.requirement_id,
+                "cedar": self.cedar,
+                "status": self.status,
+                "created_at": self.created_at.isoformat(),
+                "updated_at": self.updated_at.isoformat(),
+            },
+        }
+        if self.intent is not None:
+            intent_data = self.intent.to_data()
+            rows.update(intent_data)
+        return rows
+
 
 @dataclass(frozen=True, slots=True)
 class DraftStored:
@@ -194,6 +220,34 @@ class DraftStored:
             resource=Resource.parse(data["resources"]),
         )
 
+    def to_rows(self) -> dict[str, Any]:
+        """Return the multi-row dict for this :class:`DraftStored`.
+
+        Returns:
+            A dict with the ``drafts`` main row, the typed-object
+            rows (intent + 3 scopes), and the ``draft_unresolved``
+            rows.
+        """
+        intent_data = self.intent.to_data()
+        return {
+            "drafts": {
+                "id": self.id,
+                "policy_id": self.policy_id,
+                "model": self.model,
+                "request_id": self.request_id,
+                "cedar": self.cedar,
+                "created_at": self.created_at.isoformat(),
+            },
+            **intent_data,
+            "principals": intent_data.get("principals", []),
+            "actions": intent_data.get("actions", []),
+            "resources": intent_data.get("resources", []),
+            "unresolved": [
+                {"position": i, "item": item}
+                for i, item in enumerate(self.unresolved)
+            ],
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class ReportStored:
@@ -236,6 +290,24 @@ class ReportStored:
             payload=Payload.parse(data),
             created_at=datetime.fromisoformat(row["created_at"]),
         )
+
+    def to_rows(self) -> dict[str, Any]:
+        """Return the multi-row dict for this :class:`ReportStored`.
+
+        Returns:
+            A dict with the ``reports`` main row and the
+            ``report_payload`` rows.
+        """
+        payload_data = self.payload.to_data()
+        return {
+            "reports": {
+                "policy_id": self.policy_id,
+                "kind": self.kind,
+                "passed": 1 if self.passed else 0,
+                "created_at": self.created_at.isoformat(),
+            },
+            **payload_data,
+        }
 
 
 @runtime_checkable

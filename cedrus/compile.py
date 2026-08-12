@@ -273,6 +273,47 @@ class Intent:
             notes=notes,
         )
 
+    def to_data(self) -> dict[str, Any]:
+        """Return the multi-row dict for this :class:`Intent`.
+
+        Includes the row for the ``intents`` table, the row for
+        ``principals`` / ``actions`` / ``resources`` (from the typed
+        sub-objects), and the ordered ``intent_when_clauses`` /
+        ``intent_unless_clauses`` / ``intent_notes`` rows.
+
+        Returns:
+            A dict with ``"intents"`` and lists of typed-object /
+            composition rows ready for the multi-table write.
+        """
+        intent_row = {
+            "id": self.id,
+            "effect": self.effect,
+            "requirement_id": self.requirement_id,
+            "principal_id": self.principal.id,
+            "action_id": self.action.id,
+            "resource_id": self.resource.id,
+        }
+        return {
+            "intents": intent_row,
+            "principals": [self.principal.to_data()],
+            "actions": [self.action.to_data()],
+            "resources": [self.resource.to_data()],
+            "intent_when_clauses": [
+                {"intent_id": self.id, "position": i, "clause_id": c.id}
+                for i, c in enumerate(self.when_clauses)
+            ],
+            "intent_unless_clauses": [
+                {"intent_id": self.id, "position": i, "clause_id": c.id}
+                for i, c in enumerate(self.unless_clauses)
+            ],
+            "intent_notes": [
+                {"intent_id": self.id, "key": k, "value": v}
+                for k, v in self.notes.items()
+            ],
+            "when_clause_rows": [c.to_data() for c in self.when_clauses],
+            "unless_clause_rows": [c.to_data() for c in self.unless_clauses],
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class Source:

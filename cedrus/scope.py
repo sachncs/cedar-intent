@@ -192,6 +192,21 @@ class Principal(Scope):
             group_id=row["group_id"],
         )
 
+    def to_data(self) -> dict[str, Any]:
+        """Return the ``principals`` row dict for this :class:`Principal`.
+
+        Returns:
+            A dict keyed by ``principals`` column name.
+        """
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "type_name": self.type_name,
+            "entity_id": self.entity_id,
+            "group_type": self.group_type,
+            "group_id": self.group_id,
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class Action(Scope):
@@ -265,6 +280,19 @@ class Action(Scope):
             name=row["name"],
             group=row["group"],
         )
+
+    def to_data(self) -> dict[str, Any]:
+        """Return the ``actions`` row dict for this :class:`Action`.
+
+        Returns:
+            A dict keyed by ``actions`` column name.
+        """
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "name": self.name,
+            "group": self.group,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -358,6 +386,21 @@ class Resource(Scope):
             parent_id=row["parent_id"],
         )
 
+    def to_data(self) -> dict[str, Any]:
+        """Return the ``resources`` row dict for this :class:`Resource`.
+
+        Returns:
+            A dict keyed by ``resources`` column name.
+        """
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "type_name": self.type_name,
+            "entity_id": self.entity_id,
+            "parent_type": self.parent_type,
+            "parent_id": self.parent_id,
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class Clause(Scope):
@@ -448,6 +491,24 @@ class Clause(Scope):
             body=clause_row["body"],
             attributes=attrs,
         )
+
+    def to_data(self) -> dict[str, Any]:
+        """Return the multi-row dict for this :class:`Clause`.
+
+        Returns:
+            A dict with ``"clauses"`` (the main row) and
+            ``"clause_attributes"`` (one row per attribute key/value).
+        """
+        return {
+            "clauses": {
+                "id": self.id,
+                "body": self.body,
+            },
+            "clause_attributes": [
+                {"clause_id": self.id, "key": k, "value": v}
+                for k, v in self.attributes.items()
+            ],
+        }
 
 
 __all__ = [

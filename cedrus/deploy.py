@@ -230,6 +230,28 @@ class Record:
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
+    def to_data(self) -> dict[str, Any]:
+        """Return the multi-row dict for this :class:`Record`.
+
+        Returns:
+            A dict with ``"deployments"`` (main row) and
+            ``"deployment_responses"`` (one row per response key/value).
+        """
+        return {
+            "deployments": {
+                "id": self.id,
+                "domain": self.domain,
+                "target": self.target,
+                "target_kind": self.target_kind,
+                "bundle_hash": self.bundle_hash,
+                "status": self.status,
+                "created_at": self.created_at.isoformat(),
+            },
+            "deployment_responses": [
+                {"key": k, "value": v} for k, v in self.response.items()
+            ],
+        }
+
 
 class Bundler:
     """Build, write, and read :class:`Manifest` objects.

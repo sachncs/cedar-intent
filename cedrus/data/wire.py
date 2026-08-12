@@ -389,6 +389,20 @@ class Payload:
         rows = sorted(data["report_payload"], key=lambda r: r["position"])
         return cls(data=tuple((r["key"], r["value"]) for r in rows))
 
+    def to_data(self) -> dict[str, Any]:
+        """Return the ``report_payload`` rows for this :class:`Payload`.
+
+        Returns:
+            A dict with a ``"report_payload"`` list of
+            ``{"position", "key", "value"}`` row dicts.
+        """
+        return {
+            "report_payload": [
+                {"position": i, "key": k, "value": v}
+                for i, (k, v) in enumerate(self.data)
+            ],
+        }
+
 
 __all__ = [
     "Body",
