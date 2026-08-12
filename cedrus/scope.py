@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .error import ScopeFault
+from .utils import generate
 
 Expression = str | bool | int | float | dict[str, Any] | list[Any]
 
@@ -107,6 +108,7 @@ class Principal(Scope):
     """Scope applied to the ``principal`` slot of a Cedar policy.
 
     Attributes:
+        id: Unique identifier (UUID-style ``object_id``).
         kind: One of the ``Principal.VARIETIES`` constants.
         type_name: Entity type name (for ``type``, ``specific``, ``is_type``).
         entity_id: Entity id (for ``specific``).
@@ -121,6 +123,7 @@ class Principal(Scope):
     IS_TYPE: str = "is_type"
     VARIETIES: frozenset[str] = frozenset({ANY, TYPE, SPECIFIC, IN_GROUP, IS_TYPE})
 
+    id: str = field(default_factory=generate)
     kind: str = ANY
     type_name: str | None = None
     entity_id: str | None = None
@@ -176,6 +179,7 @@ class Action(Scope):
     """Scope applied to the ``action`` slot of a Cedar policy.
 
     Attributes:
+        id: Unique identifier (UUID-style ``object_id``).
         kind: One of the ``Action.VARIETIES`` constants.
         name: Action name (for ``named``).
         group: Action group name (for ``in_group``).
@@ -186,6 +190,7 @@ class Action(Scope):
     IN_GROUP: str = "in_group"
     VARIETIES: frozenset[str] = frozenset({ANY, NAMED, IN_GROUP})
 
+    id: str = field(default_factory=generate)
     kind: str = ANY
     name: str | None = None
     group: str | None = None
@@ -231,6 +236,7 @@ class Resource(Scope):
     """Scope applied to the ``resource`` slot of a Cedar policy.
 
     Attributes:
+        id: Unique identifier (UUID-style ``object_id``).
         kind: One of the ``Resource.VARIETIES`` constants.
         type_name: Entity type name (for ``type``, ``specific``, ``is_type``).
         entity_id: Entity id (for ``specific``).
@@ -245,6 +251,7 @@ class Resource(Scope):
     IS_TYPE: str = "is_type"
     VARIETIES: frozenset[str] = frozenset({ANY, TYPE, SPECIFIC, IN_PARENT, IS_TYPE})
 
+    id: str = field(default_factory=generate)
     kind: str = ANY
     type_name: str | None = None
     entity_id: str | None = None
@@ -302,10 +309,12 @@ class Clause(Scope):
     """A single ``when`` or ``unless`` clause carried by a draft.
 
     Attributes:
+        id: Unique identifier (UUID-style ``object_id``).
         body: Cedar expression body.
         attributes: Optional attribute bindings referenced by ``body``.
     """
 
+    id: str = field(default_factory=generate)
     body: str
     attributes: dict[str, Expression] = field(default_factory=dict)
 
