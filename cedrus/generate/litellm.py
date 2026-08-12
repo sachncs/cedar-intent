@@ -9,7 +9,7 @@ Prompting contract
 ------------------
 
 The system prompt asks the model for an ``intent`` object whose shape
-exactly matches :class:`~cedrus.compiler.Intent`. The
+exactly matches :class:`~cedrus.compile.Intent`. The
 model is told to:
 
 * use only entity types, actions, and attributes present in the
@@ -51,10 +51,10 @@ from typing import Any
 import litellm
 from openai import APIError
 
-from ..compiler import Intent
+from ..compile import Intent
 from ..error import Generate, ScopeFault
-from ..requirements import slugify
-from ..scopes import Action, Clause, Principal, Resource
+from ..need import slugify
+from ..scope import Action, Clause, Principal, Resource
 from .base import Context, Proposal, Result
 
 SYSTEM_PROMPT = """You are an authorization engineer producing a typed Cedar policy proposal.

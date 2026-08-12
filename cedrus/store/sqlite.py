@@ -55,12 +55,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ..compiler import Intent
-from ..deployment import Record
+from ..compile import Intent
+from ..deploy import Record
 from ..error import Store
-from ..migrations import detect_legacy_rows
-from ..requirements import Need
-from ..scopes import Action
+from ..migrate import detect_legacy_rows
+from ..need import Need
+from ..scope import Action
 from .base import DraftStored, ReportStored, Stored
 
 #: Current schema version. Bump whenever the SQLite schema changes in
@@ -380,7 +380,7 @@ class Sqlite:
         Args:
             policy: Policy row to upsert.
         """
-        from ..scope_json import intent_to_dict
+        from ..compile import intent_to_dict
 
         intent_payload = (
             json.dumps(intent_to_dict(policy.intent), sort_keys=True)
@@ -627,7 +627,7 @@ class Sqlite:
 def serialize_intent(intent: Intent | None) -> str | None:
     """Serialize a :class:`Intent` to a JSON string for SQLite storage.
 
-    This is a thin wrapper around :func:`cedrus.scope_json.intent_to_dict`.
+    This is a thin wrapper around :func:`cedrus.scope.intent_to_dict`.
     The canonical wire format lives there so storage and verification
     layers can never disagree.
 
@@ -637,7 +637,7 @@ def serialize_intent(intent: Intent | None) -> str | None:
     Returns:
         The JSON string, or ``None`` if ``intent`` is ``None``.
     """
-    from ..scope_json import intent_to_dict
+    from ..compile import intent_to_dict
 
     if intent is None:
         return None
@@ -647,7 +647,7 @@ def serialize_intent(intent: Intent | None) -> str | None:
 def deserialize_intent(payload: str | None) -> Intent | None:
     """Deserialize a :class:`Intent` from its JSON representation.
 
-    This is a thin wrapper around :func:`cedrus.scope_json.intent_from_dict`.
+    This is a thin wrapper around :func:`cedrus.scope.intent_from_dict`.
     Both the canonical ``when_clauses``/``unless_clauses`` shape and
     the legacy ``when``/``unless`` shape are accepted on read.
 
@@ -659,7 +659,7 @@ def deserialize_intent(payload: str | None) -> Intent | None:
         The reconstructed :class:`Intent`, or ``None`` if
         ``payload`` is empty.
     """
-    from ..scope_json import intent_from_dict
+    from ..compile import intent_from_dict
 
     if not payload:
         return None

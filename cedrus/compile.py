@@ -23,7 +23,20 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from .error import Compile
-from .scopes import Action, Clause, Principal, Resource
+from .scope import (
+    Action,
+    Clause,
+    Principal,
+    Resource,
+    action_scope_from_dict,
+    action_scope_to_dict,
+    condition_clauses_from_list,
+    condition_clauses_to_list,
+    principal_scope_from_dict,
+    principal_scope_to_dict,
+    resource_scope_from_dict,
+    resource_scope_to_dict,
+)
 
 Effect = Literal["permit", "forbid"]
 
@@ -219,7 +232,77 @@ __all__ = [
     "Effect",
     "Intent",
     "compile_intent",
+    "intent_from_dict",
+    "intent_to_dict",
     "render_action",
     "render_principal",
     "render_resource",
 ]
+
+
+def intent_to_dict(intent: Intent | None) -> dict[str, object] | None:
+    """Serialize a :class:`Intent` to a JSON-friendly dict.
+
+    The canonical wire format uses ``when_clauses`` and
+    ``unless_clauses`` keys with ``[{"body": ..., "attributes": ...},
+    ...]`` values so the verification layer can recover both the body
+    and any operator-supplied attributes.
+
+    Args:
+        intent: Intent to serialize, or ``None``.
+
+    Returns:
+        A plain ``dict`` mirroring the intent's fields, or ``None``
+        when ``intent`` is ``None``.
+    """
+    if intent is None:
+        return None
+    return {
+        "id": intent.id,
+        "requirement_id": intent.requirement_id,
+        "effect": intent.effect,
+        "principal": principal_scope_to_dict(intent.principal),
+        "action": action_scope_to_dict(intent.action),
+        "resource": resource_scope_to_dict(intent.resource),
+        "when_clauses": condition_clauses_to_list(intent.when_clauses),
+        "unless_clauses": condition_clauses_to_list(intent.unless_clauses),
+        "notes": dict(intent.notes),
+    }
+
+
+def intent_from_dict(data: Mapping[str, object] | None) -> Intent | None:
+    """Deserialize a :class:`Intent` from a JSON-friendly dict.
+
+    Accepts both the canonical ``when_clauses``/``unless_clauses``
+    shape and the legacy short form (``when``/``unless`` carrying a
+    list of body strings) so rows stored by earlier cedrus
+    versions still load.
+
+    Args:
+        data: Mapping previously produced by :func:`intent_to_dict`,
+            or ``None``.
+
+    Returns:
+        The reconstructed :class:`Intent`, or ``None`` when
+        ``data`` is ``None``.
+    """
+    if data is None:
+        return None
+    when_raw = data.get("when_clauses", data.get("when"))
+    unless_raw = data.get("unless_clauses", data.get("unless"))
+    principal = principal_scope_from_dict(data.get("principal")) or Principal()
+    action = action_scope_from_dict(data.get("action")) or Action()
+    resource = resource_scope_from_dict(data.get("resource")) or Resource()
+    when_clauses = condition_clauses_from_list(when_raw)
+    unless_clauses = condition_clauses_from_list(unless_raw)
+    return Intent(
+        id=str(data.get("id", "")),
+        requirement_id=str(data.get("requirement_id", "")),
+        effect=data.get("effect", "permit"),
+        principal=principal,
+        action=action,
+        resource=resource,
+        when_clauses=when_clauses,
+        unless_clauses=unless_clauses,
+        notes=dict(data.get("notes", {}) or {}),
+    )

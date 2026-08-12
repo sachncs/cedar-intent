@@ -23,8 +23,8 @@ from cedrus import (
     Result,
     Schema,
 )
-from cedrus.compiler import Intent
-from cedrus.generator import Proposal
+from cedrus.compile import Intent
+from cedrus.generate import Proposal
 
 
 def make_requirement(identifier: str = "HR-042") -> Need:

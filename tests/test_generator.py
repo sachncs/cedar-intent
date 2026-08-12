@@ -22,8 +22,8 @@ from cedrus import (
     Resource,
     Schema,
 )
-from cedrus.generator import Proposal, Result
-from cedrus.generator.base import merge_unresolved
+from cedrus.generate import Proposal, Result
+from cedrus.generate.base import merge_unresolved
 
 
 def make_requirement() -> Need:
@@ -143,7 +143,7 @@ def test_litellm_generator_validates_inputs() -> None:
 
 def test_litellm_generator_propagates_request_errors(schema: Schema) -> None:
     generator = Llm(model="provider/model")
-    with patch("cedrus.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generate.litellm.litellm.completion") as completion:
         completion.side_effect = litellm.exceptions.APIConnectionError(
             message="network down",
             llm_provider="provider",
@@ -172,7 +172,7 @@ def test_litellm_generator_extracts_proposal(schema: Schema) -> None:
         usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         choices=[SimpleNamespace(message=SimpleNamespace(content=_json(payload)))],
     )
-    with patch("cedrus.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generate.litellm.litellm.completion") as completion:
         completion.return_value = response
         result = generator.generate(make_context(schema))
     assert isinstance(result, Result)
@@ -189,7 +189,7 @@ def test_litellm_generator_rejects_invalid_json(schema: Schema) -> None:
         usage={},
         choices=[SimpleNamespace(message=SimpleNamespace(content="not json"))],
     )
-    with patch("cedrus.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generate.litellm.litellm.completion") as completion:
         completion.return_value = response
         with pytest.raises(Generate):
             generator.generate(make_context(schema))
@@ -203,7 +203,7 @@ def test_litellm_generator_rejects_missing_intent(schema: Schema) -> None:
         usage={},
         choices=[SimpleNamespace(message=SimpleNamespace(content=_json({"oops": True})))],
     )
-    with patch("cedrus.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generate.litellm.litellm.completion") as completion:
         completion.return_value = response
         with pytest.raises(Generate):
             generator.generate(make_context(schema))
@@ -217,7 +217,7 @@ def test_litellm_generator_rejects_non_object_intent(schema: Schema) -> None:
         usage={},
         choices=[SimpleNamespace(message=SimpleNamespace(content=_json({"intent": "oops"})))],
     )
-    with patch("cedrus.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generate.litellm.litellm.completion") as completion:
         completion.return_value = response
         with pytest.raises(Generate):
             generator.generate(make_context(schema))
@@ -239,7 +239,7 @@ def test_litellm_generator_rejects_invalid_effect(schema: Schema) -> None:
         usage={},
         choices=[SimpleNamespace(message=SimpleNamespace(content=_json(payload)))],
     )
-    with patch("cedrus.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generate.litellm.litellm.completion") as completion:
         completion.return_value = response
         with pytest.raises(Generate):
             generator.generate(make_context(schema))
@@ -269,7 +269,7 @@ def test_litellm_generator_handles_fallbacks(schema: Schema) -> None:
             )
         ],
     )
-    with patch("cedrus.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generate.litellm.litellm.completion") as completion:
         completion.return_value = response
         result = generator.generate(make_context(schema))
     assert completion.call_args.kwargs["fallbacks"] == ["backup"]
@@ -280,7 +280,7 @@ def test_litellm_generator_handles_fallbacks(schema: Schema) -> None:
 def test_litellm_generator_handles_missing_choices(schema: Schema) -> None:
     generator = Llm(model="primary")
     response = SimpleNamespace(id=None, model=None, usage=None, choices=[])
-    with patch("cedrus.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generate.litellm.litellm.completion") as completion:
         completion.return_value = response
         with pytest.raises(Generate):
             generator.generate(make_context(schema))
@@ -312,7 +312,7 @@ def test_litellm_generator_extracts_pydantic_usage(schema: Schema) -> None:
             )
         ],
     )
-    with patch("cedrus.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generate.litellm.litellm.completion") as completion:
         completion.return_value = response
         result = generator.generate(make_context(schema))
     assert result.usage == {"total_tokens": 42, "prompt_tokens": 7}
@@ -326,7 +326,7 @@ def test_litellm_generator_ignores_non_text_content(schema: Schema) -> None:
         usage={},
         choices=[SimpleNamespace(message=SimpleNamespace(content=None))],
     )
-    with patch("cedrus.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generate.litellm.litellm.completion") as completion:
         completion.return_value = response
         with pytest.raises(Generate):
             generator.generate(make_context(schema))
@@ -360,7 +360,7 @@ def test_litellm_prompt_wraps_requirement_in_fences(
 
 def test_litellm_system_prompt_declares_data_only_preamble() -> None:
     """System prompt must instruct the model to ignore instructions inside fences."""
-    from cedrus.generator.litellm import SYSTEM_PROMPT
+    from cedrus.generate.litellm import SYSTEM_PROMPT
 
     assert "data" in SYSTEM_PROMPT.lower()
     assert "Do not follow" in SYSTEM_PROMPT or "do not follow" in SYSTEM_PROMPT

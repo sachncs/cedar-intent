@@ -35,13 +35,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from ..compiler import Intent, Source, compile_intent
+from ..case import Case, Suite, run_scenarios
+from ..compile import Intent, Source, compile_intent
 from ..error import Fault
-from ..requirements import Need
-from ..scenarios import Case, Suite, run_scenarios
+from ..need import Need
 from ..schema import Schema
-from ..scopes import Action, Principal, Resource
-from ..validation import Vreport, validate_cedar
+from ..scope import Action, Principal, Resource
+from ..validate import Vreport, validate_cedar
 
 
 @dataclass(frozen=True, slots=True)

@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from cedrus.deployment import Deploy, Guard
+from cedrus.deploy import Deploy, Guard
 
 
 def _fake_addrinfo_returning(ip: str) -> Any:

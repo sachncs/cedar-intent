@@ -10,7 +10,7 @@ Storage lifecycle
 
 Every repository covers the same five tables:
 
-* ``requirements`` - one row per loaded :class:`~cedrus.requirements.Need`.
+* ``requirements`` - one row per loaded :class:`~cedrus.need.Need`.
 * ``policies`` - one row per compiled policy, with the typed intent
   and action namespace stored as JSON.
 * ``drafts`` - the full history of generator proposals per policy,
@@ -40,8 +40,8 @@ Starting with cedrus 0.6.0, :class:`DraftStored` carries the
 typed intent and per-slot scope JSON, and :class:`Stored`
 carries the action namespace. Older databases created before this
 version are upgraded on first open by
-:func:`cedrus.migrations.detect_legacy_rows` and
-:func:`cedrus.migrations.migrate_legacy_rows`, exposed via the
+:func:`cedrus.migrate.detect_legacy_rows` and
+:func:`cedrus.migrate.migrate_legacy_rows`, exposed via the
 ``cedrus migrate`` CLI subcommand. Until the migration runs,
 :class:`Sqlite` raises :class:`Store` on open so
 operators cannot accidentally work with a half-migrated store.
@@ -54,9 +54,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
-from ..compiler import Intent
-from ..deployment import Record
-from ..requirements import Need
+from ..compile import Intent
+from ..deploy import Record
+from ..need import Need
 
 
 @dataclass(frozen=True, slots=True)

@@ -18,12 +18,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ..compiler import Intent
+from ..case import Case, Suite, run_scenarios
+from ..compile import Intent
 from ..error import Fault
-from ..requirements import Need
-from ..scenarios import Case, Suite, run_scenarios
+from ..need import Need
 from ..schema import Schema
-from ..validation import Vreport, validate_cedar
+from ..validate import Vreport, validate_cedar
 from .base import Kind
 
 

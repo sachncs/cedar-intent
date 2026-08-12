@@ -18,7 +18,7 @@ A typical session runs through these stages:
    :meth:`Workspace.add_requirement_directory` registers Markdown
    requirements.
 4. **Generate draft** - :meth:`Workspace.generate_draft` runs a
-   :class:`~cedrus.generator.Generator` against a draft and
+   :class:`~cedrus.generate.Generator` against a draft and
    persists the proposal.
 5. **Apply** - :meth:`Workspace.apply` or
    :meth:`Workspace.apply_for_requirement` validates, optionally runs
@@ -49,21 +49,21 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from .compiler import Intent, compile_intent
-from .deployment import (
+from .case import Case, Suite, load_scenarios, run_scenarios
+from .compile import Intent, compile_intent
+from .deploy import (
     Bundler,
     Client,
     Manifest,
     Record,
 )
 from .error import Fault, Space, Store  # noqa: F401
-from .generator import Context, Generator, Result
+from .generate import Context, Generator, Result
+from .need import Need, load_requirement, load_requirements
 from .policies import Compiled, Draft, Existing, Kind
-from .requirements import Need, load_requirement, load_requirements
-from .scenarios import Case, Suite, load_scenarios, run_scenarios
 from .schema import Schema
-from .scopes import Action, Principal, Resource
-from .storage import (
+from .scope import Action, Principal, Resource
+from .store import (
     DraftStored,
     Memory,
     ReportStored,
@@ -71,8 +71,8 @@ from .storage import (
     Sqlite,
     Stored,
 )
-from .validation import Vreport, validate_cedar
-from .verification import Report, verify_policies
+from .validate import Vreport, validate_cedar
+from .verify import Report, verify_policies
 
 DEFAULT_STORAGE_FILENAME = "store.db"
 DEFAULT_REQUIREMENTS_DIRNAME = "requirements"
@@ -383,7 +383,7 @@ class Workspace:
             intent = policy.to_intent()
         except Fault:
             intent = None
-        from .scope_json import action_scope_to_dict
+        from .scope import action_scope_to_dict
 
         action_json: str | None = None
         if intent is not None:
@@ -773,7 +773,7 @@ class Workspace:
         Raises:
             Space: If no draft exists for the requirement.
         """
-        from .scope_json import (
+        from .scope import (
             action_scope_from_dict,
             principal_scope_from_dict,
             resource_scope_from_dict,
@@ -960,9 +960,9 @@ def build_stored_draft(
     Returns:
         A :class:`DraftStored` ready for insertion.
     """
-    from .scope_json import (
+    from .compile import intent_to_dict
+    from .scope import (
         action_scope_to_dict,
-        intent_to_dict,
         principal_scope_to_dict,
         resource_scope_to_dict,
     )
@@ -1167,8 +1167,8 @@ def intent_from_draft(
         Space: When ``intent_json`` is present but cannot be
             parsed into the expected scope shape.
     """
+    from .compile import intent_from_dict
     from .error import Space
-    from .scope_json import intent_from_dict
 
     if not draft.intent_json:
         return None

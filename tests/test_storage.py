@@ -14,11 +14,10 @@ from cedrus import (
     Sqlite,
     Store,
 )
-from cedrus.compiler import Intent
-from cedrus.deployment import DEPLOYMENT_KIND_LOCAL
-from cedrus.requirements import Need
-from cedrus.scopes import Action, Principal, Resource
-from cedrus.storage import DraftStored, ReportStored, Stored
+from cedrus.compile import Action, Intent, Principal, Resource
+from cedrus.deploy import DEPLOYMENT_KIND_LOCAL
+from cedrus.need import Need
+from cedrus.store import DraftStored, ReportStored, Stored
 
 
 def make_requirement(identifier: str, domain: str = "hr") -> Need:

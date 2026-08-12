@@ -32,9 +32,9 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-from ..compiler import Intent
-from ..requirements import slugify
-from ..scopes import Action, Clause, Principal, Resource
+from ..compile import Intent
+from ..need import slugify
+from ..scope import Action, Clause, Principal, Resource
 from .base import Context, Proposal, Result
 
 Effect = Literal["permit", "forbid"]

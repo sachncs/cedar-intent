@@ -13,7 +13,7 @@ from cedrus import (
     Resource,
     compile_intent,
 )
-from cedrus.compiler import render_action, render_principal, render_resource
+from cedrus.compile import render_action, render_principal, render_resource
 
 
 def make_intent(**overrides: object) -> Intent:

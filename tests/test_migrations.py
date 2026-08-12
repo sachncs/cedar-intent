@@ -22,7 +22,7 @@ import pytest
 
 from cedrus import Workspace
 from cedrus.error import Store
-from cedrus.migrations import detect_legacy_rows, migrate_legacy_rows
+from cedrus.migrate import detect_legacy_rows, migrate_legacy_rows
 
 
 @pytest.fixture

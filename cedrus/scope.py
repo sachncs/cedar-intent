@@ -142,3 +142,179 @@ __all__ = [
     "Principal",
     "Resource",
 ]
+
+
+# Codec helpers (merged from scope_json.py)
+
+def principal_scope_to_dict(scope: Principal | None) -> dict[str, Any] | None:
+    """Serialize a :class:`Principal` to a JSON-friendly dict.
+
+    Args:
+        scope: Principal scope, or ``None``.
+
+    Returns:
+        A plain ``dict`` mirroring the scope's fields, or ``None`` when
+        the input is ``None``.
+    """
+    if scope is None:
+        return None
+    return {
+        "kind": scope.kind,
+        "type_name": scope.type_name,
+        "entity_id": scope.entity_id,
+        "group_type": scope.group_type,
+        "group_id": scope.group_id,
+    }
+
+
+def principal_scope_from_dict(data: dict[str, Any] | None) -> Principal | None:
+    """Deserialize a :class:`Principal` from a JSON-friendly dict.
+
+    Args:
+        data: Mapping previously produced by
+            :func:`principal_scope_to_dict`, or ``None``.
+
+    Returns:
+        The reconstructed :class:`Principal`, or ``None`` when
+        ``data`` is ``None``.
+    """
+    if data is None:
+        return None
+    return Principal(
+        kind=data.get("kind", "any"),
+        type_name=data.get("type_name") or None,
+        entity_id=data.get("entity_id") or None,
+        group_type=data.get("group_type") or None,
+        group_id=data.get("group_id") or None,
+    )
+
+
+def action_scope_to_dict(scope: Action | None) -> dict[str, Any] | None:
+    """Serialize an :class:`Action` to a JSON-friendly dict.
+
+    Args:
+        scope: Action scope, or ``None``.
+
+    Returns:
+        A plain ``dict`` mirroring the scope's fields, or ``None``.
+    """
+    if scope is None:
+        return None
+    return {
+        "kind": scope.kind,
+        "name": scope.name,
+        "group": scope.group,
+        "namespace": scope.namespace,
+    }
+
+
+def action_scope_from_dict(data: dict[str, Any] | None) -> Action | None:
+    """Deserialize an :class:`Action` from a JSON-friendly dict.
+
+    Args:
+        data: Mapping previously produced by
+            :func:`action_scope_to_dict`, or ``None``.
+
+    Returns:
+        The reconstructed :class:`Action`, or ``None``.
+    """
+    if data is None:
+        return None
+    return Action(
+        kind=data.get("kind", "any"),
+        name=data.get("name") or None,
+        group=data.get("group") or None,
+        namespace=data.get("namespace") or None,
+    )
+
+
+def resource_scope_to_dict(scope: Resource | None) -> dict[str, Any] | None:
+    """Serialize a :class:`Resource` to a JSON-friendly dict.
+
+    Args:
+        scope: Resource scope, or ``None``.
+
+    Returns:
+        A plain ``dict`` mirroring the scope's fields, or ``None``.
+    """
+    if scope is None:
+        return None
+    return {
+        "kind": scope.kind,
+        "type_name": scope.type_name,
+        "entity_id": scope.entity_id,
+        "parent_type": scope.parent_type,
+        "parent_id": scope.parent_id,
+    }
+
+
+def resource_scope_from_dict(data: dict[str, Any] | None) -> Resource | None:
+    """Deserialize a :class:`Resource` from a JSON-friendly dict.
+
+    Args:
+        data: Mapping previously produced by
+            :func:`resource_scope_to_dict`, or ``None``.
+
+    Returns:
+        The reconstructed :class:`Resource`, or ``None``.
+    """
+    if data is None:
+        return None
+    return Resource(
+        kind=data.get("kind", "any"),
+        type_name=data.get("type_name") or None,
+        entity_id=data.get("entity_id") or None,
+        parent_type=data.get("parent_type") or None,
+        parent_id=data.get("parent_id") or None,
+    )
+
+
+def condition_clauses_to_list(
+    clauses: tuple[Clause, ...],
+) -> list[dict[str, Any]]:
+    """Serialize a tuple of condition clauses to a JSON list."""
+    return [{"body": clause.body, "attributes": dict(clause.attributes)} for clause in clauses]
+
+
+def condition_clauses_from_list(
+    data: list[dict[str, Any]] | None,
+) -> tuple[Clause, ...]:
+    """Deserialize a JSON list back into a tuple of condition clauses.
+
+    Accepts both the canonical shape
+    (``[{"body": "...", "attributes": {...}}, ...]``) and the legacy
+    short form (``["body string", ...]``) for backward compatibility.
+    """
+    if not data:
+        return ()
+    clauses: list[Clause] = []
+    for item in data:
+        if isinstance(item, str):
+            clauses.append(Clause(body=item))
+        elif isinstance(item, dict) and "body" in item:
+            attrs = item.get("attributes") or {}
+            clauses.append(
+                Clause(
+                    body=item["body"],
+                    attributes=dict(attrs) if isinstance(attrs, dict) else {},
+                )
+            )
+    return tuple(clauses)
+
+
+__all__ = [
+    "Action",
+    "Clause",
+    "Expression",
+    "Principal",
+    "Resource",
+    "action_scope_from_dict",
+    "action_scope_to_dict",
+    "condition_clauses_from_list",
+    "condition_clauses_to_list",
+    "principal_scope_from_dict",
+    "principal_scope_to_dict",
+    "resource_scope_from_dict",
+    "resource_scope_to_dict",
+]
+

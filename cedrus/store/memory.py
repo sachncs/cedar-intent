@@ -19,9 +19,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from ..deployment import Record
+from ..deploy import Record
 from ..error import Store
-from ..requirements import Need
+from ..need import Need
 from .base import DraftStored, ReportStored, Stored
 
 

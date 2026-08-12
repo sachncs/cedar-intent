@@ -36,22 +36,25 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Protocol
 
-from .compiler import Intent
-from .scope_json import (
+from .compile import Intent
+from .scope import (
+    Action,
+    Clause,
+    Principal,
+    Resource,
     action_scope_to_dict,
     principal_scope_to_dict,
     resource_scope_to_dict,
 )
-from .scopes import Action, Clause, Principal, Resource
 
 if TYPE_CHECKING:
-    from .storage.base import DraftStored, Stored
+    from .store.base import DraftStored, Stored
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class _RepoLike(Protocol):
-    """Subset of :class:`~cedrus.storage.Repository` used by the migration."""
+    """Subset of :class:`~cedrus.store.Repository` used by the migration."""
 
     def get_policy(self, policy_id: str) -> Stored: ...
     def upsert_policy(self, policy: Stored) -> None: ...
@@ -70,7 +73,7 @@ def detect_legacy_rows(repository: _RepoLike) -> int:
 
     Args:
         repository: Repository to scan. Quacks like the
-            :class:`~cedrus.storage.Repository` Protocol.
+            :class:`~cedrus.store.Repository` Protocol.
 
     Returns:
         Number of legacy rows that still need migration.
@@ -115,7 +118,7 @@ def migrate_legacy_rows(repository: _RepoLike) -> int:
 
 def _migrate_policy(repository: _RepoLike, policy: Any) -> int:
     """Re-derive ``action_scope_json`` for ``policy`` when missing."""
-    from .storage.base import Stored
+    from .store.base import Stored
 
     if not isinstance(policy, Stored):
         return 0
@@ -131,7 +134,7 @@ def _migrate_policy(repository: _RepoLike, policy: Any) -> int:
 
 def _migrate_draft(repository: _RepoLike, draft: Any) -> int:
     """Rebuild the intent and scope JSON columns for ``draft`` in place."""
-    from .storage.base import DraftStored
+    from .store.base import DraftStored
 
     if not isinstance(draft, DraftStored):
         return 0
@@ -207,7 +210,7 @@ def _parse_action_scope(cedar: str) -> Action | None:
 
 def _dumps(scope: Any) -> str:
     """Serialize a scope object to JSON."""
-    from .scope_json import intent_to_dict
+    from .compile import intent_to_dict
 
     if isinstance(scope, Principal):
         return json.dumps(principal_scope_to_dict(scope), sort_keys=True)
@@ -230,7 +233,7 @@ def _migrate_draft_data(
     Used by tests to verify migration without touching the repository.
     Returns ``None`` when the draft is already migrated.
     """
-    from .storage.base import DraftStored
+    from .store.base import DraftStored
 
     if not isinstance(draft, DraftStored):
         return None

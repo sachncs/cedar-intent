@@ -9,7 +9,7 @@ import pytest
 
 from cedrus import Need, load_requirement, load_requirements, render_requirement
 from cedrus.error import Require
-from cedrus.requirements import (
+from cedrus.need import (
     derive_domain,
     parse_front_matter,
     slugify,

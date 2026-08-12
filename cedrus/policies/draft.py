@@ -8,12 +8,12 @@ Lifecycle
 ---------
 
 1. :meth:`Draft.from_requirement` creates an empty draft from a
-   :class:`~cedrus.requirements.Need` and caller scopes.
+   :class:`~cedrus.need.Need` and caller scopes.
 2. :meth:`Draft.generate` calls a generator and stores the
-   resulting :class:`~cedrus.generator.Proposal` on the
+   resulting :class:`~cedrus.generate.Proposal` on the
    draft.
 3. :meth:`Draft.compile` renders the draft (or a freshly built
-   :class:`~cedrus.compiler.Intent` if no intent was set)
+   :class:`~cedrus.compile.Intent` if no intent was set)
    to Cedar source.
 4. :meth:`Draft.as_compiled` returns a copy of the draft with the
    compiled Cedar source populated.
@@ -32,12 +32,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from ..compiler import Intent, Source, compile_intent
+from ..compile import Intent, Source, compile_intent
 from ..error import Fault
-from ..generator import Context, Generator, Proposal, Result
-from ..requirements import Need
+from ..generate import Context, Generator, Proposal, Result
+from ..need import Need
 from ..schema import Schema
-from ..scopes import Action, Principal, Resource
+from ..scope import Action, Principal, Resource
 from .base import Kind
 
 DraftStatus = str  # "proposed" | "accepted" | "rejected"

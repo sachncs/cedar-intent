@@ -12,20 +12,20 @@ The pipeline flows:
 
 * :class:`~cedrus.need.Need` - Markdown with stable id and domain.
 * :class:`~cedrus.policy.Draft` - scope-typed draft.
-* :class:`~cedrus.generator.Generator` produces a typed
-  :class:`~cedrus.compiler.Intent`; two implementations
-  ship (:class:`~cedrus.generator.Offline` and
-  :class:`~cedrus.generator.Llm`).
-* :func:`~cedrus.compiler.compile_intent` renders the intent to
+* :class:`~cedrus.generate.Generator` produces a typed
+  :class:`~cedrus.compile.Intent`; two implementations
+  ship (:class:`~cedrus.generate.Offline` and
+  :class:`~cedrus.generate.Llm`).
+* :func:`~cedrus.compile.compile_intent` renders the intent to
   Cedar source text.
-* :func:`~cedrus.validation.validate` runs Cedar parse and
+* :func:`~cedrus.validate.validate` runs Cedar parse and
   schema validation.
-* :func:`~cedrus.scenarios.run_scenarios` exercises the policy
+* :func:`~cedrus.case.run_scenarios` exercises the policy
   against authorization scenarios.
-* :func:`~cedrus.verification.verify_policies` runs static
+* :func:`~cedrus.verify.verify_policies` runs static
   checks for shadowing, redundancy, and coverage.
-* :class:`~cedrus.deployment.Bundler` and
-  :class:`~cedrus.deployment.Client` produce and push the
+* :class:`~cedrus.deploy.Bundler` and
+  :class:`~cedrus.deploy.Client` produce and push the
   deployment bundle.
 
 The :class:`Space` class orchestrates every stage and is the
@@ -37,14 +37,15 @@ Schema migration
 Starting with cedrus 0.6.0, every stored :class:`DraftStored`
 carries a JSON-serialized typed intent and per-slot scope JSON, and
 every :class:`Stored` carries the action scope JSON.
-:mod:`cedrus.migrations` exposes detection and migration helpers;
+:mod:`cedrus.migrate` exposes detection and migration helpers;
 the CLI surfaces them as ``cedrus migrate``. SQLite workspaces
 created before this version refuse to open until the migration has
 run, so the new fields are guaranteed to be populated.
 """
 
-from .compiler import Intent, Source, compile_intent
-from .deployment import (
+from .case import Case, Outcome, Suite, load_scenarios, run_scenarios
+from .compile import Intent, Source, compile_intent
+from .deploy import (
     Bundler,
     Client,
     Guard,
@@ -69,7 +70,7 @@ from .error import (
 from .error import (
     Space as SpaceError,
 )
-from .generator import (
+from .generate import (
     Context,
     Generator,
     Llm,
@@ -77,38 +78,38 @@ from .generator import (
     Proposal,
     Result,
 )
-from .migrations import detect_legacy_rows, migrate_legacy_rows
+from .migrate import detect_legacy_rows, migrate_legacy_rows
+from .need import Need, load_requirement, load_requirements, render_requirement
 from .policies import Compiled, Draft, Existing, Kind
-from .requirements import Need, load_requirement, load_requirements, render_requirement
-from .scenarios import Case, Outcome, Suite, load_scenarios, run_scenarios
 from .schema import Schema
-from .scope_json import (
+from .scope import (
+    Action,
+    Clause,
+    Principal,
+    Resource,
     action_scope_from_dict,
     action_scope_to_dict,
     condition_clauses_from_list,
     condition_clauses_to_list,
-    intent_from_dict,
-    intent_to_dict,
     principal_scope_from_dict,
     principal_scope_to_dict,
     resource_scope_from_dict,
     resource_scope_to_dict,
 )
-from .scopes import Action, Clause, Principal, Resource
-from .storage import Memory, Repository, Sqlite
-from .validation import Vreport, validate_cedar
-from .validation import validate_cedar as validate
-from .verification import (
+from .space import Space, Workspace
+from .store import Memory, Repository, Sqlite
+from .validate import Vreport, validate_cedar
+from .validate import validate_cedar as validate
+from .verify import (
     Extraction,
     Finding,
     Report,
     extract_entity_types,
     verify_policies,
 )
-from .verification import (
+from .verify import (
     verify_policies as verify,
 )
-from .workspace import Space, Workspace
 
 __version__ = "0.7.0"
 

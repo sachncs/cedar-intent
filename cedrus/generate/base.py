@@ -15,7 +15,7 @@ Every generator must:
    and the existing policy intents the generator should be aware of.
 2. Return a :class:`Result` carrying:
    - a :class:`Proposal` whose ``intent`` is a typed
-     :class:`~cedrus.compiler.Intent`,
+     :class:`~cedrus.compile.Intent`,
    - the model identifier that produced the proposal (so the workspace
      can record provenance),
    - optional request-id and token-usage metadata.
@@ -33,10 +33,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from ..compiler import Intent
-from ..requirements import Need
+from ..compile import Intent
+from ..need import Need
 from ..schema import Schema
-from ..scopes import Action, Principal, Resource
+from ..scope import Action, Principal, Resource
 
 
 @dataclass(frozen=True, slots=True)

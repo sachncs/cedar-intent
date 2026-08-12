@@ -19,9 +19,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ..compiler import Intent
+from ..compile import Intent
 from ..error import Fault
-from ..requirements import Need
+from ..need import Need
 from .base import Kind
 
 

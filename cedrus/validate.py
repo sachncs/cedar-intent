@@ -3,7 +3,7 @@
 Validation is a strict two-step process: every policy statement must
 parse, and the resulting set must validate against the supplied schema.
 This module does not check intent or correctness — those concerns
-belong to :mod:`cedrus.scenarios` and :mod:`cedrus.verification`.
+belong to :mod:`cedrus.case` and :mod:`cedrus.verify`.
 
 Why a two-step pipeline
 ----------------------

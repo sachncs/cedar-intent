@@ -280,7 +280,7 @@ def test_main_policy_generate_online_with_model(
         usage={"total_tokens": 5},
         choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(response_payload)))],
     )
-    with patch("cedrus.generator.litellm.litellm.completion", return_value=fake_response):
+    with patch("cedrus.generate.litellm.litellm.completion", return_value=fake_response):
         exit_code = main(
             [
                 "--workspace",

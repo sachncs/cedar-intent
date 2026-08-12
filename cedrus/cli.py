@@ -23,8 +23,8 @@ Online and offline modes
 
 Generator selection is controlled by three pieces, in this order:
 
-1. ``--offline`` forces :class:`~cedrus.generator.Offline`.
-2. ``--model <provider/name>`` forces :class:`~cedrus.generator.Llm`.
+1. ``--offline`` forces :class:`~cedrus.generate.Offline`.
+2. ``--model <provider/name>`` forces :class:`~cedrus.generate.Llm`.
 3. Otherwise the environment variables ``CEDAR_INTENT_ONLINE`` and
    ``CEDAR_INTENT_MODEL`` decide. ``CEDAR_INTENT_ONLINE=1`` enables the
    LiteLLM generator when ``CEDAR_INTENT_MODEL`` is set; otherwise the
@@ -43,9 +43,9 @@ from pathlib import Path
 from typing import Any
 
 from . import Error, Llm, Offline, Workspace
+from .case import Case
 from .error import Config
-from .scenarios import Case
-from .scopes import Action, Principal, Resource
+from .scope import Action, Principal, Resource
 
 ONLINE_ENV_VAR = "CEDAR_INTENT_ONLINE"
 MODEL_ENV_VAR = "CEDAR_INTENT_MODEL"
@@ -577,7 +577,7 @@ def command_migrate(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
     ``--apply``: perform the migration and exit 0 (or 1 on failure).
     ``--check``: exit 1 when legacy rows are present, else exit 0.
     """
-    from .migrations import detect_legacy_rows, migrate_legacy_rows
+    from .migrate import detect_legacy_rows, migrate_legacy_rows
 
     repository = workspace.repository
     pending_before = detect_legacy_rows(repository)

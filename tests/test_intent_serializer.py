@@ -2,7 +2,7 @@
 
 Before this refactor, the storage and verification layers each had
 their own (incompatible) intent JSON format. The canonical format now
-lives in :mod:`cedrus.scope_json` and both layers round-trip
+lives in :mod:`cedrus.scope` and both layers round-trip
 through it. These tests pin the contract:
 
 * ``intent_to_dict``/``intent_from_dict`` are inverses.
@@ -20,17 +20,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from cedrus import Intent, Workspace
-from cedrus.compiler import Intent as CompilerPolicyIntent  # noqa: F401
-from cedrus.scope_json import (
-    intent_from_dict,
-    intent_to_dict,
-)
-from cedrus.scopes import (
+from cedrus.compile import (
     Action,
     Clause,
     Principal,
     Resource,
+    intent_from_dict,
+    intent_to_dict,
 )
+from cedrus.compile import Intent as CompilerPolicyIntent  # noqa: F401
 
 
 def _make_intent() -> Intent:
@@ -112,7 +110,7 @@ def test_intent_from_dict_accepts_legacy_when_unless() -> None:
 
 def test_intent_from_dict_accepts_short_form_string_array() -> None:
     """``condition_clauses_from_list`` accepts strings and dicts."""
-    from cedrus.scope_json import condition_clauses_from_list
+    from cedrus.compile import condition_clauses_from_list
 
     assert condition_clauses_from_list(["body-1", "body-2"]) == (
         Clause(body="body-1"),
@@ -139,9 +137,9 @@ def test_workspace_stored_draft_round_trip(tmp_path: Path) -> None:
     reads with the canonical format.
     """
     from cedrus import Need
-    from cedrus.generator import Proposal, Result
+    from cedrus.generate import Proposal, Result
     from cedrus.policies import Draft
-    from cedrus.workspace import build_stored_draft
+    from cedrus.space import build_stored_draft
 
     requirement = Need(
         id="HR-042",
@@ -185,7 +183,7 @@ def test_workspace_stored_draft_round_trip(tmp_path: Path) -> None:
 def test_sqlite_storage_uses_canonical_keys(tmp_path: Path) -> None:
     """Stored rows use the canonical ``when_clauses`` key."""
     from cedrus import Need
-    from cedrus.scopes import (
+    from cedrus.compile import (
         Action,
         Principal,
         Resource,
@@ -214,7 +212,7 @@ def test_sqlite_storage_uses_canonical_keys(tmp_path: Path) -> None:
         unless_clauses=(),
     )
     cedar = 'permit (principal, action == hr::Action::"view", resource);'
-    from cedrus.storage.base import Stored
+    from cedrus.store.base import Stored
 
     workspace.repository.upsert_policy(
         Stored(
@@ -243,7 +241,7 @@ def test_sqlite_storage_uses_canonical_keys(tmp_path: Path) -> None:
 
 def test_migration_uses_canonical_keys(tmp_path: Path) -> None:
     """migrate_legacy_rows writes the canonical format on upgrade."""
-    from cedrus.migrations import migrate_legacy_rows
+    from cedrus.migrate import migrate_legacy_rows
 
     workspace = Workspace.create(tmp_path / "acme")
     db = workspace.repository.path
