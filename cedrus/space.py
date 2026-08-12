@@ -265,7 +265,7 @@ class Workspace:
             Require: If the file is missing or malformed.
         """
         requirement = load_requirement(path, workspace_root=self.root)
-        self.repository.add_requirement(requirement)
+        requirement.save(self.repository)
         return requirement
 
     def add_requirement_directory(self, domain: str) -> list[Need]:
@@ -281,7 +281,7 @@ class Workspace:
         for requirement in load_requirements(
             self.requirements_directory(domain), workspace_root=self.root
         ):
-            self.repository.add_requirement(requirement)
+            requirement.save(self.repository)
             added.append(requirement)
         return added
 
@@ -289,13 +289,13 @@ class Workspace:
         """Return the requirement with ``requirement_id``.
 
         Raises:
-            Store: If no requirement exists with that id.
+            Require: If no requirement exists with that id.
         """
-        return self.repository.get_requirement(requirement_id)
+        return Need.get(self.repository, requirement_id)
 
     def list_requirements(self, domain: str | None = None) -> list[Need]:
         """Return requirements, optionally filtered by ``domain``."""
-        return list(self.repository.list_requirements(domain))
+        return Need.list(self.repository, domain=domain)
 
     def remove_requirement(self, requirement_id: str) -> None:
         """Remove the requirement with ``requirement_id``.
@@ -352,7 +352,7 @@ class Workspace:
                 source_path=path,
                 created_at=datetime.now(UTC),
             )
-            self.repository.add_requirement(requirement)
+            requirement.save(self.repository)
             policy = Existing.from_requirement(requirement, cedar=cedar)
             existing.append(policy)
             self.upsert_compiled(
@@ -391,9 +391,9 @@ class Workspace:
             status=policy.kind(),
             created_at=policy.created_at,
             updated_at=datetime.now(UTC),
-            action_scope_json=action_json,
+            action=action,
         )
-        self.repository.upsert_policy(stored)
+        stored.upsert(self.repository)
 
     def create_draft(
         self,
@@ -420,7 +420,7 @@ class Workspace:
         Raises:
             Store: If the requirement does not exist.
         """
-        requirement = self.repository.get_requirement(requirement_id)
+        requirement = Need.get(self.repository, requirement_id)
         return Draft.from_requirement(
             requirement,
             principal=principal,
@@ -444,8 +444,8 @@ class Workspace:
             A list of :class:`Existing` in storage order.
         """
         result: list[Existing] = []
-        for stored in self.repository.list_policies(domain=domain):
-            requirement = self.repository.get_requirement(stored.requirement_id or stored.id)
+        for stored in Stored.list(self.repository, domain=domain):
+            requirement = Need.get(self.repository, stored.requirement_id or stored.id)
             result.append(
                 Existing(
                     id=stored.id,
@@ -468,7 +468,7 @@ class Workspace:
             been deleted) are silently skipped.
         """
         result: list[Compiled] = []
-        for stored in self.repository.list_policies(domain=domain):
+        for stored in Stored.list(self.repository, domain=domain):
             if stored.status != "compiled":
                 continue
             requirement_id = stored.requirement_id or stored.id
@@ -476,7 +476,7 @@ class Workspace:
             # deleted from the store; the foreign key on policies.requirement_id
             # is ON DELETE SET NULL, so this can happen in practice.
             try:
-                requirement = self.repository.get_requirement(requirement_id)
+                requirement = Need.get(self.repository, requirement_id)
             except Store:
                 continue
             result.append(
@@ -528,9 +528,7 @@ class Workspace:
             model=result.model,
             request_id=result.request_id,
         )
-        self.repository.record_draft(
-            build_stored_draft(new_draft, result, compiled_source.cedar)
-        )
+        new_draft.save(self.repository)
         return new_draft, result
 
     def verify_domain(self, domain: str, schema: Schema) -> Report:
@@ -551,7 +549,8 @@ class Workspace:
         """
         policies = self.list_compiled_policies(domain)
         requirement_ids = [
-            requirement.id for requirement in self.repository.list_requirements(domain=domain)
+            requirement.id
+            for requirement in Need.list(self.repository, domain=domain)
         ]
         return verify_policies(
             domain=domain,
@@ -654,12 +653,12 @@ class Workspace:
             allow_loopback=allow_loopback,
         )
         record = client.deploy(manifest, target, headers=headers)
-        self.repository.record_deployment(record)
+        record.save(self.repository)
         return record
 
     def list_deployments(self, domain: str | None = None) -> list[Record]:
         """Return deployment records, optionally filtered by ``domain``."""
-        return list(self.repository.list_deployments(domain=domain))
+        return Record.list(self.repository, domain=domain)
 
     def apply(
         self,
@@ -715,13 +714,9 @@ class Workspace:
                     + ", ".join(failure.scenario.name for failure in failures)
                 )
         with self.repository.transaction():
-            self.repository.record_report(
-                build_stored_report(draft.id, "validation", report)
-            )
+            build_stored_report(draft.id, "validation", report).save(self.repository)
             if scenarios and test_report is not None:
-                self.repository.record_report(
-                    build_stored_report(draft.id, "test", test_report)
-                )
+                build_stored_report(draft.id, "test", test_report).save(self.repository)
             compiled = Compiled(
                 id=draft.id,
                 requirement=draft.requirement,
@@ -779,7 +774,7 @@ class Workspace:
             resource=scopes[2],
         )
         try:
-            stored_draft = self.repository.latest_draft(placeholder.id)
+            stored_draft = DraftStored.latest(self.repository, placeholder.id)
         except Store as error:
             raise Space(
                 f"no draft exists for requirement {requirement_id!r}; "
