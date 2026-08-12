@@ -203,6 +203,33 @@ class Record:
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
+    @classmethod
+    def parse(cls, data: dict[str, Any]) -> Record:
+        """Build a :class:`Record` from its SQLite ``deployments`` row + ``deployment_responses``.
+
+        Args:
+            data: Dict with ``"deployments"`` (main row) and
+                ``"deployment_responses"`` (list of ``{"key",
+                "value"}`` dicts).
+
+        Returns:
+            The reconstructed :class:`Record`.
+        """
+        row = data["deployments"]
+        response = {
+            r["key"]: r["value"] for r in data.get("deployment_responses", ())
+        }
+        return cls(
+            id=row["id"],
+            domain=row["domain"],
+            target=row["target"],
+            target_kind=row["target_kind"],
+            bundle_hash=row["bundle_hash"],
+            status=row["status"],
+            response=response,
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
 
 class Bundler:
     """Build, write, and read :class:`Manifest` objects.

@@ -374,6 +374,21 @@ class Payload:
         """
         return cls(data=tuple(data.items()))
 
+    @classmethod
+    def parse(cls, data: dict[str, Any]) -> Payload:
+        """Build a :class:`Payload` from its SQLite ``report_payload`` rows.
+
+        Args:
+            data: Dict with a ``"report_payload"`` key holding the
+                ordered list of ``{"position", "key", "value"}`` row
+                dicts from the ``report_payload`` table.
+
+        Returns:
+            The reconstructed :class:`Payload`.
+        """
+        rows = sorted(data["report_payload"], key=lambda r: r["position"])
+        return cls(data=tuple((r["key"], r["value"]) for r in rows))
+
 
 __all__ = [
     "Body",
