@@ -11,7 +11,7 @@ from cedrus import (
     Intent,
     Principal,
     Resource,
-    compile_intent,
+    compile,
 )
 from cedrus.compile import render_action, render_principal, render_resource
 
@@ -29,8 +29,8 @@ def make_intent(**overrides: object) -> Intent:
     return intent
 
 
-def test_compile_intent_emits_basic_policy() -> None:
-    source = compile_intent(make_intent())
+def test_compile_emits_basic_policy() -> None:
+    source = compile(make_intent())
     assert "permit (" in source.cedar
     assert "    principal," in source.cedar
     assert "    action," in source.cedar
@@ -38,17 +38,17 @@ def test_compile_intent_emits_basic_policy() -> None:
     assert source.cedar.rstrip().endswith(";")
 
 
-def test_compile_intent_includes_when_and_unless_clauses() -> None:
+def test_compile_includes_when_and_unless_clauses() -> None:
     intent = make_intent(
         when_clauses=(Clause(body="principal.role == \"admin\""),),
         unless_clauses=(Clause(body="resource.private"),),
     )
-    source = compile_intent(intent)
+    source = compile(intent)
     assert 'when { principal.role == "admin" }' in source.cedar
     assert "unless { resource.private }" in source.cedar
 
 
-def test_compile_intent_rejects_invalid_effect() -> None:
+def test_compile_rejects_invalid_effect() -> None:
     with pytest.raises(Compile):
         Intent(
             id="x",
@@ -60,7 +60,7 @@ def test_compile_intent_rejects_invalid_effect() -> None:
         )
 
 
-def test_compile_intent_requires_id() -> None:
+def test_compile_requires_id() -> None:
     with pytest.raises(Compile):
         Intent(
             id="   ",
@@ -133,8 +133,8 @@ def test_render_resource_variants() -> None:
     )
 
 
-def test_compile_intent_serialises_to_dict() -> None:
-    source = compile_intent(make_intent())
+def test_compile_serialises_to_dict() -> None:
+    source = compile(make_intent())
     payload = source.to_dict()
     assert payload["intent_id"] == "hr-hr-042"
     assert payload["cedar"].endswith(";")
