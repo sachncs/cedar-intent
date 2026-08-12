@@ -8,10 +8,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.6.0] - Unreleased
 
+### Added
+- `cedar-intent migrate` CLI subcommand (`--apply`, `--check`,
+  default) for upgrading pre-0.6.0 workspaces. Pre-0.6.0 databases
+  refuse to open until the migration has run; the CLI provides the
+  documented recovery path.
+- SQLite `meta` table tracks the current schema version. The version
+  is stamped inside the same transaction as the schema change so a
+  partially-migrated database either has its declared version or
+  does not exist at all.
+- SQLite `journal_mode=WAL`, `busy_timeout=5000`, and
+  `synchronous=NORMAL` PRAGMAs are set on every connection.
+- `update_draft_json` method on the Repository Protocol and both
+  backends so the migration populates new columns in place.
+- `validate_identifier` and CLI argparse types (`_positive_finite_float`,
+  `_non_negative_int`, `_positive_int`) reject path-traversal-shaped
+  inputs and negative / infinite numeric flags at parse time.
+- Top-level catch wraps non-`CedarIntentError` exceptions in a
+  structured JSON envelope when `--json` is set.
+- Test suite expanded to 283 tests, including an SSRF truth table
+  (22 cases), a pinned-transport test set (5 cases), and a
+  verifier-adversarial test set (7 cases).
+- Dependabot config (pip + github-actions, weekly).
+- Codecov upload on the Python 3.12 lane.
+- SBOM (CycloneDX) and sigstore cosign signing in the release
+  pipeline; publish job gates on a passing test matrix on the tag.
+
 ### Changed
-- Version is now sourced from `cedar_intent.__version__` at build time via
-  `[tool.setuptools.dynamic]`, eliminating drift between the package and
-  `pyproject.toml`.
+- Version is sourced from `cedar_intent.__version__` at build time
+  via `[tool.setuptools.dynamic]`, eliminating drift between the
+  package and `pyproject.toml`.
+- `DeploymentClient` uses `httpx` with a custom transport that pins
+  every HTTP connection to the IP address resolved at SSRF-check
+  time. This closes the DNS-rebinding window in which an attacker
+  returns a public IP at guard time and a private IP at request time.
+- HTTP response bodies are read in bounded chunks, never persisted
+  verbatim, and never embedded in error messages. `DeploymentRecord.response`
+  now carries `body_sha256` (not `body`) plus `idempotency_key` and
+  `retry_count`.
+- Redirects are disabled by default; opt in with
+  `follow_redirects=True`. The client honours `Retry-After` on 429
+  and 503 with exponential backoff up to `max_retries`.
+- `BundleExporter.write_directory` refuses symlinked target
+  directories, refuses non-empty staging directories, and fsyncs
+  both data and directory for durability across power loss.
+- `parse_headers` rejects empty names, CR/LF in either name or
+  value, names longer than 256 chars, values longer than 8192 chars,
+  and reserved names (`Host`, `Authorization`, `Cookie`,
+  `Content-Length`, `Transfer-Encoding`).
+- The verifier replaces its regex parser with a structured walk
+  over `cedarpy.policies_to_json_str`. Conditions are compared by
+  canonical JSON form so reordered expressions produce identical
+  signatures. Malformed policies emit a `malformed-policy` finding
+  rather than silently degrading to `permit(any/any/any)`.
+- `LiteLLMGenerator` wraps every piece of user-controlled content in
+  fenced `<<<...>>>` delimiters in the user prompt and adds an
+  explicit "data only" preamble to the system prompt so hostile
+  requirement text or schema JSON cannot impersonate instructions.
+- `find_action_namespace` raises `WorkspaceError` when an action id
+  is declared in multiple namespaces and `action.namespace` was not
+  supplied. Previously the first namespace won by dict iteration
+  order, producing non-deterministic compile output across reloads.
+- `intent_from_draft` returns `None` or raises `WorkspaceError`
+  when stored intent JSON is missing or corrupt. Previously it
+  synthesised a permissive `permit(any/any/any)` fallback that
+  could ship as a wide-open policy.
+- `SqliteRepository` connects with `check_same_thread=False` and
+  guards mutating calls with `threading.RLock`.
+- `column_exists` validates the table argument against an allow-list
+  so the f-string PRAGMA interpolation can never accept user input.
+- PyPI metadata in `pyproject.toml` is now complete: readme,
+  license, authors, keywords, classifiers, `[project.urls]`.
+
+### Security
+- `SECURITY.md` threat model expanded to enumerate DNS rebinding
+  pinning, header injection rejection, symlink-replacement refusal,
+  bundle hash as corruption detection only (not tamper evidence),
+  global-permit fallback removal, and verifier silent-degradation
+  fix.
+- `docs/deployment.md` carries WARNING callouts for header
+  validation, redirect handling, body capture, bundle integrity,
+  and DNS rebinding.
 
 ## [0.5.0] - 2026-07-20
 

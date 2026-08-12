@@ -16,7 +16,6 @@ These tests cover:
 from __future__ import annotations
 
 import hashlib
-import socket
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
@@ -24,7 +23,6 @@ from typing import Any
 import pytest
 
 from cedar_intent import (
-    BundleExporter,
     DeploymentClient,
     DeploymentError,
     DeploymentManifest,

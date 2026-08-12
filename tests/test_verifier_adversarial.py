@@ -17,7 +17,6 @@ from cedar_intent import (
     PrincipalScope,
     Requirement,
     ResourceScope,
-    VerificationReport,
     verify_policies,
 )
 

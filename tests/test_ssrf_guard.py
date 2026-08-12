@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from cedar_intent.deployment import SSRFGuard, DeploymentError
+from cedar_intent.deployment import DeploymentError, SSRFGuard
 
 
 def _fake_addrinfo_returning(ip: str) -> Any:
@@ -53,7 +53,7 @@ def _fake_addrinfo_returning(ip: str) -> Any:
 def test_ssrf_guard_rejects_blocked_addresses(ip: str) -> None:
     guard = SSRFGuard(resolver=_fake_addrinfo_returning(ip))
     with pytest.raises(DeploymentError):
-        guard.check(f"http://example.com/cedar")
+        guard.check("http://example.com/cedar")
 
 
 def test_ssrf_guard_allows_public_ip_by_default() -> None:
