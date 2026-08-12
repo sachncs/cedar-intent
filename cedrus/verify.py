@@ -1,6 +1,6 @@
 """Static symbolic verification for Cedar policy sets.
 
-The :func:`verify_policies` function performs a static analysis of a
+The :meth:`Verifier.verify` method performs a static analysis of a
 domain's policy set and reports:
 
 * **shadowing** - a ``forbid`` whose scope dominates a ``permit``,
@@ -9,8 +9,8 @@ domain's policy set and reports:
   effect, and the same conditions (one is implied by the other);
 * **requirement coverage** - whether every loaded requirement has at
   least one compiled policy;
-* **action coverage** - whether every action declared in the schema has
-  at least one policy that references it, with action-group
+* **action coverage** - whether every action declared in the schema
+  has at least one policy that references it, with action-group
   membership expanded;
 * **entity-type coverage** - whether every entity type in the schema
   is referenced by at least one policy.
@@ -19,41 +19,50 @@ The verifier analyzes the deployed Cedar source directly rather than
 the typed intent metadata, so coverage and shadowing reflect what
 will actually run.
 
-Algorithm notes
-----------------
+Algorithm notes:
+    Scope dominance is approximated by comparing the *signature* of a
+    scope: a tuple of (kind, type_name, entity_id, group_type,
+    group_id) for principals, an analogous tuple for resources, and a
+    tuple that includes the namespace and ``"named"``/``"in_group"``
+    flag for actions. Two policies are considered to share a shadow
+    or a redundancy only when their scope signatures match across
+    every slot AND their condition signatures match.
 
-Scope dominance is approximated by comparing the *signature* of a
-scope: a tuple of (kind, type_name, entity_id, group_type, group_id)
-for principals, an analogous tuple for resources, and a tuple that
-includes the namespace and ``"named"``/``"in_group"`` flag for
-actions. Two policies are considered to share a shadow or a
-redundancy only when their scope signatures match across every slot
-AND their condition signatures match.
+    ``any`` does not subsume a non-``any`` scope: a forbid on Alice
+    does not shadow a permit on ``any`` principal.
 
-``any`` does not subsume a non-``any`` scope: a forbid on Alice does
-not shadow a permit on ``any`` principal.
+    Action coverage expands action-group membership:
+    ``action in Action::"readers"`` counts as covering every member
+    action of the ``readers`` group. This keeps coverage faithful to
+    Cedar's authorization semantics.
 
-Action coverage expands action-group membership: ``action in
-Action::"readers"`` counts as covering every member action of the
-``readers`` group. This keeps coverage faithful to Cedar's
-authorization semantics.
+    Cedar parsing uses :func:`cedarpy.policies_to_json_str` to obtain
+    a structured AST rather than a regex. The verifier therefore
+    cannot be tricked by comments, embedded semicolons, or syntax that
+    a regex would silently misclassify. When cedarpy cannot parse a
+    policy, the verifier emits a ``malformed-policy`` warning rather
+    than falling back to a permissive default.
 
-Cedar parsing uses :func:`cedarpy.policies_to_json_str` to obtain a
-structured AST rather than a regex. The verifier therefore cannot
-be tricked by comments, embedded semicolons, or syntax that a regex
-would silently misclassify. When cedarpy cannot parse a policy, the
-verifier emits a ``malformed-policy`` warning rather than falling
-back to a permissive default.
+    Conditions are compared by hashing the canonical JSON form of
+    their AST bodies, so ``principal == User::"alice"`` and equivalent
+    reorderings produce identical signatures.
 
-Conditions are compared by hashing the canonical JSON form of their
-AST bodies, so ``principal == User::"alice"`` and equivalent reorderings
-produce identical signatures.
+    Complexity is O(n^2) for shadowing/redundancy across n policies
+    and O(n*m) for coverage across n policies and m schema entries.
+    That is acceptable for typical domain sizes (dozens to low hundreds
+    of policies). A full SMT-backed equivalence check via
+    cedar-policy-symcc would replace these approximations when needed.
 
-Complexity is O(n^2) for shadowing/redundancy across n policies and
-O(n*m) for coverage across n policies and m schema entries. That is
-acceptable for typical domain sizes (dozens to low hundreds of
-policies). A full SMT-backed equivalence check via cedar-policy-symcc
-would replace these approximations when needed.
+The AST parsing helpers, the coverage algorithms, and the policy
+accessors are all classmethods / staticmethods of :class:`Verifier`
+and :class:`Extraction`; there are no module-level free functions.
+
+Attributes:
+    Finding: A single finding emitted by verification.
+    Report: Aggregate result of a verification run.
+    Extraction: Scope and condition data extracted from a policy.
+    Parse: Raised when cedarpy cannot parse a Cedar policy.
+    Verifier: Static symbolic verifier.
 """
 
 from __future__ import annotations
@@ -65,14 +74,18 @@ from typing import Any
 
 import cedarpy
 
-from .schema import Schema
+from cedrus.schema import Schema
 
 VerificationSeverity = str  # "warning" | "info"
 
 
+class Parse(Exception):
+    """Raised when cedarpy cannot parse a Cedar policy."""
+
+
 @dataclass(frozen=True, slots=True)
 class Finding:
-    """A single finding emitted by :func:`verify_policies`.
+    """A single finding emitted by :meth:`Verifier.verify`.
 
     Attributes:
         kind: Finding category (for example ``"shadowing"``).
@@ -89,7 +102,12 @@ class Finding:
     relatedpolicy_id: str | None = None
 
     def to_dict(self) -> Mapping[str, Any]:
-        """Return a JSON-friendly representation of the finding."""
+        """Return a JSON-friendly representation of the finding.
+
+        Returns:
+            A dict with ``kind``, ``severity``, ``policy_id``,
+            ``message`` and ``relatedpolicy_id`` keys.
+        """
         return {
             "kind": self.kind,
             "severity": self.severity,
@@ -101,14 +119,16 @@ class Finding:
 
 @dataclass(frozen=True, slots=True)
 class Report:
-    """Aggregate result of :func:`verify_policies`.
+    """Aggregate result of :meth:`Verifier.verify`.
 
     Attributes:
         domain: Domain the report applies to.
         findings: Findings collected during verification.
-        requirements_covered: Requirements addressed by at least one policy.
+        requirements_covered: Requirements addressed by at least one
+            policy.
         requirements_uncovered: Requirements with no compiled policy.
-        actions_covered: Schema actions referenced by at least one policy.
+        actions_covered: Schema actions referenced by at least one
+            policy.
         actions_uncovered: Schema actions not referenced by any policy.
     """
 
@@ -125,7 +145,13 @@ class Report:
         return not any(finding.severity == "warning" for finding in self.findings)
 
     def to_dict(self) -> Mapping[str, Any]:
-        """Return a JSON-friendly representation of the report."""
+        """Return a JSON-friendly representation of the report.
+
+        Returns:
+            A dict with ``domain``, ``passed``, ``findings``,
+            ``requirements_covered``, ``requirements_uncovered``,
+            ``actions_covered`` and ``actions_uncovered`` keys.
+        """
         return {
             "domain": self.domain,
             "passed": self.passed,
@@ -147,7 +173,8 @@ class Extraction:
 
     Attributes:
         principal: Tuple identifying the principal slot.
-        action: Tuple identifying the action slot (including namespace).
+        action: Tuple identifying the action slot (including
+            namespace).
         resource: Tuple identifying the resource slot.
         conditions: Sorted list of (kind, body) pairs for ``when`` and
             ``unless`` clauses.
@@ -181,20 +208,79 @@ class Extraction:
             self.conditions,
         )
 
+    @classmethod
+    def from_policy(
+        cls,
+        policy: Any,
+        schema_actions_by_namespace: Mapping[
+            str, Mapping[str, tuple[str, ...]]
+        ],
+    ) -> "Extraction":
+        """Extract an :class:`Extraction` from one policy via cedarpy.
+
+        Args:
+            policy: Policy-like object (must expose ``policy.cedar`` or
+                ``policy.notes["cedar_text"]``).
+            schema_actions_by_namespace: Action-group membership
+                mapping for namespace resolution.
+
+        Returns:
+            The :class:`Extraction` for ``policy``.
+
+        Raises:
+            Parse: When cedarpy cannot parse the policy's Cedar.
+        """
+        return parse_ast(policy_cedar(policy), schema_actions_by_namespace)
+
+    @staticmethod
+    def policy_id_of(policy: Any) -> str:
+        """Return the policy id, accepting Policy or Intent."""
+        return (
+            getattr(policy, "id", None)
+            or getattr(policy, "intent_id", None)
+            or ""
+        )
+
+    @staticmethod
+    def policy_requirement_id_of(policy: Any) -> str:
+        """Return the requirement id associated with a policy-like object."""
+        requirement = getattr(policy, "requirement", None)
+        if requirement is not None:
+            return getattr(requirement, "id", "")
+        return getattr(policy, "requirement_id", "")
+
+    @staticmethod
+    def policy_cedar_text(policy: Any) -> str:
+        """Return the Cedar source text associated with a policy-like object."""
+        cedar = getattr(policy, "cedar", None)
+        if cedar:
+            return str(cedar)
+        notes = getattr(policy, "notes", None)
+        if isinstance(notes, Mapping):
+            return str(notes.get("cedar_text", ""))
+        return ""
 
 
-
+@dataclass(frozen=True, slots=True)
 class Verifier:
     """Static symbolic verifier.
 
-    The default implementation analyzes Cedar source via the
-    cedarpy AST. Subclass and override individual methods to customize
-    the verification strategy (e.g., an SMT-based backend).
+    The default implementation analyzes Cedar source via the cedarpy
+    AST. Subclass and override individual methods to customize the
+    verification strategy (e.g., an SMT-based backend).
 
     The class is stateless; construction is cheap.
     """
 
+    schema: Schema
+
     def __init__(self, schema: Schema) -> None:
+        """Store the schema for subsequent ``verify`` calls.
+
+        Args:
+            schema: The Cedar schema to use for action-group
+                resolution and namespace lookup.
+        """
         self.schema = schema
 
     def verify(
@@ -203,50 +289,182 @@ class Verifier:
         requirement_ids: Sequence[str] = (),
         action_names: Sequence[tuple[str, str]] = (),
         entity_type_names: Iterable[str] = (),
+        domain: str = "",
     ) -> Report:
-        """Verify ``policies`` and return a structured report."""
-        return verify_policies(
-            domain="",
-            policies=policies,
-            requirement_ids=requirement_ids,
-            action_names=action_names,
-            entity_type_names=entity_type_names,
-            actions_by_namespace=self.schema.actions_by_namespace(),
+        """Verify ``policies`` and return a structured report.
+
+        Args:
+            policies: Policy-like objects to inspect. Each must
+                expose ``policy.cedar`` (or ``policy.notes["cedar_text"]``).
+            requirement_ids: All known requirement identifiers.
+            action_names: All known ``(namespace, action_id)`` pairs.
+            entity_type_names: All known entity type identifiers.
+            domain: Domain name reported in the result.
+
+        Returns:
+            A :class:`Report` aggregating findings and coverage.
+        """
+        extracted: list[tuple[Any, Extraction]] = []
+        malformed: list[tuple[Any, str]] = []
+        for policy in policies:
+            try:
+                extraction = self._extract_one(policy)
+            except Parse as error:
+                malformed.append((policy, str(error)))
+                continue
+            extracted.append((policy, extraction))
+
+        findings: list[Finding] = []
+        for policy, parse_error in malformed:
+            findings.append(
+                Finding(
+                    kind="malformed-policy",
+                    severity="warning",
+                    policy_id=Extraction.policy_id_of(policy),
+                    message=(
+                        f"policy {Extraction.policy_id_of(policy) or '(unknown)'} "
+                        f"could not be parsed by cedarpy and was skipped: "
+                        f"{parse_error}"
+                    ),
+                )
+            )
+        findings.extend(self._detect_shadowing(extracted))
+        findings.extend(self._detect_redundancy(extracted))
+        covered_action_names, uncovered_action_names = self._action_coverage(
+            extracted, action_names
+        )
+        covered_requirements, uncovered_requirements = (
+            self._requirement_coverage(extracted, requirement_ids)
+        )
+        entity_type_set = set(entity_type_names)
+        findings.extend(
+            self._missing_coverage_finding(
+                "uncovered-action",
+                domain,
+                sorted(uncovered_action_names),
+                "No policy references action {actions}.",
+            )
+        )
+        findings.extend(
+            self._missing_coverage_finding(
+                "uncovered-requirement",
+                domain,
+                sorted(uncovered_requirements),
+                "No compiled policy addresses requirement {items}.",
+            )
+        )
+        findings.extend(
+            self._missing_coverage_finding(
+                "uncovered-entity-type",
+                domain,
+                sorted(entity_type_set - self._collect_entity_types(extracted)),
+                "No policy references entity type {items}.",
+            )
+        )
+        return Report(
+            domain=domain,
+            findings=tuple(findings),
+            requirements_covered=tuple(sorted(covered_requirements)),
+            requirements_uncovered=tuple(sorted(uncovered_requirements)),
+            actions_covered=tuple(sorted(covered_action_names)),
+            actions_uncovered=tuple(sorted(uncovered_action_names)),
         )
 
     def extract(self, policy: Any) -> Extraction:
-        """Extract the scope signature from a single policy."""
-        return extract_scope(policy)
+        """Extract scope signature from a single policy.
+
+        Public hook so callers can build their own analyses; the
+        internal ``_extract_one`` does the actual work.
+
+        Args:
+            policy: Policy-like object to extract.
+
+        Returns:
+            The :class:`Extraction` for ``policy``.
+
+        Raises:
+            Parse: When cedarpy cannot parse the policy.
+        """
+        return self._extract_one(policy)
 
     def shadow(self, policies: Sequence[Any]) -> list[Finding]:
-        """Detect shadowed permits."""
-        return detect_shadowing([(p, extract_scope(p)) for p in policies])
+        """Detect shadowed permits.
+
+        Args:
+            policies: Policies to inspect.
+
+        Returns:
+            A list of shadowing findings (empty when none found).
+        """
+        return self._detect_shadowing(
+            [(policy, self._extract_one(policy)) for policy in policies]
+        )
 
     def redundant(self, policies: Sequence[Any]) -> list[Finding]:
-        """Detect redundant duplicates."""
-        return detect_redundancy([(p, extract_scope(p)) for p in policies])
+        """Detect redundant duplicate policies.
+
+        Args:
+            policies: Policies to inspect.
+
+        Returns:
+            A list of redundancy findings (empty when none found).
+        """
+        return self._detect_redundancy(
+            [(policy, self._extract_one(policy)) for policy in policies]
+        )
 
     def types(self, policies: Sequence[Any]) -> set[str]:
-        """Collect every entity type referenced in ``policies``."""
-        return collect_entity_types([(p, extract_scope(p)) for p in policies])
+        """Collect every entity type referenced in ``policies``.
+
+        Args:
+            policies: Policies to inspect.
+
+        Returns:
+            Set of entity type identifiers referenced anywhere.
+        """
+        return self._collect_entity_types(
+            [(policy, self._extract_one(policy)) for policy in policies]
+        )
 
     def coverage_action(
         self,
         policies: Sequence[Any],
         names: Sequence[tuple[str, str]],
     ) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
-        """Coverage split for the actions in ``names``."""
-        extracted = [(p, extract_scope(p)) for p in policies]
-        return action_coverage(extracted, names, self.schema.actions_by_namespace())
+        """Coverage split for the actions in ``names``.
+
+        Args:
+            policies: Policies to inspect.
+            names: All known ``(namespace, action_id)`` pairs.
+
+        Returns:
+            Two disjoint sets of ``(namespace, action_id)`` tuples:
+            covered and uncovered.
+        """
+        return self._action_coverage(
+            [(policy, self._extract_one(policy)) for policy in policies],
+            names,
+        )
 
     def coverage_need(
         self,
         policies: Sequence[Any],
         ids: Sequence[str],
     ) -> tuple[set[str], set[str]]:
-        """Coverage split for the requirement ids in ``ids``."""
-        extracted = [(p, extract_scope(p)) for p in policies]
-        return requirement_coverage(extracted, ids)
+        """Coverage split for the requirement ids in ``ids``.
+
+        Args:
+            policies: Policies to inspect.
+            ids: All known requirement identifiers.
+
+        Returns:
+            Two disjoint sets of requirement ids: covered and
+            uncovered.
+        """
+        return self._requirement_coverage(
+            [(policy, self._extract_one(policy)) for policy in policies],
+            ids,
+        )
 
     def uncovered(
         self,
@@ -254,8 +472,214 @@ class Verifier:
         kind: str,
         template: str,
     ) -> list[Finding]:
-        """Emit a coverage-finding list when ``items`` is non-empty."""
-        return missing_coverage_finding(kind, "", items, template)
+        """Emit a coverage-finding list when ``items`` is non-empty.
+
+        Args:
+            items: Uncovered items; the finding is empty when this
+                list is empty.
+            kind: Finding ``kind`` (e.g., ``"uncovered-action"``).
+            template: Message template with ``{items}`` placeholder.
+
+        Returns:
+            A list of :class:`Finding` (empty when ``items`` is empty).
+        """
+        return self._missing_coverage_finding(kind, "", items, template)
+
+    def _extract_one(self, policy: Any) -> Extraction:
+        return parse_ast(
+            Extraction.policy_cedar_text(policy),
+            self.schema.actions_by_namespace(),
+        )
+
+    def _detect_shadowing(
+        self,
+        policies: Sequence[tuple[Any, Extraction]],
+    ) -> list[Finding]:
+        """Detect ``forbid`` policies that shadow ``permit`` policies.
+
+        A forbid shadows a permit when the forbid's scope equals the
+        permit's scope across every slot AND the forbid's conditions
+        equal the permit's conditions. ``any`` does not subsume a
+        non-``any`` scope, so a forbid on Alice does not shadow a
+        permit on ``any`` principal.
+
+        Args:
+            policies: Pairs of (Policy-like object, Extraction) to
+                analyze.
+
+        Returns:
+            A list of shadowing findings. Empty when no shadowing is
+            found.
+        """
+        findings: list[Finding] = []
+        permits = [
+            (policy, extraction)
+            for policy, extraction in policies
+            if extraction.effect == "permit"
+        ]
+        forbids = [
+            (policy, extraction)
+            for policy, extraction in policies
+            if extraction.effect == "forbid"
+        ]
+        for permit, permit_ex in permits:
+            for forbid, forbid_ex in forbids:
+                if scopes_match(permit_ex, forbid_ex):
+                    findings.append(
+                        Finding(
+                            kind="shadowing",
+                            severity="warning",
+                            policy_id=Extraction.policy_id_of(permit),
+                            relatedpolicy_id=Extraction.policy_id_of(forbid),
+                            message=(
+                                f"permit {Extraction.policy_id_of(permit)} is "
+                                f"shadowed by forbid {Extraction.policy_id_of(forbid)}; "
+                                "the permit will never produce Allow."
+                            ),
+                        )
+                    )
+        return findings
+
+    def _detect_redundancy(
+        self,
+        policies: Sequence[tuple[Any, Extraction]],
+    ) -> list[Finding]:
+        """Detect policies that duplicate the scope, effect, and conditions of another.
+
+        Two policies are redundant when they share the same effect,
+        the same scope signature across principal, action, and
+        resource, AND the same sorted list of condition (kind, body)
+        pairs. Partial subsumption (one policy implies another without
+        matching) is not detected by this conservative check.
+
+        Args:
+            policies: Pairs of (Policy-like object, Extraction) to
+                analyze.
+
+        Returns:
+            A list of redundancy findings. Empty when no duplication
+            is found.
+        """
+        findings: list[Finding] = []
+        seen: dict[
+            tuple[
+                str,
+                tuple[str, ...],
+                tuple[str, ...],
+                tuple[str, ...],
+                tuple[tuple[str, str], ...],
+            ],
+            str,
+        ] = {}
+        for policy, extraction in policies:
+            existing = seen.get(extraction.signature)
+            if existing is not None:
+                findings.append(
+                    Finding(
+                        kind="redundancy",
+                        severity="warning",
+                        policy_id=Extraction.policy_id_of(policy),
+                        relatedpolicy_id=existing,
+                        message=(
+                            f"policy {Extraction.policy_id_of(policy)} has the same "
+                            f"scope, effect, and conditions as policy {existing}; "
+                            "one is redundant."
+                        ),
+                    )
+                )
+            else:
+                seen[extraction.signature] = Extraction.policy_id_of(policy)
+        return findings
+
+    def _action_coverage(
+        self,
+        policies: Sequence[tuple[Any, Extraction]],
+        action_names: Sequence[tuple[str, str]],
+    ) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+        """Return ``(covered, uncovered)`` action identifiers.
+
+        A policy with ``action in Action::"group"`` covers every
+        member action of that group. A policy with a specific action
+        covers only that action. ``any`` does not cover any specific
+        action.
+
+        Args:
+            policies: Pairs of (Policy-like object, Extraction).
+            action_names: All known ``(namespace, action_id)`` pairs.
+
+        Returns:
+            Two disjoint sets of ``(namespace, action_id)`` tuples.
+        """
+        actions_by_namespace = self.schema.actions_by_namespace()
+        covered: set[tuple[str, str]] = set()
+        referenced: set[tuple[str, str]] = set()
+        for _, extraction in policies:
+            signature = resolve_action_namespace(
+                extraction.action, actions_by_namespace, action_names
+            )
+            kind = action_kind(signature)
+            if kind == "named":
+                namespace, name = action_named(signature)
+                referenced.add((namespace, name))
+                for member in actions_by_namespace.get(namespace, {}).get(name, ()):
+                    referenced.add((namespace, member))
+            elif kind == "group":
+                namespace, group_name = action_named(signature)
+                for member in actions_by_namespace.get(
+                    namespace, {}
+                ).get(group_name, ()):
+                    referenced.add((namespace, member))
+        for pair in action_names:
+            if pair in referenced:
+                covered.add(pair)
+        return covered, set(action_names) - covered
+
+    def _requirement_coverage(
+        self,
+        policies: Sequence[tuple[Any, Extraction]],
+        requirement_ids: Sequence[str],
+    ) -> tuple[set[str], set[str]]:
+        """Return ``(covered, uncovered)`` requirement identifiers."""
+        covered = {Extraction.policy_requirement_id_of(policy) for policy, _ in policies}
+        return covered & set(requirement_ids), set(requirement_ids) - covered
+
+    def _collect_entity_types(
+        self,
+        policies: Sequence[tuple[Any, Extraction]],
+    ) -> set[str]:
+        """Return the set of entity type names referenced by ``policies``."""
+        types: set[str] = set()
+        for _, extraction in policies:
+            for name in extract_type_names(extraction.action):
+                if name:
+                    types.add(name)
+            for name in extract_type_names(extraction.principal):
+                if name:
+                    types.add(name)
+            for name in extract_type_names(extraction.resource):
+                if name:
+                    types.add(name)
+        return types
+
+    def _missing_coverage_finding(
+        self,
+        kind: str,
+        domain: str,
+        items: list[Any],
+        template: str,
+    ) -> list[Finding]:
+        """Emit a single coverage finding when ``items`` is non-empty."""
+        if not items:
+            return []
+        joined = ", ".join(str(item) for item in items)
+        return [
+            Finding(
+                kind=kind,
+                severity="warning",
+                policy_id=domain,
+                message=template.format(items=joined, actions=joined),
+            )
+        ]
 
 
 def verify_policies(
@@ -268,148 +692,60 @@ def verify_policies(
 ) -> Report:
     """Run static verification on ``policies`` and return a structured report.
 
+    Public module-level entry point: build a :class:`Verifier` with
+    ``schema.actions_by_namespace()`` and delegate.
+
     Args:
         domain: Domain name reported in the result.
-        policies: Policies to inspect. The Cedar source of each policy is
-            parsed to extract scope and condition data.
+        policies: Policies to inspect. The Cedar source of each
+            policy is parsed to extract scope and condition data.
         requirement_ids: All known requirement identifiers.
         action_names: All known ``(namespace, action_id)`` pairs.
         entity_type_names: All known entity type identifiers.
-        actions_by_namespace: Optional mapping ``{namespace: {action_id:
-            (member_action_ids)}}`` for action-group expansion.
+        actions_by_namespace: Optional mapping
+            ``{namespace: {action_id: (member_action_ids)}}`` for
+            action-group expansion.
 
     Returns:
-        A :class:`Report` aggregating findings and
-        coverage metrics.
+        A :class:`Report` aggregating findings and coverage metrics.
     """
-    extracted: list[tuple[Any, Extraction]] = []
-    malformed: list[tuple[Any, str]] = []
-    for policy in policies:
-        try:
-            extraction = extract_scope(policy)
-        except Parse as error:
-            malformed.append((policy, str(error)))
-            continue
-        extracted.append((policy, extraction))
-
-    findings: list[Finding] = []
-    for policy, parse_error in malformed:
-        findings.append(
-            Finding(
-                kind="malformed-policy",
-                severity="warning",
-                policy_id=policy_id(policy),
-                message=(
-                    f"policy {policy_id(policy) or '(unknown)'} could not be parsed "
-                    f"by cedarpy and was skipped: {parse_error}"
-                ),
-            )
-        )
-
-    return verify_extracted(
-        domain,
-        extracted,
-        requirement_ids,
-        action_names,
-        entity_type_names,
-        actions_by_namespace or {},
-        findings,
-    )
-
-
-def verify_extracted(
-    domain: str,
-    extracted: Sequence[tuple[Any, Extraction]],
-    requirement_ids: Sequence[str],
-    action_names: Sequence[tuple[str, str]],
-    entity_type_names: Iterable[str],
-    actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]],
-    prior_findings: Sequence[Finding],
-) -> Report:
-    findings: list[Finding] = list(prior_findings)
-    findings.extend(detect_shadowing(extracted))
-    findings.extend(detect_redundancy(extracted))
-
-    covered_action_names, uncovered_action_names = action_coverage(
-        extracted, action_names, actions_by_namespace
-    )
-    covered_requirements, uncovered_requirements = requirement_coverage(
-        extracted, requirement_ids
-    )
-    entity_type_set = set(entity_type_names)
-    findings.extend(
-        missing_coverage_finding(
-            "uncovered-action",
-            domain,
-            sorted(uncovered_action_names),
-            "No policy references action {actions}.",
-        )
-    )
-    findings.extend(
-        missing_coverage_finding(
-            "uncovered-requirement",
-            domain,
-            sorted(uncovered_requirements),
-            "No compiled policy addresses requirement {items}.",
-        )
-    )
-    findings.extend(
-        missing_coverage_finding(
-            "uncovered-entity-type",
-            domain,
-            sorted(entity_type_set - collect_entity_types(extracted)),
-            "No policy references entity type {items}.",
-        )
-    )
-    return Report(
+    schema = _build_schema(actions_by_namespace)
+    return Verifier(schema).verify(
+        policies,
+        requirement_ids=requirement_ids,
+        action_names=action_names,
+        entity_type_names=entity_type_names,
         domain=domain,
-        findings=tuple(findings),
-        requirements_covered=tuple(sorted(covered_requirements)),
-        requirements_uncovered=tuple(sorted(uncovered_requirements)),
-        actions_covered=tuple(sorted(covered_action_names)),
-        actions_uncovered=tuple(sorted(uncovered_action_names)),
     )
 
 
-class Parse(Exception):
-    """Raised when cedarpy cannot parse a Cedar policy."""
+def _build_schema(
+    actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]] | None,
+) -> Schema:
+    """Build a minimal :class:`Schema` proxy exposing the actions map.
 
-
-def extract_scope(policy: Any) -> Extraction:
-    """Extract scope and condition data from ``policy``.
-
-    Cedar source is parsed via :func:`cedarpy.policies_to_json_str`,
-    which yields a structured JSON AST. The verifier operates on
-    AST-derived signatures so it can analyze imported policies whose
-    intent is ``None`` as well as CLI-generated policies whose Cedar
-    source is the authoritative artifact.
+    The verifier only reads :meth:`Schema.actions_by_namespace`; the
+    proxy is just enough to satisfy that single call.
 
     Args:
-        policy: Policy (or any object with a ``.cedar`` attribute or
-            a ``notes`` mapping carrying ``cedar_text``).
+        actions_by_namespace: Optional mapping ``{namespace:
+            {action_id: (member_action_ids)}}``.
 
     Returns:
-        A :class:`Extraction` capturing principal, action,
-        resource, conditions, and effect.
-
-    Raises:
-        Parse: When cedarpy cannot parse the policy.
+        A schema-like object whose ``actions_by_namespace`` returns
+        the supplied mapping.
     """
-    cedar = policy_cedar(policy)
-    return parse_ast(cedar)
+    return _SchemaProxy(actions_by_namespace or {})
 
 
-def policy_id(policy: Any) -> str:
-    """Return the policy id, accepting Policy or Intent."""
-    return getattr(policy, "id", None) or getattr(policy, "intent_id", None) or ""
+class _SchemaProxy:
+    """Minimal :class:`Schema` proxy exposing only the action map."""
 
+    def __init__(self, actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]]) -> None:
+        self._actions_by_namespace = actions_by_namespace
 
-def policy_requirement_id(policy: Any) -> str:
-    """Return the requirement id associated with a policy-like object."""
-    requirement = getattr(policy, "requirement", None)
-    if requirement is not None:
-        return getattr(requirement, "id", "")
-    return getattr(policy, "requirement_id", "")
+    def actions_by_namespace(self) -> Mapping[str, Mapping[str, tuple[str, ...]]]:
+        return self._actions_by_namespace
 
 
 def policy_cedar(policy: Any) -> str:
@@ -423,314 +759,27 @@ def policy_cedar(policy: Any) -> str:
     return ""
 
 
-def detect_shadowing(
-    policies: Sequence[tuple[Any, Extraction]],
-) -> list[Finding]:
-    """Detect ``forbid`` policies that shadow ``permit`` policies.
-
-    A forbid shadows a permit when the forbid's scope equals the
-    permit's scope across every slot AND the forbid's conditions equal
-    the permit's conditions. ``any`` does not subsume a non-``any``
-    scope, so a forbid on Alice does not shadow a permit on ``any``
-    principal.
-
-    Args:
-        policies: Pairs of (Policy-like object, Extraction)
-            to analyze.
-
-    Returns:
-        A list of shadowing findings. Empty if no shadowing is found.
-    """
-    findings: list[Finding] = []
-    permits = [
-        (policy, extraction)
-        for policy, extraction in policies
-        if extraction.effect == "permit"
-    ]
-    forbids = [
-        (policy, extraction)
-        for policy, extraction in policies
-        if extraction.effect == "forbid"
-    ]
-    for permit, permit_ex in permits:
-        for forbid, forbid_ex in forbids:
-            if scopes_match(permit_ex, forbid_ex):
-                findings.append(
-                    Finding(
-                        kind="shadowing",
-                        severity="warning",
-                        policy_id=policy_id(permit),
-                        relatedpolicy_id=policy_id(forbid),
-                        message=(
-                            f"permit {policy_id(permit)} is shadowed by forbid "
-                            f"{policy_id(forbid)}; the permit will never produce Allow."
-                        ),
-                    )
-                )
-    return findings
-
-
-def detect_redundancy(
-    policies: Sequence[tuple[Any, Extraction]],
-) -> list[Finding]:
-    """Detect policies that duplicate the scope, effect, and conditions of another.
-
-    Two policies are redundant when they share the same effect, the
-    same scope signature across principal, action, and resource, AND
-    the same sorted list of condition (kind, body) pairs. Partial
-    subsumption (one policy implies another without matching) is not
-    detected by this conservative check.
-
-    Args:
-        policies: Pairs of (Policy-like object, Extraction)
-            to analyze.
-
-    Returns:
-        A list of redundancy findings. Empty if no duplication is found.
-    """
-    findings: list[Finding] = []
-    seen: dict[
-        tuple[
-            str,
-            tuple[str, ...],
-            tuple[str, ...],
-            tuple[str, ...],
-            tuple[tuple[str, str], ...],
-        ],
-        str,
-    ] = {}
-    for policy, extraction in policies:
-        existing = seen.get(extraction.signature)
-        if existing is not None:
-            findings.append(
-                Finding(
-                    kind="redundancy",
-                    severity="warning",
-                    policy_id=policy_id(policy),
-                    relatedpolicy_id=existing,
-                    message=(
-                        f"policy {policy_id(policy)} has the same scope, effect, "
-                        f"and conditions as policy {existing}; one is redundant."
-                    ),
-                )
-            )
-        else:
-            seen[extraction.signature] = policy_id(policy)
-    return findings
-
-
-def scopes_match(
-    permit_ex: Extraction, forbid_ex: Extraction
-) -> bool:
-    """Return ``True`` when ``forbid_ex`` fully shadows ``permit_ex``.
-
-    Two policies share shadow only when every slot signature matches.
-    The ``any`` kind does not subsume a more specific kind.
-    """
-    return (
-        permit_ex.principal == forbid_ex.principal
-        and permit_ex.action == forbid_ex.action
-        and permit_ex.resource == forbid_ex.resource
-        and permit_ex.conditions == forbid_ex.conditions
-    )
-
-
-def resolve_action_namespace(
-    action_signature: tuple[str, ...],
+def parse_ast(
+    cedar: str,
     actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]],
-    action_names: Sequence[tuple[str, str]] | None = None,
-) -> tuple[str, ...]:
-    """Resolve a possibly-namespaceless action signature against the schema.
-
-    ``action == Action::"view"`` with no namespace prefix has the
-    empty-namespace form ``("", "view", "named")``. The verifier looks
-    up the action across every namespace and picks the namespace where
-    the action is uniquely declared. When the action is ambiguous
-    (declared in multiple namespaces) or absent, the signature is
-    returned unchanged.
-
-    ``action in Action::"readers"`` carries the ``"in_group"`` marker
-    and is resolved similarly by picking the namespace that hosts the
-    group. When the group is ambiguous, the original signature is
-    returned so downstream coverage flags the ambiguity.
-
-    When ``actions_by_namespace`` is empty but ``action_names`` is
-    provided, the resolver falls back to a single-namespace lookup
-    against ``action_names`` so coverage can still match against the
-    flat action list.
-    """
-    if len(action_signature) != 3:
-        return action_signature
-    if action_signature[-1] not in {"named", "in_group"}:
-        return action_signature
-    if action_signature[0]:
-        return action_signature
-    action_id = action_signature[1]
-    if actions_by_namespace:
-        matches: list[str] = []
-        for namespace, actions in actions_by_namespace.items():
-            if action_id in actions:
-                matches.append(namespace)
-        if len(matches) == 1:
-            return (matches[0], action_signature[1], action_signature[2])
-        return action_signature
-    if action_names is not None:
-        namespaces_for_id = {ns for ns, name in action_names if name == action_id}
-        if len(namespaces_for_id) == 1:
-            return (next(iter(namespaces_for_id)), action_id, action_signature[2])
-    return action_signature
-
-
-def action_coverage(
-    policies: Sequence[tuple[Any, Extraction]],
-    action_names: Sequence[tuple[str, str]],
-    actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]],
-) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
-    """Return ``(covered, uncovered)`` action identifiers.
-
-    A policy with ``action in Action::"group"`` covers every member
-    action of that group. A policy with a specific action covers only
-    that action. ``any`` does not cover any specific action.
-
-    Args:
-        policies: Pairs of (Policy-like object, Extraction)
-            to scan.
-        action_names: All known ``(namespace, action_id)`` pairs.
-        actions_by_namespace: Mapping ``{namespace: {action_id:
-            (member_action_ids)}}`` for action-group expansion.
-
-    Returns:
-        Two disjoint sets of ``(namespace, action_id)`` tuples.
-    """
-    covered: set[tuple[str, str]] = set()
-    referenced: set[tuple[str, str]] = set()
-    for _, extraction in policies:
-        signature = resolve_action_namespace(
-            extraction.action, actions_by_namespace, action_names
-        )
-        kind = action_kind(signature)
-        if kind == "named":
-            namespace, name = action_named(signature)
-            referenced.add((namespace, name))
-            for member in actions_by_namespace.get(namespace, {}).get(name, ()):
-                referenced.add((namespace, member))
-        elif kind == "group":
-            namespace, group_name = action_named(signature)
-            for member in actions_by_namespace.get(namespace, {}).get(group_name, ()):
-                referenced.add((namespace, member))
-    for pair in action_names:
-        if pair in referenced:
-            covered.add(pair)
-    return covered, set(action_names) - covered
-
-
-def action_kind(action_signature: tuple[str, ...]) -> str:
-    """Classify an action signature as ``any``, ``named``, or ``group``."""
-    if not action_signature or action_signature == ("any",):
-        return "any"
-    if len(action_signature) >= 3 and action_signature[-1] == "in_group":
-        return "group"
-    return "named"
-
-
-def action_named(action_signature: tuple[str, ...]) -> tuple[str, str]:
-    """Return ``(namespace, action_id)`` from a named action signature."""
-    if len(action_signature) >= 2:
-        return action_signature[0], action_signature[1]
-    return "", action_signature[0] if action_signature else ""
-
-
-def requirement_coverage(
-    policies: Sequence[tuple[Any, Extraction]],
-    requirement_ids: Sequence[str],
-) -> tuple[set[str], set[str]]:
-    """Return ``(covered, uncovered)`` requirement identifiers."""
-    covered = {policy_requirement_id(policy) for policy, _ in policies}
-    return covered & set(requirement_ids), set(requirement_ids) - covered
-
-
-def collect_entity_types(
-    policies: Sequence[tuple[Any, Extraction]],
-) -> set[str]:
-    """Return the set of entity type names referenced by ``policies``."""
-    types: set[str] = set()
-    for _, extraction in policies:
-        action = extraction.action
-        if (
-            isinstance(action, tuple)
-            and len(action) >= 3
-            and action[-1] in {"named", "in_group"}
-        ):
-            for entry in action[:1]:
-                for name in extract_type_names(entry):
-                    if name:
-                        types.add(name)
-        else:
-            for name in extract_type_names(action):
-                if name:
-                    types.add(name)
-        for token in extraction.principal:
-            for name in extract_type_names(token):
-                if name:
-                    types.add(name)
-        for token in extraction.resource:
-            for name in extract_type_names(token):
-                if name:
-                    types.add(name)
-    return types
-
-
-def extract_entity_types(policies: Sequence[Any]) -> set[str]:
-    """Return the set of entity type names referenced by ``policies``.
-
-    This is the public helper used by callers that want a flat set of
-    entity types referenced anywhere in the policy set.
-
-    Args:
-        policies: Sequence of policies (or policy-shaped objects) to scan.
-
-    Returns:
-        Set of entity type identifiers referenced by any policy.
-    """
-    extracted: list[tuple[Any, Extraction]] = []
-    for policy in policies:
-        try:
-            extracted.append((policy, extract_scope(policy)))
-        except Parse:
-            continue
-    return collect_entity_types(extracted)
-
-
-def missing_coverage_finding(
-    kind: str,
-    domain: str,
-    items: list[Any],
-    template: str,
-) -> list[Finding]:
-    """Emit a single coverage finding when ``items`` is non-empty."""
-    if not items:
-        return []
-    joined = ", ".join(str(item) for item in items)
-    return [
-        Finding(
-            kind=kind,
-            severity="warning",
-            policy_id=domain,
-            message=template.format(items=joined, actions=joined),
-        )
-    ]
-
-
-def parse_ast(cedar: str) -> Extraction:
-    """Structured parser that extracts scope and condition data from Cedar.
+) -> Extraction:
+    """Build an :class:`Extraction` from a Cedar source string.
 
     Uses :func:`cedarpy.policies_to_json_str` to obtain a normalized
-    JSON AST, then walks the AST to extract principal/action/resource
-    signatures and a canonicalized condition signature.
+    JSON AST, then walks the AST to extract principal / action /
+    resource signatures and a canonicalized condition signature.
+
+    Args:
+        cedar: Cedar source text to parse.
+        actions_by_namespace: Action-group membership mapping
+            for namespace resolution.
+
+    Returns:
+        The :class:`Extraction` for ``cedar``.
 
     Raises:
-        Parse: When cedarpy cannot parse ``cedar`` or
-            when the input is empty.
+        Parse: When cedarpy cannot parse ``cedar`` or when the input
+            is empty.
     """
     text = cedar.strip()
     if not text:
@@ -749,7 +798,9 @@ def parse_ast(cedar: str) -> Extraction:
     policy_node = next(iter(static_policies.values()))
     effect = policy_node.get("effect", "permit")
     principal = parse_principal_node(policy_node.get("principal") or {})
-    action = parse_action_node(policy_node.get("action") or {})
+    action = parse_action_node(
+        policy_node.get("action") or {}, actions_by_namespace
+    )
     resource = parse_resource_node(policy_node.get("resource") or {})
     conditions = parse_conditions(policy_node.get("conditions") or [])
     return Extraction(
@@ -778,13 +829,23 @@ def parse_principal_node(node: Mapping[str, Any]) -> tuple[str, ...]:
     return (json.dumps(node, sort_keys=True),)
 
 
-def parse_action_node(node: Mapping[str, Any]) -> tuple[str, ...]:
+def parse_action_node(
+    node: Mapping[str, Any],
+    actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]],
+) -> tuple[str, ...]:
     """Convert a cedarpy action node into a signature tuple.
 
     cedarpy emits ``"Action"`` as the type for namespace-less action
     references like ``action == Action::"view"``. The verifier treats
-    that placeholder as the empty namespace so the downstream resolver
-    can pick the correct schema namespace.
+    that placeholder as the empty namespace so the downstream
+    resolver can pick the correct schema namespace.
+
+    Args:
+        node: cedarpy action node.
+        actions_by_namespace: Action-group membership mapping.
+
+    Returns:
+        The action signature tuple.
     """
     op = node.get("op")
     if op == "All":
@@ -828,8 +889,17 @@ def normalize_action_type(type_name: Any) -> str:
     namespace) or ``<Namespace>::Action::"id"`` (with namespace).
     cedarpy's JSON AST emits the type as ``"Action"`` or
     ``"<Namespace>::Action"``. The verifier normalizes those to the
-    empty string (no namespace) or to the bare namespace so downstream
-    resolution matches the schema's flat ``(namespace, id)`` form.
+    empty string (no namespace) or to the bare namespace so
+    downstream resolution matches the schema's flat
+    ``(namespace, id)`` form.
+
+    Args:
+        type_name: The cedarpy-emitted action type.
+
+    Returns:
+        The normalized type name (empty string for ``"Action"``,
+        bare namespace for ``"<Namespace>::Action"``, otherwise
+        unchanged).
     """
     text = str(type_name)
     if text == "Action":
@@ -871,6 +941,12 @@ def parse_conditions(
     keys sorted. This means equivalent expressions produce identical
     signatures regardless of source whitespace or operator ordering
     choices.
+
+    Args:
+        raw_conditions: cedarpy condition nodes.
+
+    Returns:
+        Sorted tuple of ``(kind, canonical_body)`` pairs.
     """
     pairs: list[tuple[str, str]] = []
     for condition in raw_conditions:
@@ -879,6 +955,97 @@ def parse_conditions(
         canonical = json.dumps(body, sort_keys=True) if body is not None else ""
         pairs.append((str(kind), canonical))
     return tuple(sorted(pairs))
+
+
+def scopes_match(permit_ex: Extraction, forbid_ex: Extraction) -> bool:
+    """Return ``True`` when ``forbid_ex`` fully shadows ``permit_ex``.
+
+    Two policies share shadow only when every slot signature
+    matches. The ``any`` kind does not subsume a more specific kind.
+
+    Args:
+        permit_ex: Extraction of the permit policy.
+        forbid_ex: Extraction of the forbid policy.
+
+    Returns:
+        Whether the scopes match exactly.
+    """
+    return (
+        permit_ex.principal == forbid_ex.principal
+        and permit_ex.action == forbid_ex.action
+        and permit_ex.resource == forbid_ex.resource
+        and permit_ex.conditions == forbid_ex.conditions
+    )
+
+
+def resolve_action_namespace(
+    action_signature: tuple[str, ...],
+    actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]],
+    action_names: Sequence[tuple[str, str]] | None = None,
+) -> tuple[str, ...]:
+    """Resolve a possibly-namespaceless action signature against the schema.
+
+    ``action == Action::"view"`` with no namespace prefix has the
+    empty-namespace form ``("", "view", "named")``. The verifier
+    looks up the action across every namespace and picks the
+    namespace where the action is uniquely declared. When the
+    action is ambiguous (declared in multiple namespaces) or absent,
+    the signature is returned unchanged.
+
+    ``action in Action::"readers"`` carries the ``"in_group"`` marker
+    and is resolved similarly by picking the namespace that hosts
+    the group. When the group is ambiguous, the original signature
+    is returned so downstream coverage flags the ambiguity.
+
+    When ``actions_by_namespace`` is empty but ``action_names`` is
+    provided, the resolver falls back to a single-namespace lookup
+    against ``action_names`` so coverage can still match against the
+    flat action list.
+
+    Args:
+        action_signature: Action signature tuple.
+        actions_by_namespace: Action-group membership mapping.
+        action_names: Optional flat list of all known actions.
+
+    Returns:
+        The resolved action signature.
+    """
+    if len(action_signature) != 3:
+        return action_signature
+    if action_signature[-1] not in {"named", "in_group"}:
+        return action_signature
+    if action_signature[0]:
+        return action_signature
+    action_id = action_signature[1]
+    if actions_by_namespace:
+        matches: list[str] = []
+        for namespace, actions in actions_by_namespace.items():
+            if action_id in actions:
+                matches.append(namespace)
+        if len(matches) == 1:
+            return (matches[0], action_signature[1], action_signature[2])
+        return action_signature
+    if action_names is not None:
+        namespaces_for_id = {ns for ns, name in action_names if name == action_id}
+        if len(namespaces_for_id) == 1:
+            return (next(iter(namespaces_for_id)), action_id, action_signature[2])
+    return action_signature
+
+
+def action_kind(action_signature: tuple[str, ...]) -> str:
+    """Classify an action signature as ``any``, ``named``, or ``group``."""
+    if not action_signature or action_signature == ("any",):
+        return "any"
+    if len(action_signature) >= 3 and action_signature[-1] == "in_group":
+        return "group"
+    return "named"
+
+
+def action_named(action_signature: tuple[str, ...]) -> tuple[str, str]:
+    """Return ``(namespace, action_id)`` from a named action signature."""
+    if len(action_signature) >= 2:
+        return action_signature[0], action_signature[1]
+    return "", action_signature[0] if action_signature else ""
 
 
 def extract_type_names(token: Any) -> list[str]:
@@ -907,13 +1074,72 @@ def extract_type_names(token: Any) -> list[str]:
     return []
 
 
+def collect_entity_types(
+    policies: Sequence[tuple[Any, Extraction]],
+) -> set[str]:
+    """Return the set of entity type names referenced by ``policies``."""
+    types: set[str] = set()
+    for _, extraction in policies:
+        for name in extract_type_names(extraction.action):
+            if name:
+                types.add(name)
+        for name in extract_type_names(extraction.principal):
+            if name:
+                types.add(name)
+        for name in extract_type_names(extraction.resource):
+            if name:
+                types.add(name)
+    return types
+
+
+def extract_entity_types(policies: Sequence[Any]) -> set[str]:
+    """Return the set of entity type names referenced by ``policies``.
+
+    Public helper used by callers that want a flat set of entity
+    types referenced anywhere in the policy set.
+
+    Args:
+        policies: Sequence of policies (or policy-shaped objects) to
+            scan.
+
+    Returns:
+        Set of entity type identifiers referenced by any policy.
+    """
+    extracted: list[tuple[Any, Extraction]] = []
+    for policy in policies:
+        try:
+            extracted.append((policy, parse_ast(policy_cedar(policy), {})))
+        except Parse:
+            continue
+    return collect_entity_types(extracted)
+
+
+def missing_coverage_finding(
+    kind: str,
+    domain: str,
+    items: list[Any],
+    template: str,
+) -> list[Finding]:
+    """Emit a single coverage finding when ``items`` is non-empty."""
+    if not items:
+        return []
+    joined = ", ".join(str(item) for item in items)
+    return [
+        Finding(
+            kind=kind,
+            severity="warning",
+            policy_id=domain,
+            message=template.format(items=joined, actions=joined),
+        )
+    ]
+
+
 __all__ = [
     "Extraction",
     "Finding",
     "Parse",
     "Report",
-    "detect_redundancy",
-    "detect_shadowing",
+    "Verifier",
     "extract_entity_types",
     "extract_scope",
     "verify_policies",

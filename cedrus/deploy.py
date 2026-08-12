@@ -1,64 +1,69 @@
 """Deployment automation for compiled Cedar policies.
 
 A :class:`Bundler` produces a self-contained deployment artifact
-(a Cedar source bundle plus a manifest with a SHA-256 integrity hash).
-A :class:`Client` pushes the bundle to either a local directory
-or a remote HTTP endpoint and records the deployment in the workspace.
+(a Cedar source bundle plus a manifest with a SHA-256 integrity
+hash). A :class:`Client` pushes the bundle to either a local
+directory or a remote HTTP endpoint and records the deployment in
+the workspace.
 
-Bundle format
--------------
+Bundle format:
+    Every deployment produces a two-file artifact:
 
-Every deployment produces a two-file artifact:
+    * ``bundle.cedar`` - concatenated Cedar source for every compiled
+      policy in the domain.
+    * ``manifest.json`` - metadata describing the bundle: domain, the
+      SHA-256 of ``bundle.cedar``, policy identifiers, creation
+      timestamp, and any user-supplied metadata.
 
-* ``bundle.cedar`` - concatenated Cedar source for every compiled
-  policy in the domain.
-* ``manifest.json`` - metadata describing the bundle: domain, the
-  SHA-256 of ``bundle.cedar``, policy identifiers, creation timestamp,
-  and any user-supplied metadata.
+    The bundle hash in the manifest is recomputed on read; a
+    mismatch or a missing manifest hash raises :class:`Deploy`. The
+    hash provides **corruption detection** after transport; it is not
+    an authenticated signature. To obtain tamper evidence, add a
+    keyed signature (HMAC-SHA-256 with a shared key, or Ed25519 with
+    a known public key) in the deploy metadata on the receiving side.
 
-The bundle hash in the manifest is recomputed on read; a mismatch
-or a missing manifest hash raises :class:`Deploy`. The hash
-provides **corruption detection** after transport; it is not an
-authenticated signature. To obtain tamper evidence, add a keyed
-signature (HMAC-SHA-256 with a shared key, or Ed25519 with a known
-public key) in the deploy metadata on the receiving side.
+Atomicity:
+    Local deployments write the bundle to a sibling temporary
+    directory first, fsync both data and directory, and atomically
+    rename each file into place with :meth:`pathlib.Path.replace`.
+    Concurrent writers therefore never observe a mixed state where
+    one file is the new version and the other is the old version. A
+    crash before the rename leaves the previous bundle untouched.
+    Symlink targets are refused to avoid cross-trust boundary
+    replacement.
 
-Atomicity
----------
+Network behavior:
+    :meth:`Client.deploy_http` uses :mod:`httpx` with a custom
+    transport that pins the connection to the IP address resolved at
+    SSRF-check time. This closes the DNS-rebinding window in which an
+    attacker controlling authoritative DNS returns a public address
+    at guard time and a private address at request time. Redirects
+    are disabled by default; an explicit ``follow_redirects=True``
+    flag is required to follow 3xx responses (which re-enter the
+    SSRF guard on each hop).
 
-Local deployments write the bundle to a sibling temporary directory
-first, fsync both data and directory, and atomically rename each file
-into place with ``Path.replace``. Concurrent writers therefore never
-observe a mixed state where one file is the new version and the other
-is the old version. A crash before the rename leaves the previous
-bundle untouched. Symlink targets are refused to avoid cross-trust
-boundary replacement.
+    Response bodies are read in bounded chunks so that a streaming
+    or oversized endpoint cannot exhaust memory. The body is
+    **never** embedded in error messages or persisted verbatim in
+    deployment records; only a SHA-256 of the body is retained.
+    This prevents the deployment client from leaking whatever the
+    target server returns (stack traces, echoed credentials,
+    internal hostnames) into stderr or the SQLite store.
 
-Network behavior
-----------------
+    The default :class:`Guard` rejects loopback, link-local, and
+    private-network targets so untrusted callers cannot use the
+    deployment client as an SSRF proxy. Operators who genuinely need
+    to deploy into a private network can pass
+    ``allow_private_targets=True`` to the client constructor.
 
-``Client.deploy_http`` uses :mod:`httpx` with a custom
-transport that pins the connection to the IP address resolved at
-SSRF-check time. This closes the DNS-rebinding window in which an
-attacker controlling authoritative DNS returns a public address at
-guard time and a private address at request time. Redirects are
-disabled by default; an explicit ``follow_redirects=True`` flag is
-required to follow 3xx responses (which re-enter the SSRF guard on
-each hop).
-
-Response bodies are read in bounded chunks so that a streaming or
-oversized endpoint cannot exhaust memory. The body is **never**
-embedded in error messages or persisted verbatim in deployment
-records; only a SHA-256 of the body is retained. This prevents the
-deployment client from leaking whatever the target server returns
-(stack traces, echoed credentials, internal hostnames) into stderr
-or the SQLite store.
-
-The default :class:`Guard` rejects loopback, link-local, and
-private-network targets so untrusted callers cannot use the
-deployment client as an SSRF proxy. Operators who genuinely need to
-deploy into a private network can pass
-``allow_private_targets=True`` to the client constructor.
+Attributes:
+    Manifest: Self-contained deployment artifact.
+    Record: Persisted record of a successful deployment.
+    Bundler: Build, write, and read :class:`Manifest` objects.
+    Guard: Reject requests to loopback / link-local / private targets.
+    Pin: A DNS-resolved address to which an HTTP connection is pinned.
+    Transport: httpx transport that pins each connection to a resolved IP.
+    Client: Push a :class:`Manifest` to a local directory or HTTP endpoint.
 """
 
 from __future__ import annotations
@@ -66,9 +71,11 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import os
 import socket
 import ssl
 import tempfile
+import time
 import urllib.parse
 import uuid
 from collections.abc import Mapping, Sequence
@@ -79,18 +86,18 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from .error import Deploy
-from .policies import Compiled, Kind
+from cedrus.error import Deploy
+from cedrus.policies import Compiled, Kind
 
 if TYPE_CHECKING:
-    from .store.sqlite import Backend
+    from cedrus.store.sqlite import Backend
 
 DEPLOYMENT_KIND_LOCAL = "local"
 DEPLOYMENT_KIND_HTTP = "http"
 
-#: Maximum number of bytes of the HTTP response body to hash. The body
-#: is also bounded at read time so that a streaming or oversized
-#: response cannot exhaust memory.
+#: Maximum number of bytes of the HTTP response body to hash. The
+#: body is also bounded at read time so that a streaming or
+#: oversized response cannot exhaust memory.
 HTTP_RESPONSE_BODY_LIMIT = 512
 
 #: Maximum total bytes read from an HTTP response body. Pairs with
@@ -98,10 +105,11 @@ HTTP_RESPONSE_BODY_LIMIT = 512
 #: exhaust memory before the per-record truncation runs.
 HTTP_RESPONSE_READ_LIMIT = 65536
 
-#: Reserved HTTP header names that callers may not inject via ``--header``.
-#: ``Host`` would override the SSRF guard's pinned host; ``Authorization``
-#: and ``Cookie`` could leak credentials; ``Content-Length`` and
-#: ``Transfer-Encoding`` are framing headers httpx manages itself.
+#: Reserved HTTP header names that callers may not inject via
+#: ``--header``. ``Host`` would override the SSRF guard's pinned
+#: host; ``Authorization`` and ``Cookie`` could leak credentials;
+#: ``Content-Length`` and ``Transfer-Encoding`` are framing
+#: headers httpx manages itself.
 RESERVED_HEADERS = frozenset(
     {"host", "authorization", "cookie", "content-length", "transfer-encoding"}
 )
@@ -130,9 +138,14 @@ class Manifest:
     def to_dict(self) -> Mapping[str, Any]:
         """Return a JSON-friendly representation including the Cedar source.
 
-        The returned mapping is suitable for direct JSON serialization.
-        The full Cedar source is included so consumers do not need to
-        also read ``bundle.cedar`` when reconstructing the bundle.
+        The returned mapping is suitable for direct JSON
+        serialization. The full Cedar source is included so consumers
+        do not need to also read ``bundle.cedar`` when reconstructing
+        the bundle.
+
+        Returns:
+            A dict with ``domain``, ``bundle_hash``, ``policy_ids``,
+            ``created_at``, ``metadata`` and ``cedar`` keys.
         """
         return {
             "domain": self.domain,
@@ -147,8 +160,12 @@ class Manifest:
         """Return the manifest payload without the bundled Cedar source.
 
         Used when writing the manifest to disk so the Cedar source is
-        not duplicated in ``manifest.json`` (it lives in ``bundle.cedar``
-        alongside).
+        not duplicated in ``manifest.json`` (it lives in
+        ``bundle.cedar`` alongside).
+
+        Returns:
+            A dict with ``domain``, ``bundle_hash``, ``policy_ids``,
+            ``created_at`` and ``metadata`` keys.
         """
         return {
             "domain": self.domain,
@@ -185,35 +202,65 @@ class Record:
     created_at: datetime
     response: Mapping[str, str] = field(default_factory=dict)
 
-    @classmethod
-    def from_row(cls, row: dict[str, Any]) -> Record:
-        """Build a :class:`Record` from a SQLite ``deployments`` row dict.
-
-        Args:
-            row: Dict produced by ``SELECT * FROM deployments``.
+    def to_data(self) -> dict[str, Any]:
+        """Return the multi-row dict for this :class:`Record`.
 
         Returns:
-            The reconstructed :class:`Record`.
+            A dict with ``"deployments"`` (main row) and
+            ``"deployment_responses"`` (one row per response key/value).
         """
-        return cls(
-            id=row["id"],
-            domain=row["domain"],
-            target=row["target"],
-            target_kind=row["target_kind"],
-            bundle_hash=row["bundle_hash"],
-            status=row["status"],
-            response=dict(json.loads(row["response_json"])),
-            created_at=datetime.fromisoformat(row["created_at"]),
-        )
+        return {
+            "deployments": {
+                "id": self.id,
+                "domain": self.domain,
+                "target": self.target,
+                "target_kind": self.target_kind,
+                "bundle_hash": self.bundle_hash,
+                "status": self.status,
+                "created_at": self.created_at.isoformat(),
+            },
+            "deployment_responses": [
+                {"key": k, "value": v} for k, v in self.response.items()
+            ],
+        }
 
-    @classmethod
-    def parse(cls, data: dict[str, Any]) -> Record:
-        """Build a :class:`Record` from its SQLite ``deployments`` row + ``deployment_responses``.
+    def save(self, repo: "Backend") -> None:
+        """Persist this deployment (insert + response rows).
 
         Args:
-            data: Dict with ``"deployments"`` (main row) and
-                ``"deployment_responses"`` (list of ``{"key",
-                "value"}`` dicts).
+            repo: Storage backend to write through.
+        """
+        rows = self.to_data()
+        with repo.transaction():
+            repo.execute(
+                "INSERT OR REPLACE INTO deployments "
+                "(id, domain, target, target_kind, bundle_hash, status, "
+                "created_at) "
+                "VALUES (:id, :domain, :target, :target_kind, :bundle_hash, "
+                ":status, :created_at)",
+                rows["deployments"],
+            )
+            repo.execute(
+                "DELETE FROM deployment_responses WHERE deployment_id = :id",
+                {"id": self.id},
+            )
+            for resp in rows["deployment_responses"]:
+                repo.execute(
+                    "INSERT INTO deployment_responses "
+                    "(deployment_id, key, value) "
+                    "VALUES (:deployment_id, :key, :value)",
+                    {**resp, "deployment_id": self.id},
+                )
+
+    @classmethod
+    def parse(cls, data: dict[str, Any]) -> "Record":
+        """Build a :class:`Record` from its SQLite rows.
+
+        ``data`` carries the main ``"deployments"`` row plus the
+        ``"deployment_responses"`` list of ``{"key", "value"}`` dicts.
+
+        Args:
+            data: Assembled dict from the SQLite read path.
 
         Returns:
             The reconstructed :class:`Record`.
@@ -233,97 +280,72 @@ class Record:
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
-def to_data(self) -> dict[str, Any]:
-    """Return the multi-row dict for this :class:`Record`.
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> "Record":
+        """Build a :class:`Record` from a single ``deployments`` row.
 
-    Returns:
-        A dict with ``"deployments"`` (main row) and
-        ``"deployment_responses"`` (one row per response key/value).
-    """
-    return {
-        "deployments": {
-            "id": self.id,
-            "domain": self.domain,
-            "target": self.target,
-            "target_kind": self.target_kind,
-            "bundle_hash": self.bundle_hash,
-            "status": self.status,
-            "created_at": self.created_at.isoformat(),
-        },
-        "deployment_responses": [
-            {"key": k, "value": v} for k, v in self.response.items()
-        ],
-    }
+        Args:
+            row: Dict produced by ``SELECT * FROM deployments``.
 
-def save(self, repo: Backend) -> None:
-    """Persist this deployment (insert + response rows).
-
-    Args:
-        repo: Storage backend to write through.
-    """
-    rows = self.to_data()
-    with repo.transaction():
-        repo.execute(
-            "INSERT OR REPLACE INTO deployments "
-            "(id, domain, target, target_kind, bundle_hash, status, created_at) "
-            "VALUES (:id, :domain, :target, :target_kind, :bundle_hash, "
-            ":status, :created_at)",
-            rows["deployments"],
+        Returns:
+            The reconstructed :class:`Record`.
+        """
+        return cls(
+            id=row["id"],
+            domain=row["domain"],
+            target=row["target"],
+            target_kind=row["target_kind"],
+            bundle_hash=row["bundle_hash"],
+            status=row["status"],
+            response=dict(json.loads(row["response_json"])),
+            created_at=datetime.fromisoformat(row["created_at"]),
         )
-        repo.execute(
-            "DELETE FROM deployment_responses WHERE deployment_id = :id",
-            {"id": self.id},
-        )
-        for resp in rows["deployment_responses"]:
-            repo.execute(
-                "INSERT INTO deployment_responses (deployment_id, key, value) "
-                "VALUES (:deployment_id, :key, :value)",
-                {**resp, "deployment_id": self.id},
+
+    @classmethod
+    def list(
+        cls,
+        repo: "Backend",
+        *,
+        domain: str | None = None,
+    ) -> list["Record"]:
+        """All deployments, optionally filtered by ``domain``.
+
+        Args:
+            repo: Storage backend to read from.
+            domain: When provided, only deployments whose ``domain``
+                matches are returned.
+
+        Returns:
+            A list of :class:`Record` in insertion order.
+        """
+        if domain is None:
+            rows = repo.fetch("SELECT * FROM deployments ORDER BY created_at")
+        else:
+            rows = repo.fetch(
+                "SELECT * FROM deployments WHERE domain = ? ORDER BY created_at",
+                (domain,),
             )
-
-@classmethod
-def list(
-    cls,
-    repo: Backend,
-    *,
-    domain: str | None = None,
-) -> list[Record]:
-    """All deployments, optionally filtered by ``domain``.
-
-    Args:
-        repo: Storage backend to read from.
-        domain: When provided, only deployments whose ``domain``
-            matches are returned.
-
-    Returns:
-        A list of :class:`Record` in insertion order.
-    """
-    if domain is None:
-        rows = repo.fetch("SELECT * FROM deployments ORDER BY created_at")
-    else:
-        rows = repo.fetch(
-            "SELECT * FROM deployments WHERE domain = ? ORDER BY created_at",
-            (domain,),
-        )
-    result: list[Record] = []
-    for row in rows:
-        resp_rows = repo.fetch(
-            "SELECT key, value FROM deployment_responses "
-            "WHERE deployment_id = ? ORDER BY key",
-            (row["id"],),
-        )
-        result.append(cls.parse({
-            "deployments": row,
-            "deployment_responses": resp_rows,
-        }))
-    return result
+        result: list[Record] = []
+        for row in rows:
+            resp_rows = repo.fetch(
+                "SELECT key, value FROM deployment_responses "
+                "WHERE deployment_id = ? ORDER BY key",
+                (row["id"],),
+            )
+            result.append(
+                cls.parse({
+                    "deployments": row,
+                    "deployment_responses": resp_rows,
+                })
+            )
+        return result
 
 
 class Bundler:
     """Build, write, and read :class:`Manifest` objects.
 
-    All methods are stateless and can be used as static methods, but are
-    exposed as instance methods to keep a consistent call style.
+    All methods are stateless and can be used as static methods, but
+    are exposed as instance methods to keep a consistent call style.
     """
 
     def build(
@@ -337,8 +359,8 @@ class Bundler:
 
         Args:
             domain: Domain the manifest belongs to.
-            policies: Policies to include; only those with non-empty Cedar
-                source are considered.
+            policies: Policies to include; only those with non-empty
+                Cedar source are considered.
             metadata: Optional deployment metadata.
 
         Returns:
@@ -373,10 +395,10 @@ class Bundler:
         Creates ``bundle.cedar`` and ``manifest.json`` in a sibling
         temporary directory first, fsyncs both data files and the
         directory, and renames each file into place with
-        ``Path.replace``. Concurrent writers never observe a mixed
-        state where one file is the new version and the other is the
-        old version. A crash before the rename leaves the previous
-        bundle untouched.
+        :meth:`pathlib.Path.replace`. Concurrent writers never observe
+        a mixed state where one file is the new version and the other
+        is the old version. A crash before the rename leaves the
+        previous bundle untouched.
 
         Symlink targets are refused to avoid replacing a file the
         operator did not intend. A non-empty staging directory is
@@ -390,9 +412,9 @@ class Bundler:
             The directory the manifest was written to.
 
         Raises:
-            Deploy: If writing the temporary files or the
-                rename fails, or the directory is a symlink or a
-                symlink exists inside the staging directory.
+            Deploy: If writing the temporary files or the rename
+                fails, or the directory is a symlink or a symlink exists
+                inside the staging directory.
         """
         directory = directory.resolve(strict=False)
         if directory.is_symlink():
@@ -415,18 +437,16 @@ class Bundler:
             for filename in ("bundle.cedar", "manifest.json"):
                 src = staging / filename
                 dst = directory / filename
-                with src.open("rb") as handle:
-                    handle.flush()
-                    os_fsync(handle.fileno())
-                os_fsync_directory(staging)
-                os_replace(src, dst)
-            os_fsync_directory(directory)
+                self._fsync_file(src)
+                self._fsync_directory(staging)
+                self._replace(src, dst)
+            self._fsync_directory(directory)
         except OSError as error:
             raise Deploy(
                 f"failed to write deployment bundle to {directory}: {error}"
             ) from error
         finally:
-            rm_tmp(staging)
+            self._rm_tmp(staging)
         return directory
 
     def read_directory(self, directory: Path) -> Manifest:
@@ -444,9 +464,9 @@ class Bundler:
             The reconstructed :class:`Manifest`.
 
         Raises:
-            Deploy: If the directory is missing files, the
-                manifest has no bundle hash, or the bundle hash does
-                not match the recorded value.
+            Deploy: If the directory is missing files, the manifest
+                has no bundle hash, or the bundle hash does not match
+                the recorded value.
         """
         if not directory.exists() or not directory.is_dir():
             raise Deploy(f"deployment directory not found: {directory}")
@@ -466,8 +486,8 @@ class Bundler:
         expected_hash = data.get("bundle_hash")
         if not expected_hash:
             raise Deploy(
-                "deployment manifest is missing bundle_hash; refusing to trust "
-                "an unverifiable bundle"
+                "deployment manifest is missing bundle_hash; refusing to "
+                "trust an unverifiable bundle"
             )
         actual_hash = hashlib.sha256(cedar_text.encode("utf-8")).hexdigest()
         if expected_hash != actual_hash:
@@ -484,17 +504,58 @@ class Bundler:
             metadata=dict(data.get("metadata", {})),
         )
 
+    @staticmethod
+    def _fsync_file(path: Path) -> None:
+        """Flush ``path``'s data to durable storage."""
+        with path.open("rb") as handle:
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    @staticmethod
+    def _fsync_directory(directory: Path) -> None:
+        """fsync a directory to durably record file replacements.
+
+        Best-effort: some platforms do not allow opening a directory
+        fd for fsync. Failures are silently swallowed because the data
+        is already on disk.
+        """
+        try:
+            fd = os.open(str(directory), os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(fd)
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
+
+    @staticmethod
+    def _replace(src: Path, dst: Path) -> None:
+        """Atomically replace ``dst`` with ``src`` (POSIX rename)."""
+        os.replace(src, dst)
+
+    @staticmethod
+    def _rm_tmp(path: Path) -> None:
+        """Best-effort removal of a temporary directory used for staging."""
+        import shutil
+
+        try:
+            shutil.rmtree(path, ignore_errors=True)
+        except OSError:
+            pass
+
 
 class Guard:
     """Reject requests to loopback, link-local, or private network targets.
 
-    The deployment client constructs an :class:`Guard` by default so
+    The deployment client constructs a :class:`Guard` by default so
     untrusted callers cannot use the client as an SSRF proxy. The
     guard resolves the target hostname through DNS and rejects any
     address that falls inside a reserved range.
 
-    The guard is also responsible for **pinning** the resolved address.
-    Callers should connect to the returned :class:`Pin`
+    The guard is also responsible for **pinning** the resolved
+    address. Callers should connect to the returned :class:`Pin`
     rather than re-resolving the hostname, which closes the
     DNS-rebinding window in which an attacker returns a public
     address at guard time and a private address at request time.
@@ -512,7 +573,7 @@ class Guard:
     """
 
     BLOCKED_NETWORKS: tuple[
-        ipaddress.IPv4Network | ipaddress.IPv6Network, ...
+        "ipaddress.IPv4Network | ipaddress.IPv6Network", ...
     ] = (
         ipaddress.ip_network("0.0.0.0/8"),
         ipaddress.ip_network("127.0.0.0/8"),
@@ -528,6 +589,10 @@ class Guard:
         ipaddress.ip_network("2001:db8::/32"),
     )
 
+    allow_private_targets: bool
+    allow_loopback: bool
+    resolver: Any
+
     def __init__(
         self,
         *,
@@ -535,22 +600,35 @@ class Guard:
         allow_loopback: bool = False,
         resolver: Any = None,
     ) -> None:
+        """Initialize the SSRF guard.
+
+        Args:
+            allow_private_targets: When ``True``, the guard permits
+                addresses inside RFC1918 private ranges. Loopback and
+                link-local are still rejected.
+            allow_loopback: When ``True``, permits loopback and
+                link-local addresses. Intended for tests that bind
+                to ``127.0.0.1``; never enable in production.
+            resolver: Optional DNS resolver. Defaults to
+                :func:`socket.getaddrinfo`. Tests inject a stub to
+                avoid network calls.
+        """
         self.allow_private_targets = allow_private_targets
         self.allow_loopback = allow_loopback
         self.resolver = resolver
 
-    def check(self, url: str) -> Pin:
+    def check(self, url: str) -> "Pin":
         """Validate ``url`` and return the pinned connection target.
 
         Args:
             url: Full HTTP(S) URL to validate.
 
         Returns:
-            A :class:`Pin` describing the host, port, scheme,
-            and the IP that the connection must use. Callers must
-            connect to ``pinned.ip`` with the explicit ``Host:``
-            header set from ``pinned.host`` so that TLS SNI and
-            virtual-host routing still use the original hostname.
+            A :class:`Pin` describing the host, port, scheme, and
+            the IP that the connection must use. Callers must connect
+            to ``pinned.ip`` with the explicit ``Host:`` header set
+            from ``pinned.host`` so that TLS SNI and virtual-host
+            routing still use the original hostname.
 
         Raises:
             Deploy: When the host resolves to a blocked network
@@ -582,7 +660,7 @@ class Guard:
                 f"deployment host {host} did not resolve to any address"
             )
         seen_families: set[int] = set()
-        last_rejection: Deploy | None = None
+        last_rejection: "Deploy | None" = None
         for info in infos:
             family = info[0]
             sock_address = info[4]
@@ -613,8 +691,10 @@ class Guard:
         )
 
     def check_address(
-        self, parsed_address: ipaddress.IPv4Address | ipaddress.IPv6Address, host: str
-    ) -> Deploy | None:
+        self,
+        parsed_address: "ipaddress.IPv4Address | ipaddress.IPv6Address",
+        host: str,
+    ) -> "Deploy | None":
         """Return a rejection error for blocked addresses or ``None``."""
         for network in self.BLOCKED_NETWORKS:
             if parsed_address in network:
@@ -639,10 +719,17 @@ class Guard:
 class Pin:
     """A DNS-resolved address to which an HTTP connection must be pinned.
 
-    The transport created by :func:`_pinned_transport` will connect to
-    ``(ip, port)`` and set the ``Host`` header to ``host``. This closes
-    the DNS-rebinding window between the SSRF guard and the actual
-    connection.
+    The transport created by :meth:`Client._pinned_transport` will
+    connect to ``(ip, port)`` and set the ``Host`` header to
+    ``host``. This closes the DNS-rebinding window between the SSRF
+    guard and the actual connection.
+
+    Attributes:
+        host: Original hostname from the deployment URL.
+        port: TCP port resolved from the URL.
+        scheme: URL scheme (``"http"`` or ``"https"``).
+        ip: Resolved IP address the connection must use.
+        family: Socket family (e.g. :data:`socket.AF_INET`).
     """
 
     host: str
@@ -655,9 +742,9 @@ class Pin:
 class Transport(httpx.BaseTransport):
     """An :mod:`httpx` transport that pins each connection to a resolved IP.
 
-    The transport refuses to reconnect to the original hostname; if the
-    caller asks for a URL whose host or port disagrees with the pinned
-    address, the request is rejected. This is what closes the
+    The transport refuses to reconnect to the original hostname; if
+    the caller asks for a URL whose host or port disagrees with the
+    pinned address, the request is rejected. This is what closes the
     DNS-rebinding gap.
 
     The transport opens the socket itself, wraps with TLS when the
@@ -667,15 +754,37 @@ class Transport(httpx.BaseTransport):
     :data:`HTTP_RESPONSE_READ_LIMIT`.
     """
 
-    def __init__(self, pinned: Pin) -> None:
+    pinned: "Pin"
+    closed: bool
+
+    def __init__(self, pinned: "Pin") -> None:
+        """Initialize the pinned transport.
+
+        Args:
+            pinned: The :class:`Pin` from the SSRF guard.
+        """
         self.pinned = pinned
-        self._closed = False
+        self.closed = False
 
     def close(self) -> None:
-        self._closed = True
+        """Mark the transport as closed; subsequent calls raise :class:`Deploy`."""
+        self.closed = True
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
-        if self._closed:
+        """Send ``request`` over the pinned connection.
+
+        Args:
+            request: The HTTP request to send.
+
+        Returns:
+            The :class:`httpx.Response` from the server.
+
+        Raises:
+            Deploy: When the request URL disagrees with the pinned
+                address, the transport has been closed, the
+                connection fails, or the server times out.
+        """
+        if self.closed:
             raise Deploy("pinned transport has been closed")
         url = request.url
         if url.host != self.pinned.host or url.port != self.pinned.port:
@@ -683,7 +792,7 @@ class Transport(httpx.BaseTransport):
                 f"deployment transport mismatch: request url {url!s} disagrees "
                 f"with pinned {self.pinned.host}:{self.pinned.port}"
             )
-        timeout = read_timeout(request)
+        timeout = self._read_timeout(request)
         try:
             sock = socket.create_connection(
                 (self.pinned.ip, self.pinned.port), timeout=timeout
@@ -706,115 +815,137 @@ class Transport(httpx.BaseTransport):
                         f"{self.pinned.host} failed: {error}"
                     ) from error
             request.headers["Host"] = self.pinned.host
-            return round_trip(request, sock, timeout)
+            return self._round_trip(request, sock, timeout)
         finally:
             try:
                 sock.close()
             except OSError:
                 pass
 
-
-def read_timeout(request: httpx.Request) -> float:
-    """Extract the per-request timeout from the :class:`httpx.Request` extensions."""
-    timeout = request.extensions.get("timeout")
-    if timeout is None:
-        return 30.0
-    if isinstance(timeout, httpx.Timeout):
-        return float(timeout.connect or 30.0)
-    if isinstance(timeout, Mapping):
-        connect = timeout.get("connect", 30.0)
+    @staticmethod
+    def _read_timeout(request: httpx.Request) -> float:
+        """Extract the per-request timeout from the :class:`httpx.Request` extensions."""
+        timeout = request.extensions.get("timeout")
+        if timeout is None:
+            return 30.0
+        if isinstance(timeout, httpx.Timeout):
+            return float(timeout.connect or 30.0)
+        if isinstance(timeout, Mapping):
+            connect = timeout.get("connect", 30.0)
+            try:
+                return float(connect)
+            except (TypeError, ValueError) as error:
+                raise Deploy(
+                    f"invalid httpx timeout extension: {timeout!r}"
+                ) from error
         try:
-            return float(connect)
+            return float(timeout)
         except (TypeError, ValueError) as error:
             raise Deploy(
                 f"invalid httpx timeout extension: {timeout!r}"
             ) from error
-    try:
-        return float(timeout)
-    except (TypeError, ValueError) as error:
-        raise Deploy(
-            f"invalid httpx timeout extension: {timeout!r}"
-        ) from error
 
+    @staticmethod
+    def _round_trip(
+        request: httpx.Request, sock: socket.socket, timeout: float
+    ) -> httpx.Response:
+        """Send ``request`` over ``sock`` and parse the response.
 
-def round_trip(
-    request: httpx.Request, sock: socket.socket, timeout: float
-) -> httpx.Response:
-    """Send ``request`` over ``sock`` and parse the response.
+        The HTTP/1.1 implementation here is intentionally minimal: a
+        single request, a single response, with a hard byte cap on the
+        body. There is no chunked transfer-encoding support because
+        the deployment client does not stream requests and most
+        deployment endpoints respond with a small JSON body.
+        """
+        body = b"" if request.content is None else bytes(request.content)
+        host_header = request.headers.get("Host") or request.url.host or ""
+        head_lines = [
+            f"{request.method} {request.url.path or '/'} HTTP/1.1",
+            f"Host: {host_header}",
+        ]
+        for name, value in request.headers.items():
+            if name.lower() == "host":
+                continue
+            head_lines.append(f"{name}: {value}")
+        head_lines.append(f"Content-Length: {len(body)}")
+        head_lines.append("")
+        head_lines.append("")
+        sock.settimeout(timeout)
+        sock.sendall("\r\n".join(head_lines).encode("ascii") + body)
 
-    The HTTP/1.1 implementation here is intentionally minimal: a
-    single request, a single response, with a hard byte cap on the
-    body. There is no chunked transfer-encoding support because the
-    deployment client does not stream requests and most deployment
-    endpoints respond with a small JSON body.
-    """
-    body = b"" if request.content is None else bytes(request.content)
-    host_header = request.headers.get("Host") or request.url.host or ""
-    head_lines = [
-        f"{request.method} {request.url.path or '/'} HTTP/1.1",
-        f"Host: {host_header}",
-    ]
-    for name, value in request.headers.items():
-        if name.lower() == "host":
-            continue
-        head_lines.append(f"{name}: {value}")
-    head_lines.append(f"Content-Length: {len(body)}")
-    head_lines.append("")
-    head_lines.append("")
-    sock.settimeout(timeout)
-    sock.sendall("\r\n".join(head_lines).encode("ascii") + body)
+        response_bytes = bytearray()
+        header_end = -1
+        while True:
+            try:
+                chunk = sock.recv(4096)
+            except TimeoutError as error:
+                raise Deploy(
+                    f"deployment response timed out after {timeout}s"
+                ) from error
+            if not chunk:
+                break
+            response_bytes.extend(chunk)
+            if b"\r\n\r\n" in response_bytes and header_end == -1:
+                header_end = response_bytes.index(b"\r\n\r\n") + 4
+            if header_end != -1 and len(response_bytes) >= HTTP_RESPONSE_READ_LIMIT:
+                response_bytes = response_bytes[:HTTP_RESPONSE_READ_LIMIT]
+                break
+        return self._parse_response(bytes(response_bytes))
 
-    response_bytes = bytearray()
-    header_end = -1
-    while True:
-        try:
-            chunk = sock.recv(4096)
-        except TimeoutError as error:
+    @staticmethod
+    def _parse_response(raw: bytes) -> httpx.Response:
+        """Parse a raw HTTP/1.1 response into an :class:`httpx.Response`."""
+        if b"\r\n\r\n" not in raw:
             raise Deploy(
-                f"deployment response timed out after {timeout}s"
-            ) from error
-        if not chunk:
-            break
-        response_bytes.extend(chunk)
-        if b"\r\n\r\n" in response_bytes and header_end == -1:
-            header_end = response_bytes.index(b"\r\n\r\n") + 4
-        if header_end != -1 and len(response_bytes) >= HTTP_RESPONSE_READ_LIMIT:
-            response_bytes = response_bytes[:HTTP_RESPONSE_READ_LIMIT]
-            break
-    return parse_response(bytes(response_bytes))
-
-
-def parse_response(raw: bytes) -> httpx.Response:
-    """Parse a raw HTTP/1.1 response into an :class:`httpx.Response`."""
-    if b"\r\n\r\n" not in raw:
-        raise Deploy(
-            "deployment response was truncated before headers completed"
+                "deployment response was truncated before headers completed"
+            )
+        head_bytes, _, body_bytes = raw.partition(b"\r\n\r\n")
+        head_text = head_bytes.decode("iso-8859-1")
+        lines = head_text.split("\r\n")
+        status_line = lines[0]
+        parts = status_line.split(" ", 2)
+        if len(parts) < 2 or not parts[1].isdigit():
+            raise Deploy(
+                f"could not parse HTTP status line: {status_line!r}"
+            )
+        status_code = int(parts[1])
+        header_pairs: list[tuple[str, str]] = []
+        for line in lines[1:]:
+            if not line:
+                continue
+            name, _, value = line.partition(":")
+            header_pairs.append((name.strip(), value.strip()))
+        return httpx.Response(
+            status_code=status_code,
+            headers=httpx.Headers(header_pairs),
+            content=body_bytes,
         )
-    head_bytes, _, body_bytes = raw.partition(b"\r\n\r\n")
-    head_text = head_bytes.decode("iso-8859-1")
-    lines = head_text.split("\r\n")
-    status_line = lines[0]
-    parts = status_line.split(" ", 2)
-    if len(parts) < 2 or not parts[1].isdigit():
-        raise Deploy(
-            f"could not parse HTTP status line: {status_line!r}"
-        )
-    status_code = int(parts[1])
-    header_pairs: list[tuple[str, str]] = []
-    for line in lines[1:]:
-        if not line:
-            continue
-        name, _, value = line.partition(":")
-        header_pairs.append((name.strip(), value.strip()))
-    return httpx.Response(
-        status_code=status_code,
-        headers=httpx.Headers(header_pairs),
-        content=body_bytes,
-    )
 
 
+@dataclass(frozen=True, slots=True)
 class Client:
-    """Push a :class:`Manifest` to a local directory or HTTP endpoint."""
+    """Push a :class:`Manifest` to a local directory or HTTP endpoint.
+
+    Attributes:
+        timeout: HTTP timeout in seconds.
+        allow_private_targets: When ``True``, permits HTTP targets in
+            RFC1918 private-network ranges.
+        allow_loopback: When ``True``, permits loopback and
+            link-local targets.
+        max_retries: Number of additional attempts on retryable
+            failures.
+        retry_backoff: Initial backoff in seconds; doubled per attempt
+            up to 8 s.
+        follow_redirects: When ``True``, 3xx responses are followed.
+    """
+
+    timeout: float
+    allow_private_targets: bool
+    allow_loopback: bool
+    max_retries: int
+    retry_backoff: float
+    follow_redirects: bool
+    ssrf_guard: "Guard"
 
     def __init__(
         self,
@@ -822,7 +953,7 @@ class Client:
         timeout: float = 30,
         allow_private_targets: bool = False,
         allow_loopback: bool = False,
-        ssrf_guard: Guard | None = None,
+        ssrf_guard: "Guard | None" = None,
         max_retries: int = 0,
         retry_backoff: float = 0.5,
         follow_redirects: bool = False,
@@ -831,34 +962,35 @@ class Client:
 
         Args:
             timeout: HTTP timeout in seconds for remote deployments.
-            allow_private_targets: When ``True``, the SSRF guard permits
-                RFC1918 private-network targets. Loopback and link-local
-                addresses are still rejected.
+            allow_private_targets: When ``True``, the SSRF guard
+                permits RFC1918 private-network targets. Loopback
+                and link-local addresses are still rejected.
             allow_loopback: When ``True``, permits loopback and
                 link-local targets. Intended for tests that bind to
                 ``127.0.0.1``; never enable in production.
             ssrf_guard: Optional guard override (mostly for tests).
             max_retries: Number of additional attempts on retryable
-                failures (429, 503, network errors). Each retry re-sends
-                the same ``Idempotency-Key`` so the server can dedupe.
+                failures (429, 503, network errors). Each retry
+                re-sends the same ``Idempotency-Key`` so the server
+                can dedupe.
             retry_backoff: Initial backoff in seconds; doubled per
                 attempt up to 8 s.
-            follow_redirects: When ``True``, 3xx responses are followed.
-                **Disabled by default** because a redirect to a private
-                address would bypass the SSRF guard unless the redirect
-                target is re-validated; the client does not re-validate
-                redirect targets, so leaving this ``False`` is the
-                safe default.
+            follow_redirects: When ``True``, 3xx responses are
+                followed. **Disabled by default** because a redirect
+                to a private address would bypass the SSRF guard
+                unless the redirect target is re-validated; the
+                client does not re-validate redirect targets, so
+                leaving this ``False`` is the safe default.
 
         Raises:
             Deploy: If ``timeout`` is not strictly positive or
                 ``max_retries`` is negative.
         """
-        if timeout <= 0 or not is_finite(timeout):
+        if timeout <= 0 or not self._is_finite(timeout):
             raise Deploy("deployment timeout must be positive and finite")
         if max_retries < 0:
             raise Deploy("deployment max_retries must be non-negative")
-        if retry_backoff < 0 or not is_finite(retry_backoff):
+        if retry_backoff < 0 or not self._is_finite(retry_backoff):
             raise Deploy("deployment retry_backoff must be non-negative")
         self.timeout = timeout
         self.max_retries = max_retries
@@ -874,9 +1006,9 @@ class Client:
         manifest: Manifest,
         target: str,
         *,
-        record_id: str | None = None,
-        headers: Mapping[str, str] | None = None,
-        idempotency_key: str | None = None,
+        record_id: "str | None" = None,
+        headers: "Mapping[str, str] | None" = None,
+        idempotency_key: "str | None" = None,
     ) -> Record:
         """Push ``manifest`` to ``target`` (local path or http(s) URL).
 
@@ -889,21 +1021,22 @@ class Client:
             manifest: Bundle to push.
             target: Destination. Either a filesystem path or an
                 ``http(s)://`` URL.
-            record_id: Optional explicit identifier for the deployment
-                record. Auto-generated when omitted.
-            headers: Optional HTTP headers added to the POST request.
-                Reserved names (``Host``, ``Authorization``, ``Cookie``,
-                ``Content-Length``, ``Transfer-Encoding``) are rejected.
-            idempotency_key: Optional explicit idempotency key. When
-                omitted a UUID is generated. The key is sent as the
-                ``Idempotency-Key`` header.
+            record_id: Optional explicit identifier for the
+                deployment record. Auto-generated when omitted.
+            headers: Optional HTTP headers added to the POST
+                request. Reserved names (``Host``, ``Authorization``,
+                ``Cookie``, ``Content-Length``,
+                ``Transfer-Encoding``) are rejected.
+            idempotency_key: Optional explicit idempotency key.
+                When omitted a UUID is generated. The key is sent as
+                the ``Idempotency-Key`` header.
 
         Returns:
             The deployment record describing the outcome.
 
         Raises:
-            Deploy: If the target is invalid, the HTTP
-                endpoint returns non-2xx, or the request fails.
+            Deploy: If the target is invalid, the HTTP endpoint
+                returns non-2xx, or the request fails.
         """
         if not target.strip():
             raise Deploy("deployment target must be non-empty")
@@ -923,9 +1056,9 @@ class Client:
         manifest: Manifest,
         directory: Path,
         *,
-        record_id: str | None = None,
+        record_id: "str | None" = None,
     ) -> Record:
-        """Write ``manifest`` to ``directory`` atomically and return the record.
+        """Write ``manifest`` to ``directory`` atomically.
 
         Args:
             manifest: Bundle to write.
@@ -938,7 +1071,7 @@ class Client:
         directory.parent.mkdir(parents=True, exist_ok=True)
         Bundler().write_directory(manifest, directory)
         return Record(
-            id=record_id or generate_record_id(),
+            id=record_id or self._generate_record_id(),
             domain=manifest.domain,
             target=str(directory.resolve()),
             target_kind=DEPLOYMENT_KIND_LOCAL,
@@ -952,26 +1085,26 @@ class Client:
         manifest: Manifest,
         url: str,
         *,
-        record_id: str | None = None,
-        headers: Mapping[str, str] | None = None,
-        idempotency_key: str | None = None,
+        record_id: "str | None" = None,
+        headers: "Mapping[str, str] | None" = None,
+        idempotency_key: "str | None" = None,
     ) -> Record:
         """POST ``manifest`` to ``url`` and return the deployment record.
 
         The connection is **pinned** to the IP address resolved at
         SSRF-check time, so a DNS change between the guard and the
-        request cannot redirect the deployment into a private network.
-        The response body is read in bounded chunks and never
-        embedded in error messages or persisted verbatim; only a
-        SHA-256 of the body is retained. 2xx responses are treated as
-        success; 4xx and 5xx raise :class:`Deploy`.
+        request cannot redirect the deployment into a private
+        network. The response body is read in bounded chunks and
+        never embedded in error messages or persisted verbatim; only
+        a SHA-256 of the body is retained. 2xx responses are treated
+        as success; 4xx and 5xx raise :class:`Deploy`.
 
         Args:
             manifest: Bundle to push.
             url: HTTP endpoint accepting a JSON POST.
             record_id: Optional explicit identifier for the record.
-            headers: Optional HTTP headers added to the POST. Reserved
-                names are rejected.
+            headers: Optional HTTP headers added to the POST.
+                Reserved names are rejected.
             idempotency_key: Optional explicit idempotency key. A
                 UUID is generated when omitted.
 
@@ -979,11 +1112,11 @@ class Client:
             The deployment record describing the HTTP push.
 
         Raises:
-            Deploy: When the URL fails the SSRF guard, the
-                endpoint returns non-2xx, the request times out, or the
-                network fails.
+            Deploy: When the URL fails the SSRF guard, the endpoint
+                returns non-2xx, the request times out, or the network
+                fails.
         """
-        validate_headers(headers)
+        self._validate_headers(headers)
         pinned = self.ssrf_guard.check(url)
         idem = idempotency_key or uuid.uuid4().hex
         payload = json.dumps(manifest.to_dict()).encode("utf-8")
@@ -1004,7 +1137,7 @@ class Client:
         )
         attempt = 0
         backoff = self.retry_backoff
-        last_error: Deploy | None = None
+        last_error: "Deploy | None" = None
         while attempt <= self.max_retries:
             try:
                 with httpx.Client(
@@ -1013,11 +1146,11 @@ class Client:
                     follow_redirects=self.follow_redirects,
                 ) as client:
                     response = client.send(request)
-                    body = read_bounded(response)
+                    body = self._read_bounded(response)
                     response_sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
                     if 200 <= response.status_code < 300:
                         return Record(
-                            id=record_id or generate_record_id(),
+                            id=record_id or self._generate_record_id(),
                             domain=manifest.domain,
                             target=url,
                             target_kind=DEPLOYMENT_KIND_HTTP,
@@ -1033,7 +1166,7 @@ class Client:
                         )
                     if response.status_code in {429, 503} and attempt < self.max_retries:
                         attempt += 1
-                        sleep(backoff)
+                        self._sleep(backoff)
                         backoff = min(backoff * 2, 8.0)
                         continue
                     raise Deploy(
@@ -1047,133 +1180,90 @@ class Client:
                 if attempt >= self.max_retries:
                     raise last_error from error
                 attempt += 1
-                sleep(backoff)
+                self._sleep(backoff)
                 backoff = min(backoff * 2, 8.0)
                 continue
         if last_error is not None:
             raise last_error
         raise Deploy("deployment exhausted retries without a result")
 
+    @staticmethod
+    def _validate_headers(headers: "Mapping[str, str] | None") -> None:
+        """Reject empty, reserved, or carriage-return-bearing HTTP headers.
 
-def validate_headers(headers: Mapping[str, str] | None) -> None:
-    """Reject empty, reserved, or carriage-return-bearing HTTP headers.
+        Args:
+            headers: Optional user-supplied headers.
 
-    Raises:
-        Deploy: When a header name is empty, reserved, or
-            contains CR/LF, or when a header value contains CR/LF.
-    """
-    if not headers:
-        return
-    for name, value in headers.items():
-        if not name or not name.strip():
-            raise Deploy("deployment header name must be non-empty")
-        if "\r" in name or "\n" in name:
-            raise Deploy(
-                f"deployment header name contains CR/LF: {name!r}"
-            )
-        if "\r" in value or "\n" in value:
-            raise Deploy(
-                f"deployment header value for {name!r} contains CR/LF"
-            )
-        if name.lower() in RESERVED_HEADERS:
-            raise Deploy(
-                f"deployment header name {name!r} is reserved and cannot be set"
-            )
-        if len(name) > 256:
-            raise Deploy(
-                f"deployment header name {name!r} exceeds 256 characters"
-            )
-        if len(value) > 8192:
-            raise Deploy(
-                f"deployment header value for {name!r} exceeds 8192 characters"
-            )
+        Raises:
+            Deploy: When a header name is empty, reserved, or
+                contains CR/LF, or when a header value contains CR/LF.
+        """
+        if not headers:
+            return
+        for name, value in headers.items():
+            if not name or not name.strip():
+                raise Deploy("deployment header name must be non-empty")
+            if "\r" in name or "\n" in name:
+                raise Deploy(
+                    f"deployment header name contains CR/LF: {name!r}"
+                )
+            if "\r" in value or "\n" in value:
+                raise Deploy(
+                    f"deployment header value for {name!r} contains CR/LF"
+                )
+            if name.lower() in RESERVED_HEADERS:
+                raise Deploy(
+                    f"deployment header name {name!r} is reserved and cannot be set"
+                )
+            if len(name) > 256:
+                raise Deploy(
+                    f"deployment header name {name!r} exceeds 256 characters"
+                )
+            if len(value) > 8192:
+                raise Deploy(
+                    f"deployment header value for {name!r} exceeds 8192 characters"
+                )
 
+    @staticmethod
+    def _read_bounded(response: httpx.Response) -> str:
+        """Read the response body with a hard upper bound on bytes consumed."""
+        body_bytes = bytearray()
+        for chunk in response.iter_bytes(chunk_size=4096):
+            body_bytes.extend(chunk)
+            if len(body_bytes) >= HTTP_RESPONSE_READ_LIMIT:
+                break
+        return body_bytes[:HTTP_RESPONSE_READ_LIMIT].decode("utf-8", errors="replace")
 
-def read_bounded(response: httpx.Response) -> str:
-    """Read the response body with a hard upper bound on bytes consumed."""
-    body_bytes = bytearray()
-    for chunk in response.iter_bytes(chunk_size=4096):
-        body_bytes.extend(chunk)
-        if len(body_bytes) >= HTTP_RESPONSE_READ_LIMIT:
-            break
-    return body_bytes[:HTTP_RESPONSE_READ_LIMIT].decode("utf-8", errors="replace")
+    @staticmethod
+    def _is_finite(value: float) -> bool:
+        """Return True when ``value`` is a finite number (not inf or NaN)."""
+        return value == value and value not in (float("inf"), float("-inf"))
 
+    @staticmethod
+    def _sleep(seconds: float) -> None:
+        """Sleep helper that ignores zero/negative durations."""
+        if seconds > 0:
+            time.sleep(seconds)
 
-def is_finite(value: float) -> bool:
-    """Return True when ``value`` is a finite number (not inf or NaN)."""
-    return value == value and value not in (float("inf"), float("-inf"))
-
-
-def sleep(seconds: float) -> None:
-    """Sleep helper that ignores zero/negative durations."""
-    if seconds > 0:
-        import time
-
-        time.sleep(seconds)
-
-
-def os_replace(src: Path, dst: Path) -> None:
-    """Replace ``dst`` with ``src`` atomically (POSIX rename)."""
-    import os
-
-    os.replace(src, dst)
-
-
-def os_fsync_directory(directory: Path) -> None:
-    """fsync a directory to durably record file replacements.
-
-    Best-effort: some platforms do not allow opening a directory fd
-    for fsync. Failures are silently swallowed because the data is
-    already on disk.
-    """
-    import os
-
-    try:
-        fd = os.open(str(directory), os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(fd)
-    except OSError:
-        pass
-    finally:
-        os.close(fd)
-
-
-def os_fsync(fd: int) -> None:
-    """Flush an open file descriptor to durable storage."""
-    import os
-
-    os.fsync(fd)
-
-
-def rm_tmp(path: Path) -> None:
-    """Best-effort removal of a temporary directory used for staging."""
-    import shutil
-
-    try:
-        shutil.rmtree(path, ignore_errors=True)
-    except OSError:
-        pass
-
-
-def generate_record_id() -> str:
-    """Return a fresh UUID-based deployment record identifier."""
-    return uuid.uuid4().hex
+    @staticmethod
+    def _generate_record_id() -> str:
+        """Return a fresh UUID-based deployment record identifier."""
+        return uuid.uuid4().hex
 
 
 __all__ = [
-    "Bundler",
     "DEPLOYMENT_KIND_HTTP",
     "DEPLOYMENT_KIND_LOCAL",
+    "Bundler",
     "Client",
-    "Deploy",
-    "Manifest",
-    "Record",
+    "Guard",
     "HTTP_RESPONSE_BODY_LIMIT",
     "HTTP_RESPONSE_READ_LIMIT",
+    "Manifest",
     "Pin",
-    "Guard",
+    "Record",
+    "RESERVED_HEADERS",
+    "Transport",
     "generate_record_id",
     "validate_headers",
 ]

@@ -9,12 +9,12 @@ Mutations funnel through :meth:`Domain.mutate` so callers cannot
 accidentally bypass the orchestrator's invariants.
 
 Attributes:
-    Domain: One authorization domain inside a :class:`~cedrus.space.Workspace`.
+    Domain: One authorization domain inside a
+        :class:`~cedrus.space.Workspace`.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,7 +24,6 @@ from cedrus.need import Need, load_requirement
 from cedrus.policies import Existing
 
 
-@dataclass
 class Domain:
     """One authorization domain inside a :class:`~cedrus.space.Workspace`.
 
@@ -42,25 +41,63 @@ class Domain:
         manifests: Deployment manifests produced for this domain.
         bundles: Filesystem paths of written bundles.
         reports: Verification/validation/test reports keyed by id.
-        schema_loaded: The loaded :class:`~cedrus.schema.Schema`, if any.
+        schema_loaded: The loaded :class:`~cedrus.schema.Schema`,
+            if any.
         verified_at: When verification last ran.
     """
 
-    name: str
-    root: Path
-    schema_path: Path
-    scenarios_path: Path
-    requirements_dir: Path
-    policies_dir: Path
-    needs: list[Need] = field(default_factory=list)
-    cases: list[object] = field(default_factory=list)  # Case, forward-refed
-    policies: list[object] = field(default_factory=list)
-    drafts: list[object] = field(default_factory=list)  # DraftStored, forward-refed
-    manifests: list[object] = field(default_factory=list)  # Manifest, forward-refed
-    bundles: list[Path] = field(default_factory=list)
-    reports: dict[str, Any] = field(default_factory=dict)
-    schema_loaded: Any | None = None  # Schema, forward-refed
-    verified_at: datetime | None = None
+    def __init__(
+        self,
+        name: str,
+        root: Path,
+        schema_path: Path,
+        scenarios_path: Path,
+        requirements_dir: Path,
+        policies_dir: Path,
+        needs: list[Need] | None = None,
+        cases: list[Any] | None = None,
+        policies: list[Any] | None = None,
+        drafts: list[Any] | None = None,
+        manifests: list[Any] | None = None,
+        bundles: list[Path] | None = None,
+        reports: dict[str, Any] | None = None,
+        schema_loaded: Any | None = None,
+        verified_at: datetime | None = None,
+    ) -> None:
+        """Initialize the domain with its filesystem paths and state.
+
+        Args:
+            name: Domain identifier (e.g., ``"hr"``).
+            root: Filesystem root of the domain.
+            schema_path: Path to the schema file.
+            scenarios_path: Path to the scenarios file.
+            requirements_dir: Path to the requirements directory.
+            policies_dir: Path to the policies directory.
+            needs: Optional initial list of requirements.
+            cases: Optional initial list of scenarios.
+            policies: Optional initial list of compiled policies.
+            drafts: Optional initial list of drafts.
+            manifests: Optional initial list of manifests.
+            bundles: Optional initial list of bundle paths.
+            reports: Optional initial report dict.
+            schema_loaded: Optional pre-loaded schema.
+            verified_at: Optional verification timestamp.
+        """
+        self.name = name
+        self.root = root
+        self.schema_path = schema_path
+        self.scenarios_path = scenarios_path
+        self.requirements_dir = requirements_dir
+        self.policies_dir = policies_dir
+        self.needs = needs if needs is not None else []
+        self.cases = cases if cases is not None else []
+        self.policies = policies if policies is not None else []
+        self.drafts = drafts if drafts is not None else []
+        self.manifests = manifests if manifests is not None else []
+        self.bundles = bundles if bundles is not None else []
+        self.reports = reports if reports is not None else {}
+        self.schema_loaded = schema_loaded
+        self.verified_at = verified_at
 
     def mutate(self, **changes: object) -> None:
         """Update fields in place. Single verb for all field updates.
@@ -92,17 +129,17 @@ class Domain:
             "scenarios_path": str(self.scenarios_path),
             "requirements_dir": str(self.requirements_dir),
             "policies_dir": str(self.policies_dir),
-            "needs": [need.id for need in self.needs],  # type: ignore[attr-defined]
-            "cases": [case.name for case in self.cases],  # type: ignore[attr-defined]
-            "policies": [policy.id for policy in self.policies],  # type: ignore[attr-defined]
-            "drafts": [draft.id for draft in self.drafts],  # type: ignore[attr-defined]
-            "manifests": [manifest.domain for manifest in self.manifests],  # type: ignore[attr-defined]
-            "bundles": [str(path) for path in self.bundles],  # type: ignore[attr-defined]
+            "needs": [need.id for need in self.needs],
+            "cases": [case.name for case in self.cases],
+            "policies": [policy.id for policy in self.policies],
+            "drafts": [draft.id for draft in self.drafts],
+            "manifests": [manifest.domain for manifest in self.manifests],
+            "bundles": [str(path) for path in self.bundles],
             "reports": list(self.reports.keys()),
         }
 
     @classmethod
-    def create(cls, name: str, root: Path) -> Domain:
+    def create(cls, name: str, root: Path) -> "Domain":
         """Create a new domain directory and return an empty Domain.
 
         Args:
@@ -134,7 +171,7 @@ class Domain:
         name: str,
         root: Path,
         schema: Any | None = None,
-    ) -> Domain:
+    ) -> "Domain":
         """Load an existing domain.
 
         Args:
@@ -157,10 +194,10 @@ class Domain:
 
         Re-scans ``self.requirements_dir`` (parsing every ``*.md``)
         and ``self.policies_dir`` (parsing every ``*.cedar`` as
-        :class:`~cedrus.policies.Existing`); updates ``self.needs`` and
-        ``self.policies`` in place. A failure to load any single file
-        is logged and skipped so one bad requirement doesn't take the
-        whole domain down.
+        :class:`~cedrus.policies.Existing`); updates ``self.needs``
+        and ``self.policies`` in place. A failure to load any single
+        file is logged and skipped so one bad requirement doesn't
+        take the whole domain down.
         """
         from datetime import datetime as _dt
 
@@ -184,9 +221,9 @@ class Domain:
                     policies.append(
                         Existing.from_requirement(
                             Need(
-                                id=path.stem,  # type: ignore[arg-type]
+                                id=path.stem,
                                 text=f"Imported from {path.name}",
-                                domain=self.name,  # type: ignore[arg-type]
+                                domain=self.name,
                                 source_path=path,
                                 created_at=_dt.now(UTC),
                             ),

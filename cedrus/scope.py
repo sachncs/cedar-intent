@@ -6,16 +6,27 @@ slot of a Cedar policy (``principal``, ``action``, ``resource``) is
 backed by a corresponding scope class, and ``when``/``unless`` clauses
 are carried as :class:`Clause` instances.
 
-Why a class hierarchy and not a string union
---------------------------------------------
+Why a class hierarchy and not a string union:
+    Cedar's syntax for principal, action, and resource is rich: each
+    slot accepts ``any``, a fully qualified entity reference, an
+    ``is`` membership test, an ``in`` group/parent reference, and a
+    small set of named kinds. Encoding these as strings makes
+    validation, linting, and namespace resolution difficult; encoding
+    them as objects makes each kind a discrete, type-checked branch
+    in the compiler and the generator.
 
-Cedar's syntax for principal, action, and resource is rich: each
-slot accepts ``any``, a fully qualified entity reference, an ``is``
-membership test, an ``in`` group/parent reference, and a small set
-of named kinds. Encoding these as strings makes validation, linting,
-and namespace resolution difficult; encoding them as objects makes
-each kind a discrete, type-checked branch in the compiler and the
-generator.
+Every scope class implements :meth:`Scope.clause` polymorphically —
+the :class:`~cedrus.compile.Intent` compiler just calls
+``intent.principal.clause()`` / ``intent.action.clause()`` /
+``intent.resource.clause()`` without knowing the concrete type.
+
+Attributes:
+    Scope: Abstract base for every scope shape.
+    Principal: Scope for the ``principal`` slot of a Cedar policy.
+    Action: Scope for the ``action`` slot.
+    Resource: Scope for the ``resource`` slot.
+    Clause: A single ``when`` or ``unless`` clause carried by a draft.
+    Expression: Union of allowed types for clause attribute values.
 """
 
 from __future__ import annotations
@@ -24,10 +35,40 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from .error import ScopeFault
-from .utils import generate
+from cedrus.error import ScopeFault
+from cedrus.utils import generate
 
 Expression = str | bool | int | float | dict[str, Any] | list[Any]
+
+
+def validate_kind(value: str, allowed: frozenset[str]) -> None:
+    """Raise :class:`ScopeFault` if ``value`` is not in ``allowed``.
+
+    Args:
+        value: The kind string to validate.
+        allowed: The set of valid kind values for the scope type.
+
+    Raises:
+        ScopeFault: When ``value`` is not in ``allowed``.
+    """
+    if value not in allowed:
+        raise ScopeFault(
+            f"invalid kind {value!r}; expected one of {sorted(allowed)}"
+        )
+
+
+def validate_id(value: str | None, field: str) -> None:
+    """Raise :class:`ScopeFault` if ``value`` is empty when set.
+
+    Args:
+        value: The optional id string to validate.
+        field: The id field name for the error message.
+
+    Raises:
+        ScopeFault: When ``value`` is provided but empty / whitespace.
+    """
+    if value is not None and not value.strip():
+        raise ScopeFault(f"{field} must be non-empty when set")
 
 
 class Scope(ABC):
@@ -41,7 +82,13 @@ class Scope(ABC):
 
     @abstractmethod
     def clause(self) -> str:
-        """Return the Cedar source fragment this scope renders to."""
+        """Return the Cedar source fragment this scope renders to.
+
+        Polymorphic entry point used by
+        :meth:`~cedrus.compile.Intent.compile` — the compiler
+        just calls ``intent.<slot>.clause()`` without knowing the
+        concrete type.
+        """
 
     @abstractmethod
     def to_dict(self) -> dict[str, Any]:
@@ -89,20 +136,6 @@ class Scope(ABC):
         return None
 
 
-def _validate_kind(value: str, allowed: frozenset[str]) -> None:
-    """Raise :class:`ScopeFault` if ``value`` is not in ``allowed``."""
-    if value not in allowed:
-        raise ScopeFault(
-            f"invalid kind {value!r}; expected one of {sorted(allowed)}"
-        )
-
-
-def _validate_id(value: str | None, field: str) -> None:
-    """Raise :class:`ScopeFault` if ``value`` is empty when required."""
-    if value is not None and not value.strip():
-        raise ScopeFault(f"{field} must be non-empty when set")
-
-
 @dataclass(frozen=True, slots=True)
 class Principal(Scope):
     """Scope applied to the ``principal`` slot of a Cedar policy.
@@ -110,7 +143,8 @@ class Principal(Scope):
     Attributes:
         id: Unique identifier (UUID-style ``object_id``).
         kind: One of the ``Principal.VARIETIES`` constants.
-        type_name: Entity type name (for ``type``, ``specific``, ``is_type``).
+        type_name: Entity type name (for ``type``, ``specific``,
+            ``is_type``).
         entity_id: Entity id (for ``specific``).
         group_type: Group entity type (for ``in_group``).
         group_id: Group entity id (for ``in_group``).
@@ -131,20 +165,38 @@ class Principal(Scope):
     group_id: str | None = None
 
     def __post_init__(self) -> None:
-        _validate_kind(self.kind, self.VARIETIES)
-        _validate_id(self.type_name, "type_name")
-        _validate_id(self.entity_id, "entity_id")
-        _validate_id(self.group_type, "group_type")
-        _validate_id(self.group_id, "group_id")
+        """Validate kind and id fields after construction.
+
+        Raises:
+            ScopeFault: When ``kind`` is invalid or any optional id
+                is set but empty.
+        """
+        validate_kind(self.kind, self.VARIETIES)
+        validate_id(self.type_name, "type_name")
+        validate_id(self.entity_id, "entity_id")
+        validate_id(self.group_type, "group_type")
+        validate_id(self.group_id, "group_id")
 
     def clause(self) -> str:
-        """Render the Cedar fragment for this principal slot."""
+        """Render the Cedar fragment for this principal slot.
+
+        Polymorphic implementation of :meth:`Scope.clause`. The
+        :class:`~cedrus.compile.Intent` compiler calls this directly
+        to produce the principal slot of the rendered Cedar policy.
+
+        Returns:
+            A Cedar source fragment suitable for the principal slot
+            of a policy statement.
+
+        Raises:
+            ScopeFault: If ``kind`` is not a recognized kind (caught
+                by ``__post_init__``, so this is unreachable in
+                practice).
+        """
         if self.kind == self.ANY:
             return "principal"
         if self.kind == self.SPECIFIC:
-            import json
-
-            return f'principal == {self.type_name}::{json.dumps(self.entity_id)}'
+            return f"principal == {self.type_name}::{json.dumps(self.entity_id)}"
         if self.kind == self.TYPE:
             return f"principal == {self.type_name}"
         if self.kind == self.IS_TYPE:
@@ -153,7 +205,12 @@ class Principal(Scope):
         return f"principal in {self.group_type}::{json.dumps(self.group_id)}"
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-friendly representation of this principal."""
+        """Return a JSON-friendly representation of this principal.
+
+        Returns:
+            A dict with ``kind``, ``type_name``, ``entity_id``,
+            ``group_type`` and ``group_id`` keys.
+        """
         return {
             "kind": self.kind,
             "type_name": self.type_name,
@@ -164,7 +221,14 @@ class Principal(Scope):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Principal:
-        """Reconstruct a Principal from its JSON-friendly representation."""
+        """Reconstruct a Principal from its JSON-friendly representation.
+
+        Args:
+            data: The JSON-friendly dict.
+
+        Returns:
+            The reconstructed :class:`Principal`.
+        """
         return cls(
             kind=data.get("kind", cls.ANY),
             type_name=data.get("type_name"),
@@ -217,6 +281,10 @@ class Action(Scope):
         kind: One of the ``Action.VARIETIES`` constants.
         name: Action name (for ``named``).
         group: Action group name (for ``in_group``).
+        namespace: Optional explicit namespace for ambiguous action
+            names. When the schema's action declaration is unique the
+            verifier auto-resolves; ``namespace`` is the override
+            path.
     """
 
     ANY: str = "any"
@@ -228,40 +296,66 @@ class Action(Scope):
     kind: str = ANY
     name: str | None = None
     group: str | None = None
+    namespace: str | None = None
 
     def __post_init__(self) -> None:
-        _validate_kind(self.kind, self.VARIETIES)
-        _validate_id(self.name, "name")
-        _validate_id(self.group, "group")
+        """Validate kind and id fields after construction.
+
+        Raises:
+            ScopeFault: When ``kind`` is invalid or any optional id
+                is set but empty.
+        """
+        validate_kind(self.kind, self.VARIETIES)
+        validate_id(self.name, "name")
+        validate_id(self.group, "group")
 
     def clause(self) -> str:
-        """Render the Cedar fragment for this action slot."""
+        """Render the Cedar fragment for this action slot.
+
+        Polymorphic implementation of :meth:`Scope.clause`.
+
+        Returns:
+            A Cedar source fragment suitable for the action slot.
+        """
         if self.kind == self.ANY:
             return "action"
+        namespace_prefix = (
+            f"{self.namespace}::" if self.namespace else ""
+        )
         if self.kind == self.NAMED:
-            import json
-
-            return f'action == Action::{json.dumps(self.name)}'
+            return f"action == {namespace_prefix}Action::{json.dumps(self.name)}"
         # self.kind == self.IN_GROUP
-        import json
-
-        return f'action in Action::{json.dumps(self.group)}'
+        return f"action in {namespace_prefix}Action::{json.dumps(self.group)}"
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-friendly representation of this action."""
+        """Return a JSON-friendly representation of this action.
+
+        Returns:
+            A dict with ``kind``, ``name``, ``group`` and ``namespace``
+            keys.
+        """
         return {
             "kind": self.kind,
             "name": self.name,
             "group": self.group,
+            "namespace": self.namespace,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Action:
-        """Reconstruct an Action from its JSON-friendly representation."""
+        """Reconstruct an Action from its JSON-friendly representation.
+
+        Args:
+            data: The JSON-friendly dict.
+
+        Returns:
+            The reconstructed :class:`Action`.
+        """
         return cls(
             kind=data.get("kind", cls.ANY),
             name=data.get("name"),
             group=data.get("group"),
+            namespace=data.get("namespace"),
         )
 
     @classmethod
@@ -279,6 +373,7 @@ class Action(Scope):
             kind=row["kind"],
             name=row["name"],
             group=row["group"],
+            namespace=row.get("namespace"),
         )
 
     def to_data(self) -> dict[str, Any]:
@@ -292,6 +387,7 @@ class Action(Scope):
             "kind": self.kind,
             "name": self.name,
             "group": self.group,
+            "namespace": self.namespace,
         }
 
 
@@ -302,7 +398,8 @@ class Resource(Scope):
     Attributes:
         id: Unique identifier (UUID-style ``object_id``).
         kind: One of the ``Resource.VARIETIES`` constants.
-        type_name: Entity type name (for ``type``, ``specific``, ``is_type``).
+        type_name: Entity type name (for ``type``, ``specific``,
+            ``is_type``).
         entity_id: Entity id (for ``specific``).
         parent_type: Parent entity type (for ``in_parent``).
         parent_id: Parent entity id (for ``in_parent``).
@@ -323,31 +420,47 @@ class Resource(Scope):
     parent_id: str | None = None
 
     def __post_init__(self) -> None:
-        _validate_kind(self.kind, self.VARIETIES)
-        _validate_id(self.type_name, "type_name")
-        _validate_id(self.entity_id, "entity_id")
-        _validate_id(self.parent_type, "parent_type")
-        _validate_id(self.parent_id, "parent_id")
+        """Validate kind and id fields after construction.
+
+        Raises:
+            ScopeFault: When ``kind`` is invalid or any optional id
+                is set but empty.
+        """
+        validate_kind(self.kind, self.VARIETIES)
+        validate_id(self.type_name, "type_name")
+        validate_id(self.entity_id, "entity_id")
+        validate_id(self.parent_type, "parent_type")
+        validate_id(self.parent_id, "parent_id")
 
     def clause(self) -> str:
-        """Render the Cedar fragment for this resource slot."""
+        """Render the Cedar fragment for this resource slot.
+
+        Polymorphic implementation of :meth:`Scope.clause`.
+
+        Returns:
+            A Cedar source fragment suitable for the resource slot.
+        """
         if self.kind == self.ANY:
             return "resource"
         if self.kind == self.SPECIFIC:
-            import json
-
-            return f'resource == {self.type_name}::{json.dumps(self.entity_id)}'
+            return f"resource == {self.type_name}::{json.dumps(self.entity_id)}"
         if self.kind == self.TYPE:
             return f"resource == {self.type_name}"
         if self.kind == self.IS_TYPE:
             return f"resource is {self.type_name}"
         # self.kind == self.IN_PARENT
-        import json
-
-        return f'resource in {self.parent_type}::{json.dumps(self.parent_id)}'
+        return (
+            f"resource is {self.type_name} "
+            f"in {self.parent_type}::{json.dumps(self.parent_id)}"
+        )
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-friendly representation of this resource."""
+        """Return a JSON-friendly representation of this resource.
+
+        Returns:
+            A dict with ``kind``, ``type_name``, ``entity_id``,
+            ``parent_type`` and ``parent_id`` keys.
+        """
         return {
             "kind": self.kind,
             "type_name": self.type_name,
@@ -358,7 +471,14 @@ class Resource(Scope):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Resource:
-        """Reconstruct a Resource from its JSON-friendly representation."""
+        """Reconstruct a Resource from its JSON-friendly representation.
+
+        Args:
+            data: The JSON-friendly dict.
+
+        Returns:
+            The reconstructed :class:`Resource`.
+        """
         return cls(
             kind=data.get("kind", cls.ANY),
             type_name=data.get("type_name"),
@@ -417,15 +537,31 @@ class Clause(Scope):
     attributes: dict[str, Expression] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        """Validate the clause body after construction.
+
+        Raises:
+            ScopeFault: When ``body`` is empty or whitespace.
+        """
         if not self.body or not self.body.strip():
             raise ScopeFault("condition clause body must be non-empty")
 
     def clause(self) -> str:
-        """Return the clause body (which IS the Cedar source fragment)."""
+        """Return the clause body (which IS the Cedar source fragment).
+
+        Polymorphic implementation of :meth:`Scope.clause`; for
+        clauses, the rendered fragment is just the body.
+
+        Returns:
+            The clause body string.
+        """
         return self.body
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-friendly representation of this clause."""
+        """Return a JSON-friendly representation of this clause.
+
+        Returns:
+            A dict with ``body`` and ``attributes`` keys.
+        """
         return {
             "body": self.body,
             "attributes": dict(self.attributes),
@@ -433,9 +569,18 @@ class Clause(Scope):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Clause:
-        """Reconstruct a Clause from its JSON-friendly representation."""
+        """Reconstruct a Clause from its JSON-friendly representation.
+
+        Args:
+            data: The JSON-friendly dict.
+
+        Returns:
+            The reconstructed :class:`Clause`.
+        """
         attrs_raw = data.get("attributes") or {}
-        attrs: dict[str, Expression] = dict(attrs_raw) if isinstance(attrs_raw, dict) else {}
+        attrs: dict[str, Expression] = (
+            dict(attrs_raw) if isinstance(attrs_raw, dict) else {}
+        )
         return cls(body=str(data.get("body", "")), attributes=attrs)
 
     @classmethod

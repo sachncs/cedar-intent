@@ -67,7 +67,7 @@ class Vreport:
         cls,
         policies: Sequence[str],
         schema: Schema,
-    ) -> Vreport:
+    ) -> "Vreport":
         """Validate Cedar statements against ``schema`` and return a structured report.
 
         The canonical two-step pipeline: every ``policies`` entry is
@@ -118,10 +118,10 @@ class Vreport:
                 raise Validate(
                     (f"format received non-string input: {error}",), source
                 ) from error
-        return Vreport(passed=True, errors=(), formatted=tuple(formatted))
+        return cls(passed=True, errors=(), formatted=tuple(formatted))
 
     @classmethod
-    def validate_policy(cls, policy: Any, schema: Schema) -> Vreport:
+    def validate_policy(cls, policy: Any, schema: Schema) -> "Vreport":
         """Validate a single :class:`~cedrus.policies.Policy`.
 
         Args:
@@ -142,12 +142,15 @@ class Vreport:
         return cls.from_cedar([cedar], schema)
 
 
+@dataclass(frozen=True, slots=True)
 class Validator:
     """Schema validator. Subclass for alternate Cedar engine bindings.
 
     Attributes:
         schema: The Cedar schema to use for validation.
     """
+
+    schema: Schema
 
     def __init__(self, schema: Schema) -> None:
         """Store the schema for subsequent ``validate`` calls.
