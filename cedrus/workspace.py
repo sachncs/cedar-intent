@@ -1,6 +1,6 @@
 """Workspace orchestrator.
 
-A :class:`Workspace` binds every cedar-intent concern together: it owns a
+A :class:`Workspace` binds every cedrus concern together: it owns a
 repository, loads schemas and requirements from disk, drives generators,
 applies drafts, and exports validated policy bundles for embedded Cedar
 applications.
@@ -18,7 +18,7 @@ A typical session runs through these stages:
    :meth:`Workspace.add_requirement_directory` registers Markdown
    requirements.
 4. **Generate draft** - :meth:`Workspace.generate_draft` runs a
-   :class:`~cedar_intent.generator.Generator` against a draft and
+   :class:`~cedrus.generator.Generator` against a draft and
    persists the proposal.
 5. **Apply** - :meth:`Workspace.apply` or
    :meth:`Workspace.apply_for_requirement` validates, optionally runs
@@ -82,7 +82,7 @@ DEFAULT_SCENARIOS_FILENAME = "scenarios.json"
 
 @dataclass
 class Workspace:
-    """Top-level cedar-intent orchestrator for a single organization workspace.
+    """Top-level cedrus orchestrator for a single organization workspace.
 
     Attributes:
         root: Filesystem root of the workspace.
@@ -102,7 +102,7 @@ class Workspace:
             path: Filesystem path of the workspace root.
             allow_legacy: When ``True``, open the workspace even when it
                 still carries pre-0.6.0 legacy rows. Only the
-                ``cedar-intent migrate`` command should use this flag;
+                ``cedrus migrate`` command should use this flag;
                 every other caller should leave it ``False`` so a
                 legacy workspace is rejected loudly rather than
                 silently operated on with broken schema assumptions.
@@ -118,7 +118,7 @@ class Workspace:
         root = Path(path).resolve()
         if not root.exists() or not root.is_dir():
             raise WorkspaceError(f"workspace root not found: {root}")
-        storage_path = root / ".cedar-intent" / DEFAULT_STORAGE_FILENAME
+        storage_path = root / ".cedrus" / DEFAULT_STORAGE_FILENAME
         repository = SqliteRepository(storage_path, allow_legacy=allow_legacy)
         return cls(root=root, repository=repository, storage_path=storage_path)
 
@@ -134,8 +134,8 @@ class Workspace:
         """
         root = Path(path).resolve()
         root.mkdir(parents=True, exist_ok=True)
-        (root / ".cedar-intent").mkdir(exist_ok=True)
-        storage_path = root / ".cedar-intent" / DEFAULT_STORAGE_FILENAME
+        (root / ".cedrus").mkdir(exist_ok=True)
+        storage_path = root / ".cedrus" / DEFAULT_STORAGE_FILENAME
         repository = SqliteRepository(storage_path)
         return cls(root=root, repository=repository, storage_path=storage_path)
 
@@ -232,7 +232,7 @@ class Workspace:
             A fully parsed :class:`CedarSchema`.
 
         Raises:
-            cedar_intent.errors.ValidationError: If the schema file is
+            cedrus.errors.ValidationError: If the schema file is
                 missing or invalid.
         """
         return CedarSchema.from_json_file(self.schema_path(domain))
@@ -791,7 +791,7 @@ class Workspace:
         except StorageError as error:
             raise WorkspaceError(
                 f"no draft exists for requirement {requirement_id!r}; "
-                "run 'cedar-intent policy generate' first"
+                "run 'cedrus policy generate' first"
             ) from error
         intent = intent_from_draft(stored_draft, placeholder.id, requirement_id)
         principal_payload = loads_optional_json(stored_draft.principal_scope_json)
@@ -1160,7 +1160,7 @@ def intent_from_draft(
 
     Both the canonical ``when_clauses``/``unless_clauses`` shape and
     the legacy ``when``/``unless`` shape are accepted on read for
-    backward compatibility with rows stored by earlier cedar-intent
+    backward compatibility with rows stored by earlier cedrus
     versions.
 
     Raises:
@@ -1176,19 +1176,19 @@ def intent_from_draft(
     if data is None:
         raise WorkspaceError(
             f"stored draft {draft.id!r} has unparseable intent_json; "
-            "re-run `cedar-intent policy generate` for the requirement"
+            "re-run `cedrus policy generate` for the requirement"
         )
     try:
         intent = intent_from_dict(data)
     except (KeyError, TypeError, ValueError) as error:
         raise WorkspaceError(
             f"stored draft {draft.id!r} has corrupt intent JSON ({error}); "
-            "re-run `cedar-intent policy generate` for the requirement"
+            "re-run `cedrus policy generate` for the requirement"
         ) from error
     if intent is None:
         raise WorkspaceError(
             f"stored draft {draft.id!r} has empty intent JSON; "
-            "re-run `cedar-intent policy generate` for the requirement"
+            "re-run `cedrus policy generate` for the requirement"
         )
     # When ``intent.id`` or ``intent.requirement_id`` are missing from
     # the stored JSON, fall back to the supplied identifiers so the

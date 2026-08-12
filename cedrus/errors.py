@@ -1,4 +1,4 @@
-"""Exception hierarchy for cedar-intent.
+"""Exception hierarchy for cedrus.
 
 Every error raised by the library inherits from :class:`CedarIntentError`,
 which lets callers handle the entire family with a single ``except``
@@ -11,7 +11,7 @@ Hierarchy
 The hierarchy is organized by responsibility, not by layer:
 
 * :class:`CedarIntentError` - base class. Catch this when you want
-  every cedar-intent error.
+  every cedrus error.
 * :class:`ConfigError` - bad configuration (CLI flags, env vars,
   invalid generator options).
 * :class:`RequirementError` - missing or malformed requirement files.
@@ -37,7 +37,7 @@ from __future__ import annotations
 
 
 class CedarIntentError(Exception):
-    """Base class for every error raised by cedar-intent."""
+    """Base class for every error raised by cedrus."""
 
 
 class ConfigError(CedarIntentError):

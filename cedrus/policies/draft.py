@@ -8,12 +8,12 @@ Lifecycle
 ---------
 
 1. :meth:`DraftPolicy.from_requirement` creates an empty draft from a
-   :class:`~cedar_intent.requirements.Requirement` and caller scopes.
+   :class:`~cedrus.requirements.Requirement` and caller scopes.
 2. :meth:`DraftPolicy.generate` calls a generator and stores the
-   resulting :class:`~cedar_intent.generator.DraftProposal` on the
+   resulting :class:`~cedrus.generator.DraftProposal` on the
    draft.
 3. :meth:`DraftPolicy.compile` renders the draft (or a freshly built
-   :class:`~cedar_intent.compiler.PolicyIntent` if no intent was set)
+   :class:`~cedrus.compiler.PolicyIntent` if no intent was set)
    to Cedar source.
 4. :meth:`DraftPolicy.as_compiled` returns a copy of the draft with the
    compiled Cedar source populated.

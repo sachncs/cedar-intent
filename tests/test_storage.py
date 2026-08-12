@@ -7,18 +7,18 @@ from pathlib import Path
 
 import pytest
 
-from cedar_intent import (
+from cedrus import (
     DeploymentRecord,
     InMemoryRepository,
     Repository,
     SqliteRepository,
     StorageError,
 )
-from cedar_intent.compiler import PolicyIntent
-from cedar_intent.deployment import DEPLOYMENT_KIND_LOCAL
-from cedar_intent.requirements import Requirement
-from cedar_intent.scopes import ActionScope, PrincipalScope, ResourceScope
-from cedar_intent.storage import StoredDraft, StoredPolicy, StoredReport
+from cedrus.compiler import PolicyIntent
+from cedrus.deployment import DEPLOYMENT_KIND_LOCAL
+from cedrus.requirements import Requirement
+from cedrus.scopes import ActionScope, PrincipalScope, ResourceScope
+from cedrus.storage import StoredDraft, StoredPolicy, StoredReport
 
 
 def make_requirement(identifier: str, domain: str = "hr") -> Requirement:

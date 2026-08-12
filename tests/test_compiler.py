@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cedar_intent import (
+from cedrus import (
     ActionScope,
     CompilationError,
     ConditionClause,
@@ -13,7 +13,7 @@ from cedar_intent import (
     ResourceScope,
     compile_intent,
 )
-from cedar_intent.compiler import render_action, render_principal, render_resource
+from cedrus.compiler import render_action, render_principal, render_resource
 
 
 def make_intent(**overrides: object) -> PolicyIntent:

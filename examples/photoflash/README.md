@@ -1,6 +1,6 @@
 # PhotoFlash example workspace
 
-This directory contains a complete `cedar-intent` workspace for the
+This directory contains a complete `cedrus` workspace for the
 PhotoFlash scenario: users viewing photos in an album.
 
 ## Layout
@@ -24,8 +24,8 @@ photoflash/
 
 ```bash
 cd photoflash
-cedar-intent init --path .
-cedar-intent domain add hr
+cedrus init --path .
+cedrus domain add hr
 bash scripts/run.sh
 ```
 

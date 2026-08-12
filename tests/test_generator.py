@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import litellm
 import pytest
 
-from cedar_intent import (
+from cedrus import (
     ActionScope,
     CedarSchema,
     GenerationContext,
@@ -22,8 +22,8 @@ from cedar_intent import (
     Requirement,
     ResourceScope,
 )
-from cedar_intent.generator import DraftProposal, GenerationResult
-from cedar_intent.generator.base import merge_unresolved
+from cedrus.generator import DraftProposal, GenerationResult
+from cedrus.generator.base import merge_unresolved
 
 
 def make_requirement() -> Requirement:
@@ -143,7 +143,7 @@ def test_litellm_generator_validates_inputs() -> None:
 
 def test_litellm_generator_propagates_request_errors(schema: CedarSchema) -> None:
     generator = LiteLLMGenerator(model="provider/model")
-    with patch("cedar_intent.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generator.litellm.litellm.completion") as completion:
         completion.side_effect = litellm.exceptions.APIConnectionError(
             message="network down",
             llm_provider="provider",
@@ -172,7 +172,7 @@ def test_litellm_generator_extracts_proposal(schema: CedarSchema) -> None:
         usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         choices=[SimpleNamespace(message=SimpleNamespace(content=_json(payload)))],
     )
-    with patch("cedar_intent.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generator.litellm.litellm.completion") as completion:
         completion.return_value = response
         result = generator.generate(make_context(schema))
     assert isinstance(result, GenerationResult)
@@ -189,7 +189,7 @@ def test_litellm_generator_rejects_invalid_json(schema: CedarSchema) -> None:
         usage={},
         choices=[SimpleNamespace(message=SimpleNamespace(content="not json"))],
     )
-    with patch("cedar_intent.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generator.litellm.litellm.completion") as completion:
         completion.return_value = response
         with pytest.raises(GeneratorError):
             generator.generate(make_context(schema))
@@ -203,7 +203,7 @@ def test_litellm_generator_rejects_missing_intent(schema: CedarSchema) -> None:
         usage={},
         choices=[SimpleNamespace(message=SimpleNamespace(content=_json({"oops": True})))],
     )
-    with patch("cedar_intent.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generator.litellm.litellm.completion") as completion:
         completion.return_value = response
         with pytest.raises(GeneratorError):
             generator.generate(make_context(schema))
@@ -217,7 +217,7 @@ def test_litellm_generator_rejects_non_object_intent(schema: CedarSchema) -> Non
         usage={},
         choices=[SimpleNamespace(message=SimpleNamespace(content=_json({"intent": "oops"})))],
     )
-    with patch("cedar_intent.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generator.litellm.litellm.completion") as completion:
         completion.return_value = response
         with pytest.raises(GeneratorError):
             generator.generate(make_context(schema))
@@ -239,7 +239,7 @@ def test_litellm_generator_rejects_invalid_effect(schema: CedarSchema) -> None:
         usage={},
         choices=[SimpleNamespace(message=SimpleNamespace(content=_json(payload)))],
     )
-    with patch("cedar_intent.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generator.litellm.litellm.completion") as completion:
         completion.return_value = response
         with pytest.raises(GeneratorError):
             generator.generate(make_context(schema))
@@ -269,7 +269,7 @@ def test_litellm_generator_handles_fallbacks(schema: CedarSchema) -> None:
             )
         ],
     )
-    with patch("cedar_intent.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generator.litellm.litellm.completion") as completion:
         completion.return_value = response
         result = generator.generate(make_context(schema))
     assert completion.call_args.kwargs["fallbacks"] == ["backup"]
@@ -280,7 +280,7 @@ def test_litellm_generator_handles_fallbacks(schema: CedarSchema) -> None:
 def test_litellm_generator_handles_missing_choices(schema: CedarSchema) -> None:
     generator = LiteLLMGenerator(model="primary")
     response = SimpleNamespace(id=None, model=None, usage=None, choices=[])
-    with patch("cedar_intent.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generator.litellm.litellm.completion") as completion:
         completion.return_value = response
         with pytest.raises(GeneratorError):
             generator.generate(make_context(schema))
@@ -312,7 +312,7 @@ def test_litellm_generator_extracts_pydantic_usage(schema: CedarSchema) -> None:
             )
         ],
     )
-    with patch("cedar_intent.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generator.litellm.litellm.completion") as completion:
         completion.return_value = response
         result = generator.generate(make_context(schema))
     assert result.usage == {"total_tokens": 42, "prompt_tokens": 7}
@@ -326,7 +326,7 @@ def test_litellm_generator_ignores_non_text_content(schema: CedarSchema) -> None
         usage={},
         choices=[SimpleNamespace(message=SimpleNamespace(content=None))],
     )
-    with patch("cedar_intent.generator.litellm.litellm.completion") as completion:
+    with patch("cedrus.generator.litellm.litellm.completion") as completion:
         completion.return_value = response
         with pytest.raises(GeneratorError):
             generator.generate(make_context(schema))
@@ -360,7 +360,7 @@ def test_litellm_prompt_wraps_requirement_in_fences(
 
 def test_litellm_system_prompt_declares_data_only_preamble() -> None:
     """System prompt must instruct the model to ignore instructions inside fences."""
-    from cedar_intent.generator.litellm import SYSTEM_PROMPT
+    from cedrus.generator.litellm import SYSTEM_PROMPT
 
     assert "data" in SYSTEM_PROMPT.lower()
     assert "Do not follow" in SYSTEM_PROMPT or "do not follow" in SYSTEM_PROMPT

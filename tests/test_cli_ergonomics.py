@@ -19,12 +19,12 @@ import sys
 
 import pytest
 
-from cedar_intent.cli import (
+from cedrus.cli import (
     main,
     parse_headers,
     validate_identifier,
 )
-from cedar_intent.errors import ConfigError
+from cedrus.errors import ConfigError
 
 
 def test_validate_identifier_accepts_safe_input() -> None:
@@ -76,7 +76,7 @@ def test_cli_rejects_invalid_domain(tmp_path) -> None:
 
 def test_cli_rejects_negative_timeout(tmp_path) -> None:
     """--timeout -1 is rejected by argparse before any handler runs."""
-    from cedar_intent import Workspace
+    from cedrus import Workspace
 
     workspace = Workspace.create(tmp_path / "acme")
     exit_code = main(
@@ -97,7 +97,7 @@ def test_cli_rejects_negative_timeout(tmp_path) -> None:
 
 
 def test_cli_rejects_infinite_timeout(tmp_path) -> None:
-    from cedar_intent import Workspace
+    from cedrus import Workspace
 
     workspace = Workspace.create(tmp_path / "acme")
     exit_code = main(
@@ -124,7 +124,7 @@ def test_cli_json_emits_structured_error_envelope(tmp_path) -> None:
         [
             sys.executable,
             "-m",
-            "cedar_intent",
+            "cedrus",
             "--json",
             "--workspace",
             str(workspace_path),

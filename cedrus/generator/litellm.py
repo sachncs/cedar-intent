@@ -9,7 +9,7 @@ Prompting contract
 ------------------
 
 The system prompt asks the model for an ``intent`` object whose shape
-exactly matches :class:`~cedar_intent.compiler.PolicyIntent`. The
+exactly matches :class:`~cedrus.compiler.PolicyIntent`. The
 model is told to:
 
 * use only entity types, actions, and attributes present in the

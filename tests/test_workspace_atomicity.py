@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from cedar_intent import (
+from cedrus import (
     ActionScope,
     PolicyIntent,
     PrincipalScope,
@@ -65,7 +65,7 @@ def test_apply_persists_validation_report_and_policy_in_one_transaction(
     requirement = _make_requirement()
     workspace.repository.add_requirement(requirement)
 
-    from cedar_intent.policies import DraftPolicy
+    from cedrus.policies import DraftPolicy
 
     intent = PolicyIntent(
         id=requirement.id,
@@ -100,7 +100,7 @@ def test_apply_rolls_back_when_scenario_fails(tmp_path: Path) -> None:
     requirement = _make_requirement()
     workspace.repository.add_requirement(requirement)
 
-    from cedar_intent.policies import DraftPolicy
+    from cedrus.policies import DraftPolicy
 
     intent = PolicyIntent(
         id=requirement.id,
@@ -162,7 +162,7 @@ def test_apply_passes_when_scenario_succeeds(tmp_path: Path) -> None:
     requirement = _make_requirement()
     workspace.repository.add_requirement(requirement)
 
-    from cedar_intent.policies import DraftPolicy
+    from cedrus.policies import DraftPolicy
 
     intent = PolicyIntent(
         id=requirement.id,

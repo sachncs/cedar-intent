@@ -1,4 +1,4 @@
-"""Storage backends for cedar-intent."""
+"""Storage backends for cedrus."""
 
 from .base import Repository, StoredDraft, StoredPolicy, StoredReport
 from .memory import InMemoryRepository

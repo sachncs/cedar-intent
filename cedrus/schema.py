@@ -2,7 +2,7 @@
 
 The schema is the authority over entity types, actions, attributes,
 and context. It is required both at compile time (to validate a
-proposal) and at runtime (for authorization decisions). cedar-intent
+proposal) and at runtime (for authorization decisions). cedrus
 wraps ``cedarpy`` to provide a single, typed entrypoint.
 
 Why an eager handle

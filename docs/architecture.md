@@ -1,6 +1,6 @@
 # Architecture
 
-This document explains how `cedar-intent` fits together at the module
+This document explains how `cedrus` fits together at the module
 level, how a single requirement flows from Markdown to a deployed Cedar
 bundle, and which responsibilities belong to which class.
 
@@ -104,7 +104,7 @@ That is the contract that keeps the LLM from writing production Cedar.
 
 ## Persistence
 
-The SQLite schema (`.cedar-intent/store.db`) holds five tables:
+The SQLite schema (`.cedrus/store.db`) holds five tables:
 
 - `requirements` — one row per requirement loaded from disk.
 - `policies` — one row per compiled policy.
@@ -119,9 +119,9 @@ identifier string, allowing them to survive policy deletion.
 ## Extending the system
 
 - **New generator** — implement the `Generator` Protocol in
-  `cedar_intent.generator.base` and pass it to `Workspace.generate_draft`.
+  `cedrus.generator.base` and pass it to `Workspace.generate_draft`.
 - **New storage backend** — implement the `Repository` Protocol in
-  `cedar_intent.storage.base` and construct the workspace with it.
+  `cedrus.storage.base` and construct the workspace with it.
 - **New verification check** — add a function returning a list of
   `VerificationFinding` and call it from `verify_policies`.
 - **New deployment target** — extend `DeploymentClient.deploy` with a

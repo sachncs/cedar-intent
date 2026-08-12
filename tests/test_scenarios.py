@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cedar_intent import (
+from cedrus import (
     CedarSchema,
     Scenario,
     load_scenarios,

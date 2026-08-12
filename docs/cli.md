@@ -1,6 +1,6 @@
 # CLI reference
 
-The `cedar-intent` command-line tool exposes every operation the library
+The `cedrus` command-line tool exposes every operation the library
 supports. Every command accepts `--json` for machine-readable output
 and reads its workspace from `--workspace <path>` (default: the current
 directory).
@@ -18,17 +18,17 @@ Exit codes:
 - `1` — `CedarIntentError` raised at any layer
 - `2` — argparse validation error
 
-## `cedar-intent init`
+## `cedrus init`
 
 ```text
-cedar-intent init --path <path>
+cedrus init --path <path>
 ```
 
 Create a new workspace at `<path>`. The workspace contains a hidden
-`.cedar-intent/` directory with the SQLite store.
+`.cedrus/` directory with the SQLite store.
 
 ```bash
-cedar-intent --workspace /tmp init --path /tmp/acme
+cedrus --workspace /tmp init --path /tmp/acme
 ```
 
 Output:
@@ -39,11 +39,11 @@ Output:
 }
 ```
 
-## `cedar-intent domain`
+## `cedrus domain`
 
 ```text
-cedar-intent domain add <name>
-cedar-intent domain list
+cedrus domain add <name>
+cedrus domain list
 ```
 
 `add <name>` creates `<name>/schema.json`, `<name>/requirements/`, and
@@ -51,15 +51,15 @@ cedar-intent domain list
 in the workspace.
 
 ```bash
-cedar-intent domain add hr
-cedar-intent domain list
+cedrus domain add hr
+cedrus domain list
 ```
 
-## `cedar-intent requirement`
+## `cedrus requirement`
 
 ```text
-cedar-intent requirement add <path> --domain <name>
-cedar-intent requirement list [--domain <name>]
+cedrus requirement add <path> --domain <name>
+cedrus requirement list [--domain <name>]
 ```
 
 `add` copies the Markdown file into the workspace's requirements
@@ -69,25 +69,25 @@ stem. `list` shows registered requirements, optionally filtered by
 domain.
 
 ```bash
-cedar-intent requirement add hr/requirements/HR-042.md --domain hr
-cedar-intent requirement list --domain hr
+cedrus requirement add hr/requirements/HR-042.md --domain hr
+cedrus requirement list --domain hr
 ```
 
-## `cedar-intent policy`
+## `cedrus policy`
 
 The `policy` command has three subcommands.
 
 ### `policy draft`
 
 ```text
-cedar-intent policy draft <requirement-id> --domain <name> [scope flags]
+cedrus policy draft <requirement-id> --domain <name> [scope flags]
 ```
 
 Build an in-memory draft policy from the requirement and the supplied
 scopes. No LLM is invoked. The draft is not persisted.
 
 ```bash
-cedar-intent policy draft HR-042 \
+cedrus policy draft HR-042 \
     --domain hr \
     --principal specific --principal-type User --entity-id alice \
     --action named --action-name viewPhoto \
@@ -97,7 +97,7 @@ cedar-intent policy draft HR-042 \
 ### `policy generate`
 
 ```text
-cedar-intent policy generate <requirement-id> --domain <name> [scope flags] [generator flags]
+cedrus policy generate <requirement-id> --domain <name> [scope flags] [generator flags]
 ```
 
 Run the configured generator against the requirement and persist the
@@ -112,7 +112,7 @@ environment:
 
 ```bash
 # Offline, deterministic
-cedar-intent policy generate HR-042 --domain hr \
+cedrus policy generate HR-042 --domain hr \
     --principal specific --principal-type User --entity-id alice \
     --action named --action-name viewPhoto \
     --resource is_type --resource-type Photo \
@@ -120,7 +120,7 @@ cedar-intent policy generate HR-042 --domain hr \
 
 # Online, model-supplied
 CEDAR_INTENT_ONLINE=1 CEDAR_INTENT_MODEL=openai/gpt-4o \
-cedar-intent policy generate HR-042 --domain hr \
+cedrus policy generate HR-042 --domain hr \
     --principal specific --principal-type User --entity-id alice \
     --action named --action-name viewPhoto \
     --resource is_type --resource-type Photo
@@ -129,7 +129,7 @@ cedar-intent policy generate HR-042 --domain hr \
 ### `policy apply`
 
 ```text
-cedar-intent policy apply <requirement-id> --domain <name> [scope flags] [--no-scenarios]
+cedrus policy apply <requirement-id> --domain <name> [scope flags] [--no-scenarios]
 ```
 
 Validate the most recent draft for `<requirement-id>` against the
@@ -142,43 +142,43 @@ compiled policy. Fails if:
 - Any scenario fails.
 
 ```bash
-cedar-intent policy apply HR-042 --domain hr \
+cedrus policy apply HR-042 --domain hr \
     --principal specific --principal-type User --entity-id alice \
     --action named --action-name viewPhoto \
     --resource is_type --resource-type Photo \
     --no-scenarios
 ```
 
-## `cedar-intent export`
+## `cedrus export`
 
 ```text
-cedar-intent export --domain <name> --output <path>
+cedrus export --domain <name> --output <path>
 ```
 
 Write the compiled Cedar policies for `<domain>` to `<path>` as a
 single concatenated file. Validates before writing.
 
 ```bash
-cedar-intent export --domain hr --output dist/hr.cedar
+cedrus export --domain hr --output dist/hr.cedar
 ```
 
-## `cedar-intent check`
+## `cedrus check`
 
 ```text
-cedar-intent check [--domain <name>]
+cedrus check [--domain <name>]
 ```
 
 Validate every domain in the workspace, or the specified domain.
 Useful as a CI gate.
 
 ```bash
-cedar-intent --json check
+cedrus --json check
 ```
 
-## `cedar-intent verify`
+## `cedrus verify`
 
 ```text
-cedar-intent verify --domain <name> [--strict]
+cedrus verify --domain <name> [--strict]
 ```
 
 Run static verification on the compiled policies for `<domain>`.
@@ -186,16 +186,16 @@ Reports shadowing, redundancy, and coverage gaps. With `--strict`,
 exits non-zero when any warning is reported.
 
 ```bash
-cedar-intent --json verify --domain hr
-cedar-intent verify --domain hr --strict
+cedrus --json verify --domain hr
+cedrus verify --domain hr --strict
 ```
 
-## `cedar-intent deploy`
+## `cedrus deploy`
 
 ```text
-cedar-intent deploy push --domain <name> --target <path-or-url> [--timeout N] [--header Name: Value]...
-cedar-intent deploy bundle --domain <name> --output <directory>
-cedar-intent deploy history [--domain <name>]
+cedrus deploy push --domain <name> --target <path-or-url> [--timeout N] [--header Name: Value]...
+cedrus deploy bundle --domain <name> --output <directory>
+cedrus deploy history [--domain <name>]
 ```
 
 - `push` writes a bundle and either saves it to a local directory
@@ -207,26 +207,26 @@ cedar-intent deploy history [--domain <name>]
 
 ```bash
 # Local deployment
-cedar-intent deploy bundle --domain hr --output dist/hr
-cedar-intent deploy push --domain hr --target /opt/policies/hr
+cedrus deploy bundle --domain hr --output dist/hr
+cedrus deploy push --domain hr --target /opt/policies/hr
 
 # HTTP deployment with custom headers
-cedar-intent deploy push --domain hr \
+cedrus deploy push --domain hr \
     --target https://policy-service.example.com/deploy \
     --header "Authorization: Bearer ..." \
     --header "X-Environment: production"
 
 # History
-cedar-intent --json deploy history --domain hr
+cedrus --json deploy history --domain hr
 ```
 
 ## migrate
 
 ```text
-cedar-intent migrate [--apply | --check]
+cedrus migrate [--apply | --check]
 ```
 
-Upgrade a workspace created before cedar-intent 0.6.0 to the current
+Upgrade a workspace created before cedrus 0.6.0 to the current
 schema. The 0.6.0 schema adds per-slot scope JSON columns and typed
 intent metadata to every policy and draft, so pre-0.6.0 workspaces
 refuse to open until the migration has run.
@@ -239,10 +239,10 @@ refuse to open until the migration has run.
 
 ```bash
 # CI gate
-cedar-intent --json migrate --check || echo "workspace needs migration"
+cedrus --json migrate --check || echo "workspace needs migration"
 
 # Apply the migration
-cedar-intent migrate --apply
+cedrus migrate --apply
 ```
 
 ## Scope flags

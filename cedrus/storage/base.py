@@ -1,6 +1,6 @@
 """Storage Protocol and shared data structures for the persistence layer.
 
-The Repository Protocol is the seam between cedar-intent and any backing
+The Repository Protocol is the seam between cedrus and any backing
 store. Two implementations are shipped: :class:`InMemoryRepository` for
 tests and ephemeral use, and :class:`SqliteRepository` for the default
 on-disk behaviour.
@@ -10,7 +10,7 @@ Storage lifecycle
 
 Every repository covers the same five tables:
 
-* ``requirements`` - one row per loaded :class:`~cedar_intent.requirements.Requirement`.
+* ``requirements`` - one row per loaded :class:`~cedrus.requirements.Requirement`.
 * ``policies`` - one row per compiled policy, with the typed intent
   and action namespace stored as JSON.
 * ``drafts`` - the full history of generator proposals per policy,
@@ -36,13 +36,13 @@ single repository instance per process or open one per thread.
 Schema migration
 ----------------
 
-Starting with cedar-intent 0.6.0, :class:`StoredDraft` carries the
+Starting with cedrus 0.6.0, :class:`StoredDraft` carries the
 typed intent and per-slot scope JSON, and :class:`StoredPolicy`
 carries the action namespace. Older databases created before this
 version are upgraded on first open by
-:func:`cedar_intent.migrations.detect_legacy_rows` and
-:func:`cedar_intent.migrations.migrate_legacy_rows`, exposed via the
-``cedar-intent migrate`` CLI subcommand. Until the migration runs,
+:func:`cedrus.migrations.detect_legacy_rows` and
+:func:`cedrus.migrations.migrate_legacy_rows`, exposed via the
+``cedrus migrate`` CLI subcommand. Until the migration runs,
 :class:`SqliteRepository` raises :class:`StorageError` on open so
 operators cannot accidentally work with a half-migrated store.
 """

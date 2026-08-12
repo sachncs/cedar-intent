@@ -20,7 +20,7 @@ Six tables back the entity types exposed by the Protocol:
 * ``reports`` (id AUTOINCREMENT PRIMARY KEY, policy_id logical)
 * ``deployments`` (id PRIMARY KEY, domain indexed)
 
-Starting with cedar-intent 0.6.0, every row in ``policies`` and
+Starting with cedrus 0.6.0, every row in ``policies`` and
 ``drafts`` carries additional JSON columns that capture the typed
 intent and per-slot scopes. Older databases are upgraded in place by
 :meth:`SqliteRepository.migrate` followed by a strict-refusal check
@@ -273,7 +273,7 @@ class SqliteRepository:
         Hard-refuses per the 0.6.0 migration policy: any row whose new
         JSON columns are NULL is treated as a hard error because the
         verification and deployment paths rely on those columns being
-        populated. The CLI exposes ``cedar-intent migrate`` to upgrade
+        populated. The CLI exposes ``cedrus migrate`` to upgrade
         legacy rows in place.
 
         Raises:
@@ -284,14 +284,14 @@ class SqliteRepository:
             if pending:
                 raise StorageError(
                     f"workspace at {self.path} contains {pending} legacy rows; "
-                    "run 'cedar-intent migrate --apply' to upgrade to the 0.6.0 schema"
+                    "run 'cedrus migrate --apply' to upgrade to the 0.6.0 schema"
                 )
             return
         # Schema version not yet at current; treat the database as
         # legacy until the migration runs.
         raise StorageError(
             f"workspace at {self.path} has not been migrated to schema "
-            f"version {SCHEMA_VERSION}; run 'cedar-intent migrate --apply'"
+            f"version {SCHEMA_VERSION}; run 'cedrus migrate --apply'"
         )
 
     def close(self) -> None:
@@ -627,7 +627,7 @@ class SqliteRepository:
 def serialize_intent(intent: PolicyIntent | None) -> str | None:
     """Serialize a :class:`PolicyIntent` to a JSON string for SQLite storage.
 
-    This is a thin wrapper around :func:`cedar_intent.scope_json.intent_to_dict`.
+    This is a thin wrapper around :func:`cedrus.scope_json.intent_to_dict`.
     The canonical wire format lives there so storage and verification
     layers can never disagree.
 
@@ -647,7 +647,7 @@ def serialize_intent(intent: PolicyIntent | None) -> str | None:
 def deserialize_intent(payload: str | None) -> PolicyIntent | None:
     """Deserialize a :class:`PolicyIntent` from its JSON representation.
 
-    This is a thin wrapper around :func:`cedar_intent.scope_json.intent_from_dict`.
+    This is a thin wrapper around :func:`cedrus.scope_json.intent_from_dict`.
     Both the canonical ``when_clauses``/``unless_clauses`` shape and
     the legacy ``when``/``unless`` shape are accepted on read.
 

@@ -1,6 +1,6 @@
-"""Schema migration helpers for cedar-intent 0.6.0.
+"""Schema migration helpers for cedrus 0.6.0.
 
-Starting with cedar-intent 0.6.0, every stored :class:`StoredDraft`
+Starting with cedrus 0.6.0, every stored :class:`StoredDraft`
 carries a JSON-serialized typed intent and the per-slot scope JSON,
 and every :class:`StoredPolicy` carries the action scope JSON.
 Databases created before this version are upgraded in place by
@@ -51,7 +51,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class _RepoLike(Protocol):
-    """Subset of :class:`~cedar_intent.storage.Repository` used by the migration."""
+    """Subset of :class:`~cedrus.storage.Repository` used by the migration."""
 
     def get_policy(self, policy_id: str) -> StoredPolicy: ...
     def upsert_policy(self, policy: StoredPolicy) -> None: ...
@@ -70,7 +70,7 @@ def detect_legacy_rows(repository: _RepoLike) -> int:
 
     Args:
         repository: Repository to scan. Quacks like the
-            :class:`~cedar_intent.storage.Repository` Protocol.
+            :class:`~cedrus.storage.Repository` Protocol.
 
     Returns:
         Number of legacy rows that still need migration.

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from cedar_intent import (
+from cedrus import (
     ActionScope,
     PolicyIntent,
     PrincipalScope,

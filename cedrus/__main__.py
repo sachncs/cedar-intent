@@ -1,4 +1,4 @@
-"""Module entrypoint for ``python -m cedar_intent``."""
+"""Module entrypoint for ``python -m cedrus``."""
 
 from .cli import main
 

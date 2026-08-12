@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from cedar_intent import (
+from cedrus import (
     ActionScope,
     CompiledPolicy,
     PolicyIntent,
@@ -162,7 +162,7 @@ def test_workspace_deploy_local_persists_record(tmp_path: Path) -> None:
 def test_workspace_deploy_empty_domain_raises(tmp_path: Path) -> None:
     workspace = make_workspace_with_domain(tmp_path)
     try:
-        from cedar_intent import WorkspaceError
+        from cedrus import WorkspaceError
 
         with pytest.raises(WorkspaceError):
             workspace.deploy("hr", str(tmp_path / "out"))

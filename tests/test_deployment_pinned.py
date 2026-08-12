@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from cedar_intent import (
+from cedrus import (
     DeploymentClient,
     DeploymentError,
     DeploymentManifest,
@@ -117,7 +117,7 @@ def test_pinned_transport_pins_resolved_ip() -> None:
 
 def test_response_body_is_bounded() -> None:
     """Streaming 1MB of body is bounded by HTTP_RESPONSE_READ_LIMIT."""
-    from cedar_intent.deployment import HTTP_RESPONSE_READ_LIMIT
+    from cedrus.deployment import HTTP_RESPONSE_READ_LIMIT
 
     class Flood(BaseHTTPRequestHandler):
         def do_POST(self) -> None:  # noqa: N802

@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for cedar-intent."""
+"""Shared pytest fixtures for cedrus."""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from cedar_intent import (
+from cedrus import (
     DraftPolicy,
     ExistingPolicy,
     Requirement,
 )
-from cedar_intent.schema import CedarSchema
+from cedrus.schema import CedarSchema
 
 PHOTOFLASH_SCHEMA = {
     "PhotoFlash": {
@@ -104,7 +104,7 @@ def workspace_root(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def workspace(workspace_root: Path):
-    from cedar_intent.workspace import Workspace
+    from cedrus.workspace import Workspace
 
     ws = Workspace.open(workspace_root)
     try:
@@ -115,7 +115,7 @@ def workspace(workspace_root: Path):
 
 @pytest.fixture
 def in_memory_workspace() -> Iterator:
-    from cedar_intent.workspace import Workspace
+    from cedrus.workspace import Workspace
 
     ws = Workspace.in_memory()
     try:

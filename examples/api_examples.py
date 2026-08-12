@@ -1,4 +1,4 @@
-"""Runnable Python API recipes for cedar-intent.
+"""Runnable Python API recipes for cedrus.
 
 Run with::
 
@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from cedar_intent import (
+from cedrus import (
     ActionScope,
     CedarSchema,
     CompiledPolicy,
@@ -64,7 +64,7 @@ PHOTOFLASH_SCHEMA = {
 
 def make_workspace() -> Workspace:
     """Build a fresh in-memory workspace for the recipes."""
-    return Workspace.in_memory(Path("/tmp/cedar-intent-example"))
+    return Workspace.in_memory(Path("/tmp/cedrus-example"))
 
 
 def make_schema() -> CedarSchema:
@@ -185,7 +185,7 @@ def recipe_deployment(workspace: Workspace) -> None:
     """Build a deployment bundle and write it to a local directory."""
     workspace.init_domain("hr")
     manifest = workspace.build_bundle("hr", metadata={"channel": "staging"})
-    target = Path("/tmp/cedar-intent-example/dist")
+    target = Path("/tmp/cedrus-example/dist")
     workspace.write_bundle(manifest, target)
     print(
         "deployment ->",

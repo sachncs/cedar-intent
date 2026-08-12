@@ -28,8 +28,8 @@ jobs:
           python -c "
           import re, sys
           tag = '${{ github.ref_name }}'.lstrip('v')
-          sys.path.insert(0, 'cedar_intent')
-          from cedar_intent import __version__ as pkg_version
+          sys.path.insert(0, 'cedrus')
+          from cedrus import __version__ as pkg_version
           if pkg_version != tag:
               print(f'tag {tag} does not match package version {pkg_version}', file=sys.stderr)
               sys.exit(1)
@@ -37,7 +37,7 @@ jobs:
       - name: Install package
         run: pip install -e ".[test]"
       - name: Run pytest with coverage
-        run: pytest --cov=cedar_intent --cov-fail-under=88
+        run: pytest --cov=cedrus --cov-fail-under=88
 
   publish:
     name: Build, sign, and publish to PyPI

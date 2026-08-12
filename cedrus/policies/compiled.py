@@ -8,7 +8,7 @@ includes it in subsequent verification, test, and deployment runs.
 
 Compiled policies are immutable. To produce a new version, build a
 :class:`DraftPolicy` from the same requirement and run the apply
-pipeline again; cedar-intent does not currently version policies
+pipeline again; cedrus does not currently version policies
 internally.
 """
 

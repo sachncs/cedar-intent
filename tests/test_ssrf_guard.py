@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from cedar_intent.deployment import DeploymentError, SSRFGuard
+from cedrus.deployment import DeploymentError, SSRFGuard
 
 
 def _fake_addrinfo_returning(ip: str) -> Any:

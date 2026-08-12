@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cedar_intent import CedarSchema, ValidationError, validate_cedar
+from cedrus import CedarSchema, ValidationError, validate_cedar
 
 VALID_POLICY = (
     'permit (principal == PhotoFlash::User::"alice", '

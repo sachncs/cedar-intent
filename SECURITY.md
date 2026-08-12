@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-`cedar-intent` follows semantic versioning. Security updates are
+`cedrus` follows semantic versioning. Security updates are
 provided for the latest minor release and the previous minor release.
 
 | Version | Supported          |
@@ -32,7 +32,7 @@ anonymous.
 
 ## Threat model
 
-`cedar-intent` is a developer tool that turns English requirements into
+`cedrus` is a developer tool that turns English requirements into
 Cedar policies. Its threat model covers:
 
 - **LLM prompt injection** — adversarial inputs in requirements or
@@ -46,7 +46,7 @@ Cedar policies. Its threat model covers:
   the validator. The defense is Cedar's own schema validation plus
   the workspace's deployment history: deployments are bound to a
   SHA-256 hash of the compiled bundle.
-- **Workspace tampering** — direct modification of `.cedar-intent/store.db`.
+- **Workspace tampering** — direct modification of `.cedrus/store.db`.
   Defenses include content hashing at deployment time and explicit
   recommendation to review every PR through Git before merging.
 - **Bundle substitution** — an attacker replaces a deployed bundle
@@ -84,7 +84,7 @@ Cedar policies. Its threat model covers:
   The 0.6.0 verifier parses via the cedarpy AST and emits a
   `malformed-policy` finding when cedarpy rejects the input.
 
-`cedar-intent` is **not** a runtime authorization engine. It does not
+`cedrus` is **not** a runtime authorization engine. It does not
 evaluate authorization requests itself; applications embed the Cedar
 policy engine for that. Concerns about runtime request evaluation,
 policy evaluation performance, or authorization service availability
@@ -97,7 +97,7 @@ belong to the deployed Cedar engine, not to this tool.
   with their hashes for traceability.
 - Pin the LLM model and provider in your workspace configuration.
   Untrusted model responses can introduce subtle mistakes.
-- Run `cedar-intent verify --strict --domain <name>` in CI to fail
+- Run `cedrus verify --strict --domain <name>` in CI to fail
   builds when verification flags warnings.
 - Store the workspace on an encrypted filesystem when policies
   describe sensitive data access.

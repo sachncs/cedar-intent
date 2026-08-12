@@ -1,6 +1,6 @@
 # Examples
 
-This directory contains example cedar-intent workspaces and Python API
+This directory contains example cedrus workspaces and Python API
 recipes.
 
 ## Workspaces
@@ -19,23 +19,23 @@ recipes.
 
 ```bash
 cd photoflash
-cedar-intent init --path .
-cedar-intent domain add hr
-cedar-intent requirement add hr/requirements/HR-042.md --domain hr
-cedar-intent policy generate HR-042 \
+cedrus init --path .
+cedrus domain add hr
+cedrus requirement add hr/requirements/HR-042.md --domain hr
+cedrus policy generate HR-042 \
     --domain hr \
     --principal specific --principal-type User --entity-id alice \
     --action named --action-name viewPhoto \
     --resource is_type --resource-type Photo \
     --offline
-cedar-intent policy apply HR-042 \
+cedrus policy apply HR-042 \
     --domain hr \
     --principal specific --principal-type User --entity-id alice \
     --action named --action-name viewPhoto \
     --resource is_type --resource-type Photo \
     --no-scenarios
-cedar-intent --json verify --domain hr
-cedar-intent deploy bundle --domain hr --output ./dist/hr
+cedrus --json verify --domain hr
+cedrus deploy bundle --domain hr --output ./dist/hr
 ```
 
 The compiled policy lands in `./dist/hr/bundle.cedar`.

@@ -1,4 +1,4 @@
-# cedar-intent
+# cedrus
 
 [![CI](https://img.shields.io/badge/CI-passing-brightgreen)](.github/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
@@ -8,7 +8,7 @@
 Compile organizational authorization intent into validated, deployable
 [Cedar](https://www.cedarpolicy.com) policies.
 
-`cedar-intent` is a Python library and CLI that turns natural-language
+`cedrus` is a Python library and CLI that turns natural-language
 authorization requirements into typed policy drafts, validates them
 against a Cedar schema, runs authorization scenarios through the Cedar
 engine, performs static verification, and exports the result as a
@@ -16,12 +16,12 @@ deployment bundle for applications that embed Cedar.
 
 The LLM proposes. Cedar validates. Humans approve. Git remembers.
 
-## Why cedar-intent
+## Why cedrus
 
 Authorization policies are the most safety-critical code most teams
 write, yet they are typically authored by hand from English requirements,
 reviewed by humans in pull requests, and deployed by ad-hoc shell
-scripts. `cedar-intent` makes that loop auditable:
+scripts. `cedrus` makes that loop auditable:
 
 - Requirements live as Markdown with stable identifiers, in a Git-tracked
   workspace.
@@ -38,18 +38,18 @@ scripts. `cedar-intent` makes that loop auditable:
 ## Installation
 
 ```bash
-pip install cedar-intent
+pip install cedrus
 ```
 
-This installs the library and the `cedar-intent` console script. The
+This installs the library and the `cedrus` console script. The
 runtime dependencies are `cedarpy` (the official Python binding to the
 Cedar policy engine) and `litellm` (the LLM provider abstraction).
 
 For local development:
 
 ```bash
-git clone https://github.com/sachin/cedar-intent.git
-cd cedar-intent
+git clone https://github.com/sachin/cedrus.git
+cd cedrus
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[test]"
@@ -61,16 +61,16 @@ pip install -e ".[test]"
 
 ```bash
 mkdir acme && cd acme
-cedar-intent init --path .
+cedrus init --path .
 ```
 
-This creates a `.cedar-intent/store.db` SQLite database inside the
+This creates a `.cedrus/store.db` SQLite database inside the
 workspace.
 
 ### 2. Declare a domain
 
 ```bash
-cedar-intent domain add hr
+cedrus domain add hr
 ```
 
 This creates a `hr/` directory with an empty schema, a `requirements/`
@@ -120,13 +120,13 @@ Only the album owner can view private photos.
 Register the requirement:
 
 ```bash
-cedar-intent requirement add hr/requirements/HR-042.md --domain hr
+cedrus requirement add hr/requirements/HR-042.md --domain hr
 ```
 
 ### 5. Generate a draft policy
 
 ```bash
-cedar-intent policy generate HR-042 \
+cedrus policy generate HR-042 \
     --domain hr \
     --principal specific \
     --principal-type User \
@@ -147,13 +147,13 @@ To use an LLM instead, set:
 ```bash
 export CEDAR_INTENT_ONLINE=1
 export CEDAR_INTENT_MODEL="openai/gpt-4o"
-cedar-intent policy generate HR-042 --domain hr ...
+cedrus policy generate HR-042 --domain hr ...
 ```
 
 ### 6. Apply the draft
 
 ```bash
-cedar-intent policy apply HR-042 \
+cedrus policy apply HR-042 \
     --domain hr \
     --principal specific \
     --principal-type User \
@@ -171,26 +171,26 @@ policy, and records it in the deployment history.
 ### 7. Verify and deploy
 
 ```bash
-cedar-intent verify --domain hr
-cedar-intent deploy bundle --domain hr --output dist/hr
-cedar-intent deploy push --domain hr --target http://policy-service/deploy
+cedrus verify --domain hr
+cedrus deploy bundle --domain hr --output dist/hr
+cedrus deploy push --domain hr --target http://policy-service/deploy
 ```
 
 The CLI emits JSON output with `--json` for CI consumption:
 
 ```bash
-cedar-intent --json check
-cedar-intent --json verify --domain hr --strict
+cedrus --json check
+cedrus --json verify --domain hr --strict
 ```
 
 ## Workspace layout
 
 A workspace is a directory holding one or more domains plus a
-hidden `.cedar-intent/` folder with the SQLite store.
+hidden `.cedrus/` folder with the SQLite store.
 
 ```text
 acme/
-├── .cedar-intent/
+├── .cedrus/
 │   └── store.db
 └── hr/
     ├── schema.json
@@ -256,7 +256,7 @@ pytest
 Run the tests with coverage:
 
 ```bash
-pytest --cov=cedar_intent --cov-report=term-missing
+pytest --cov=cedrus --cov-report=term-missing
 ```
 
 Lint and type-check:
@@ -276,11 +276,11 @@ and [SECURITY.md](SECURITY.md) for how to report vulnerabilities.
 
 We follow [Semantic Versioning](https://semver.org/). The current
 release is tracked in [CHANGELOG.md](CHANGELOG.md) and exposed as
-`cedar_intent.__version__`.
+`cedrus.__version__`.
 
 ## License
 
-cedar-intent is released under the Apache License, Version 2.0. See
+cedrus is released under the Apache License, Version 2.0. See
 [LICENSE](LICENSE) for the full text. The [NOTICE](NOTICE) file
 credits the upstream Cedar language project and key dependencies.
 
@@ -291,4 +291,4 @@ credits the upstream Cedar language project and key dependencies.
 - The [cedarpy](https://github.com/k9securityio/cedar-py) Python
   bindings that bridge Python and the Rust Cedar engine.
 - [LiteLLM](https://github.com/BerriAI/litellm) for the provider
-  abstraction that lets cedar-intent work with any LLM backend.
+  abstraction that lets cedrus work with any LLM backend.

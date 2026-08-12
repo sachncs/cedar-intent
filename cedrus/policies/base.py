@@ -46,7 +46,7 @@ from ..validation import ValidationReport, validate_cedar
 
 @dataclass(frozen=True, slots=True)
 class Policy(ABC):
-    """Abstract base for every policy object in cedar-intent.
+    """Abstract base for every policy object in cedrus.
 
     Attributes:
         id: Policy identifier.

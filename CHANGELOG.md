@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [0.7.0] - Unreleased
 
 ### Changed
-- **Rename**: The package is renamed from `cedar_intent` to `cedrus`.
+- **Rename**: The package is renamed from `cedrus` to `cedrus`.
   All classes are renamed to single-word nouns; all methods are
   single-word verbs; all enum discriminators live as class-level
   constants on the owning class.
@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   string-based Workspace API.
 
 ### Removed (breaking)
-- `cedar_intent` import path is gone; use `cedrus`.
+- `cedrus` import path is gone; use `cedrus`.
 - Multi-word class names (`PolicyIntent`, `BundleExporter`, etc.) are
   gone; use `Intent`, `Bundler`, etc.
 - Free functions (`validate_cedar`, `compile_intent`, etc.) are gone;
@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [0.6.0] - Unreleased
 
 ### Added
-- `cedar-intent migrate` CLI subcommand (`--apply`, `--check`,
+- `cedrus migrate` CLI subcommand (`--apply`, `--check`,
   default) for upgrading pre-0.6.0 workspaces. Pre-0.6.0 databases
   refuse to open until the migration has run; the CLI provides the
   documented recovery path.
@@ -67,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   pipeline; publish job gates on a passing test matrix on the tag.
 
 ### Changed
-- Version is sourced from `cedar_intent.__version__` at build time
+- Version is sourced from `cedrus.__version__` at build time
   via `[tool.setuptools.dynamic]`, eliminating drift between the
   package and `pyproject.toml`.
 - `DeploymentClient` uses `httpx` with a custom transport that pins
@@ -139,7 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   ``deploy``, ``list_deployments``, ``verify_domain``.
 
 ### Changed
-- Replaced `<your-org>` placeholders with `sachin/cedar-intent` across
+- Replaced `<your-org>` placeholders with `sachin/cedrus` across
   `README.md`, `CHANGELOG.md`, and `CONTRIBUTING.md`.
 - Tightened exception handling in ``LiteLLMGenerator.generate`` to
   catch only ``openai.APIError`` and ``TimeoutError`` instead of
@@ -201,7 +201,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `run.sh`.
 - `examples/api_examples.py` runnable Python snippets exercising the
   public API end to end.
-- `.cedar-intent/` and `.cedar-intent/*` entries in `.gitignore`.
+- `.cedrus/` and `.cedrus/*` entries in `.gitignore`.
 
 ## [0.4.0] - 2026-06-01
 
@@ -210,7 +210,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   generator, SQLite-backed workspace, and CLI for end-to-end
   requirement-to-Cedar drafting.
 
-[Unreleased]: https://github.com/sachin/cedar-intent/compare/v0.6.0...HEAD
-[0.6.0]: https://github.com/sachin/cedar-intent/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/sachin/cedar-intent/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/sachin/cedar-intent/releases/tag/v0.4.0
+[Unreleased]: https://github.com/sachin/cedrus/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/sachin/cedrus/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/sachin/cedrus/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/sachin/cedrus/releases/tag/v0.4.0

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from cedar_intent import (
+from cedrus import (
     ActionScope,
     BundleExporter,
     CompiledPolicy,

@@ -1,6 +1,6 @@
-# Contributing to cedar-intent
+# Contributing to cedrus
 
-Thank you for your interest in improving `cedar-intent`. This document
+Thank you for your interest in improving `cedrus`. This document
 covers the workflow for proposing changes, the local development setup,
 and the quality gates every contribution must pass.
 
@@ -27,8 +27,8 @@ of opening a public issue.
 ## Development setup
 
 ```bash
-git clone https://github.com/sachin/cedar-intent.git
-cd cedar-intent
+git clone https://github.com/sachin/cedrus.git
+cd cedrus
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[test]"
@@ -46,7 +46,7 @@ pip install -e ".[test]"
    ```bash
    ruff check .
    mypy
-   pytest --cov=cedar_intent --cov-report=term-missing
+   pytest --cov=cedrus --cov-report=term-missing
    ```
 
    Coverage must stay above 88%. The full suite must pass on every
@@ -91,7 +91,7 @@ mood ("Add generator module", not "Added"). The body explains the
 
 ## Release process
 
-1. Bump `__version__` in `cedar_intent/__init__.py` and the version in
+1. Bump `__version__` in `cedrus/__init__.py` and the version in
    `pyproject.toml`.
 2. Update `CHANGELOG.md` with the release notes.
 3. Tag the release: `git tag -s vX.Y.Z`.
@@ -112,9 +112,9 @@ checklist expands to include the listed concerns.
 
 | File | Review checklist |
 |------|-------------------|
-| `cedar_intent/deployment.py` | DNS pinning closes SSRF rebind window; no body bytes in errors; redirects disabled by default; idempotency key recorded; retries bounded; symlink targets refused; atomic writes use fsync. |
-| `cedar_intent/verification.py` | Structured AST parser (cedarpy) replaces regex; malformed policies emit `malformed-policy` finding; condition signatures normalized via canonical JSON. |
-| `cedar_intent/generator/litellm.py` | User content fenced in `<<<...>>>` delimiters; system prompt explicitly forbids instructions inside markers. |
-| `cedar_intent/workspace.py` | `intent_from_draft` returns None or raises WorkspaceError on corrupt stored JSON; never synthesizes a permissive `permit(any/any/any)` fallback. `find_action_namespace` raises on ambiguous action names. |
-| `cedar_intent/storage/sqlite.py` | `column_exists` validates table against allow-list; transactions wrap multi-statement writes; `check_same_thread=False` paired with RLock; WAL + busy_timeout PRAGMAs. |
-| `cedar_intent/cli.py` | Top-level catch wraps non-CedarIntentError exceptions in JSON envelope; `parse_headers` rejects CR/LF and reserved names; `validate_identifier` rejects path-traversal-shaped inputs. |
+| `cedrus/deployment.py` | DNS pinning closes SSRF rebind window; no body bytes in errors; redirects disabled by default; idempotency key recorded; retries bounded; symlink targets refused; atomic writes use fsync. |
+| `cedrus/verification.py` | Structured AST parser (cedarpy) replaces regex; malformed policies emit `malformed-policy` finding; condition signatures normalized via canonical JSON. |
+| `cedrus/generator/litellm.py` | User content fenced in `<<<...>>>` delimiters; system prompt explicitly forbids instructions inside markers. |
+| `cedrus/workspace.py` | `intent_from_draft` returns None or raises WorkspaceError on corrupt stored JSON; never synthesizes a permissive `permit(any/any/any)` fallback. `find_action_namespace` raises on ambiguous action names. |
+| `cedrus/storage/sqlite.py` | `column_exists` validates table against allow-list; transactions wrap multi-statement writes; `check_same_thread=False` paired with RLock; WAL + busy_timeout PRAGMAs. |
+| `cedrus/cli.py` | Top-level catch wraps non-CedarIntentError exceptions in JSON envelope; `parse_headers` rejects CR/LF and reserved names; `validate_identifier` rejects path-traversal-shaped inputs. |

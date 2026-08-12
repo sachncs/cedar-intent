@@ -3,7 +3,7 @@
 A :class:`Generator` turns an authorization intent request into a
 :class:`DraftProposal`. The Protocol is intentionally minimal: any
 object that implements ``generate`` qualifies, which keeps the rest of
-cedar-intent independent of LiteLLM.
+cedrus independent of LiteLLM.
 
 Contract
 --------
@@ -15,7 +15,7 @@ Every generator must:
    and the existing policy intents the generator should be aware of.
 2. Return a :class:`GenerationResult` carrying:
    - a :class:`DraftProposal` whose ``intent`` is a typed
-     :class:`~cedar_intent.compiler.PolicyIntent`,
+     :class:`~cedrus.compiler.PolicyIntent`,
    - the model identifier that produced the proposal (so the workspace
      can record provenance),
    - optional request-id and token-usage metadata.

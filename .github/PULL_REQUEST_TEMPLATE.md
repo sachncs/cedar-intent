@@ -1,6 +1,6 @@
 ---
 name: Pull request
-about: Submit a change to cedar-intent
+about: Submit a change to cedrus
 title: ''
 labels: ''
 assignees: ''

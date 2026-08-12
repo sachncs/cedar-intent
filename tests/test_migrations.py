@@ -6,7 +6,7 @@ action_scope_json, no draft intent/scope JSON) and exercise:
 - detect_legacy_rows counts the legacy rows
 - migrate_legacy_rows populates the new columns
 - SqliteRepository.__post_init__ refuses to open a legacy database
-- cedar-intent migrate CLI exits with the right code in each mode
+- cedrus migrate CLI exits with the right code in each mode
 """
 
 from __future__ import annotations
@@ -20,9 +20,9 @@ from pathlib import Path
 
 import pytest
 
-from cedar_intent import Workspace
-from cedar_intent.errors import StorageError
-from cedar_intent.migrations import detect_legacy_rows, migrate_legacy_rows
+from cedrus import Workspace
+from cedrus.errors import StorageError
+from cedrus.migrations import detect_legacy_rows, migrate_legacy_rows
 
 
 @pytest.fixture
@@ -91,7 +91,7 @@ def test_sqlite_repository_refuses_to_open_legacy_db(
     workspace_root = tmp_path / "acme"
     workspace_root.mkdir()
     Workspace.create(workspace_root)
-    db = workspace_root / ".cedar-intent" / "store.db"
+    db = workspace_root / ".cedrus" / "store.db"
     now = datetime.now(UTC).isoformat()
     with sqlite3.connect(db) as connection:
         # Insert a row without action_scope_json so the post-migration
@@ -132,10 +132,10 @@ def test_migrate_legacy_rows_populates_columns(legacy_workspace: Workspace) -> N
 def test_migrate_cli_default_reports_count(
     legacy_workspace: Workspace, tmp_path: Path
 ) -> None:
-    """``cedar-intent migrate`` prints the pending count and exits 0."""
+    """``cedrus migrate`` prints the pending count and exits 0."""
     workspace_root = legacy_workspace.root
     result = subprocess.run(
-        [sys.executable, "-m", "cedar_intent", "--workspace", str(workspace_root), "migrate"],
+        [sys.executable, "-m", "cedrus", "--workspace", str(workspace_root), "migrate"],
         capture_output=True,
         text=True,
         check=False,
@@ -147,12 +147,12 @@ def test_migrate_cli_default_reports_count(
 def test_migrate_cli_check_returns_nonzero_on_legacy(
     legacy_workspace: Workspace,
 ) -> None:
-    """``cedar-intent migrate --check`` exits 1 when legacy rows exist."""
+    """``cedrus migrate --check`` exits 1 when legacy rows exist."""
     result = subprocess.run(
         [
             sys.executable,
             "-m",
-            "cedar_intent",
+            "cedrus",
             "--workspace",
             str(legacy_workspace.root),
             "migrate",
@@ -174,7 +174,7 @@ def test_migrate_cli_check_returns_zero_after_apply(
         [
             sys.executable,
             "-m",
-            "cedar_intent",
+            "cedrus",
             "--workspace",
             str(workspace_root),
             "migrate",
@@ -189,7 +189,7 @@ def test_migrate_cli_check_returns_zero_after_apply(
         [
             sys.executable,
             "-m",
-            "cedar_intent",
+            "cedrus",
             "--workspace",
             str(workspace_root),
             "migrate",
@@ -208,7 +208,7 @@ def test_migrate_cli_json_shape(legacy_workspace: Workspace) -> None:
         [
             sys.executable,
             "-m",
-            "cedar_intent",
+            "cedrus",
             "--json",
             "--workspace",
             str(legacy_workspace.root),

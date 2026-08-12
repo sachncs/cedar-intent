@@ -1,7 +1,7 @@
-# cedar-intent → cedrus: 0.7.0 full rebuild plan
+# cedrus → cedrus: 0.7.0 full rebuild plan
 
 This document enumerates **254 atomic commits** that together rename the
-package from `cedar_intent` to `cedrus`, enforce single-word naming,
+package from `cedrus` to `cedrus`, enforce single-word naming,
 build a polymorphic OOP architecture, and replace every string/dict
 boundary with a typed object.
 
@@ -62,10 +62,10 @@ coverage.
 
 | # | Commit | Files | Acceptance |
 |---|--------|-------|------------|
-| 1 | `chore(release): introduce 0.7.0 with full rebuild` | `CHANGELOG.md`, `cedar_intent/__init__.py` | CHANGELOG has `[0.7.0] - Unreleased` section; `__version__ = "0.7.0"` |
-| 2 | `chore(build): rename pyproject.toml distribution cedar-intent → cedrus` | `pyproject.toml` | `name = "cedrus"`; `[project.scripts] cedrus = "cedrus.cli:main"`; `[tool.setuptools.dynamic] version = {attr = "cedrus.__version__"}`; `[tool.setuptools.packages]` lists `cedrus.*`; `[tool.setuptools.package-data] cedrus = ["py.typed"]` |
-| 3 | `chore(rename): move package directory cedar_intent → cedrus` | `cedar_intent/` → `cedrus/` (git mv) | `cedrus/` exists; `cedar_intent/` does not |
-| 4 | `chore(rename): replace internal imports cedar_intent → cedrus` | all `.py` files in `cedrus/`, `tests/`, `examples/` | Zero references to `cedar_intent` (string or symbol) remain in `.py` files; `python -c "import cedrus"` succeeds |
+| 1 | `chore(release): introduce 0.7.0 with full rebuild` | `CHANGELOG.md`, `cedrus/__init__.py` | CHANGELOG has `[0.7.0] - Unreleased` section; `__version__ = "0.7.0"` |
+| 2 | `chore(build): rename pyproject.toml distribution cedrus → cedrus` | `pyproject.toml` | `name = "cedrus"`; `[project.scripts] cedrus = "cedrus.cli:main"`; `[tool.setuptools.dynamic] version = {attr = "cedrus.__version__"}`; `[tool.setuptools.packages]` lists `cedrus.*`; `[tool.setuptools.package-data] cedrus = ["py.typed"]` |
+| 3 | `chore(rename): move package directory cedrus → cedrus` | `cedrus/` → `cedrus/` (git mv) | `cedrus/` exists; `cedrus/` does not |
+| 4 | `chore(rename): replace internal imports cedrus → cedrus` | all `.py` files in `cedrus/`, `tests/`, `examples/` | Zero references to `cedrus` (string or symbol) remain in `.py` files; `python -c "import cedrus"` succeeds |
 
 ---
 
@@ -502,7 +502,7 @@ Each commit introduces one method on one data class.
 |---|--------|------------|
 | 254 | `chore(rename): update test imports and class references` | All test files reference `cedrus.*` |
 | 255 | `chore(rename): update example/api_examples.py to cedrus namespace` | |
-| 256 | `chore(rename): update .github/workflows to cedrus binary name` | `cedrus` binary replaces `cedar-intent` |
+| 256 | `chore(rename): update .github/workflows to cedrus binary name` | `cedrus` binary replaces `cedrus` |
 | 257 | `chore(rename): update docs/*.md to use new class and module names` | README, architecture.md, cli.md, python-api.md, deployment.md, verification.md |
 | 258 | `chore(rename): update issue and PR templates to cedrus branding` | .github/ISSUE_TEMPLATE/*.md, PULL_REQUEST_TEMPLATE.md |
 | 259 | `chore(rename): update CHANGELOG.md with the rename` | New `[0.7.0]` section populated |
@@ -522,7 +522,7 @@ After every commit:
 - `pytest tests/` must pass (existing 299 tests + new ones as added)
 - `ruff check .` must be clean
 - `mypy --strict` must be clean
-- No `cedar_intent` strings in `.py` files (after Phase A)
+- No `cedrus` strings in `.py` files (after Phase A)
 - No `_x` leading-underscore symbols (after Phase L)
 - Every public method is single-word verb (after Phase K)
 

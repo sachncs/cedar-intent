@@ -2,7 +2,7 @@
 
 A :class:`ExistingPolicy` represents a Cedar policy that was loaded
 from disk rather than drafted by a generator. Examples include
-policies committed to a repository before cedar-intent was adopted,
+policies committed to a repository before cedrus was adopted,
 policies imported from another authorization tool, or pre-existing
 policies that ship with an application.
 

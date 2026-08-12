@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from cedar_intent import ActionScope, ConditionClause, PrincipalScope, ResourceScope
-from cedar_intent.errors import ScopeError
+from cedrus import ActionScope, ConditionClause, PrincipalScope, ResourceScope
+from cedrus.errors import ScopeError
 
 
 def test_principal_any_passes() -> None:

@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from cedar_intent import CedarSchema
-from cedar_intent.errors import ValidationError
+from cedrus import CedarSchema
+from cedrus.errors import ValidationError
 
 
 def test_schema_from_mapping_exposes_types_and_actions() -> None:

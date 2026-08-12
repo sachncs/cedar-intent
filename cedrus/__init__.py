@@ -1,4 +1,4 @@
-"""cedar-intent public API.
+"""cedrus public API.
 
 The package exposes a typed, OOP-first surface for compiling
 organizational authorization intent into validated, deployable
@@ -10,23 +10,23 @@ Architecture at a glance
 
 The pipeline flows:
 
-* :class:`~cedar_intent.requirements.Requirement` - Markdown with
+* :class:`~cedrus.requirements.Requirement` - Markdown with
   stable id and domain.
-* :class:`~cedar_intent.policies.DraftPolicy` - scope-typed draft.
-* :class:`~cedar_intent.generator.Generator` produces a typed
-  :class:`~cedar_intent.compiler.PolicyIntent`; two implementations
-  ship (:class:`~cedar_intent.generator.OfflineGenerator` and
-  :class:`~cedar_intent.generator.LiteLLMGenerator`).
-* :func:`~cedar_intent.compiler.compile_intent` renders the intent to
+* :class:`~cedrus.policies.DraftPolicy` - scope-typed draft.
+* :class:`~cedrus.generator.Generator` produces a typed
+  :class:`~cedrus.compiler.PolicyIntent`; two implementations
+  ship (:class:`~cedrus.generator.OfflineGenerator` and
+  :class:`~cedrus.generator.LiteLLMGenerator`).
+* :func:`~cedrus.compiler.compile_intent` renders the intent to
   Cedar source text.
-* :func:`~cedar_intent.validation.validate_cedar` runs Cedar parse and
+* :func:`~cedrus.validation.validate_cedar` runs Cedar parse and
   schema validation.
-* :func:`~cedar_intent.scenarios.run_scenarios` exercises the policy
+* :func:`~cedrus.scenarios.run_scenarios` exercises the policy
   against authorization scenarios.
-* :func:`~cedar_intent.verification.verify_policies` runs static
+* :func:`~cedrus.verification.verify_policies` runs static
   checks for shadowing, redundancy, and coverage.
-* :class:`~cedar_intent.deployment.BundleExporter` and
-  :class:`~cedar_intent.deployment.DeploymentClient` produce and push
+* :class:`~cedrus.deployment.BundleExporter` and
+  :class:`~cedrus.deployment.DeploymentClient` produce and push
   the deployment bundle.
 
 The :class:`Workspace` class orchestrates every stage and is the
@@ -35,11 +35,11 @@ recommended entry point for Python users.
 Schema migration
 ----------------
 
-Starting with cedar-intent 0.6.0, every stored :class:`StoredDraft`
+Starting with cedrus 0.6.0, every stored :class:`StoredDraft`
 carries a JSON-serialized typed intent and per-slot scope JSON, and
 every :class:`StoredPolicy` carries the action scope JSON.
-:mod:`cedar_intent.migrations` exposes detection and migration
-helpers; the CLI surfaces them as ``cedar-intent migrate``. SQLite
+:mod:`cedrus.migrations` exposes detection and migration
+helpers; the CLI surfaces them as ``cedrus migrate``. SQLite
 workspaces created before this version refuse to open until the
 migration has run, so the new fields are guaranteed to be populated.
 """

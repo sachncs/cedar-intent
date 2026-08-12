@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from cedar_intent import (
+from cedrus import (
     ActionScope,
     DraftPolicy,
     ExistingPolicy,
@@ -65,7 +65,7 @@ def test_workspace_open_missing_root_raises(tmp_path: Path) -> None:
 def test_workspace_create_initialises_storage(tmp_path: Path) -> None:
     workspace = Workspace.create(tmp_path)
     try:
-        assert (tmp_path / ".cedar-intent" / "store.db").exists()
+        assert (tmp_path / ".cedrus" / "store.db").exists()
     finally:
         workspace.close()
 
@@ -131,7 +131,7 @@ def test_workspace_remove_requirement(tmp_path: Path) -> None:
         )
         workspace.add_requirement_file(path)
         workspace.remove_requirement("HR-042")
-        from cedar_intent import StorageError
+        from cedrus import StorageError
 
         with pytest.raises(StorageError):
             workspace.get_requirement("HR-042")

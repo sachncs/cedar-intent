@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 import pytest
 
-from cedar_intent import cli
-from cedar_intent.cli import (
+from cedrus import cli
+from cedrus.cli import (
     MODEL_ENV_VAR,
     ONLINE_ENV_VAR,
     build_action,
@@ -103,7 +103,7 @@ def test_main_init_returns_zero(tmp_path: Path) -> None:
     target = tmp_path / "ws"
     exit_code = main(["--workspace", str(tmp_path), "init", "--path", str(target)])
     assert exit_code == 0
-    assert (target / ".cedar-intent" / "store.db").exists()
+    assert (target / ".cedrus" / "store.db").exists()
 
 
 def test_main_init_serializes_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -122,7 +122,7 @@ def test_main_init_missing_target_returns_one(
     exit_code = main(["--workspace", str(tmp_path), "init", "--path", ""])
     assert exit_code == 1
     captured = capsys.readouterr()
-    assert "cedar-intent: error" in captured.err
+    assert "cedrus: error" in captured.err
 
 
 def test_main_domain_add(tmp_path: Path) -> None:
@@ -280,7 +280,7 @@ def test_main_policy_generate_online_with_model(
         usage={"total_tokens": 5},
         choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(response_payload)))],
     )
-    with patch("cedar_intent.generator.litellm.litellm.completion", return_value=fake_response):
+    with patch("cedrus.generator.litellm.litellm.completion", return_value=fake_response):
         exit_code = main(
             [
                 "--workspace",
@@ -439,7 +439,7 @@ def test_main_unknown_command(tmp_path: Path) -> None:
 
 
 def test_run_command_unknown_command_raises(tmp_path: Path) -> None:
-    from cedar_intent import ConfigError
+    from cedrus import ConfigError
 
     args = cli.build_parser().parse_args(
         ["--workspace", str(tmp_path), "init", "--path", str(tmp_path)]

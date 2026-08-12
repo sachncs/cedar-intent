@@ -1,13 +1,13 @@
 # Python API reference
 
-`cedar-intent` exposes a typed Python API for every workflow. The
-public surface lives in the `cedar_intent` namespace; you should never
+`cedrus` exposes a typed Python API for every workflow. The
+public surface lives in the `cedrus` namespace; you should never
 need to import from submodules directly.
 
 ## Top-level entry points
 
 ```python
-from cedar_intent import (
+from cedrus import (
     Workspace,
     CedarSchema,
     Requirement,
@@ -37,7 +37,7 @@ from cedar_intent import (
 
 ```python
 from pathlib import Path
-from cedar_intent import Workspace
+from cedrus import Workspace
 
 # On-disk workspace (SQLite-backed).
 workspace = Workspace.open(Path("./acme"))
@@ -53,7 +53,7 @@ workspace = Workspace.in_memory(Path("./ephemeral"))
 
 ```python
 from pathlib import Path
-from cedar_intent import Workspace, Requirement
+from cedrus import Workspace, Requirement
 
 workspace = Workspace.open(Path("./acme"))
 
@@ -80,7 +80,7 @@ Only the album owner can view private photos.
 ## Building policies with the OOP API
 
 ```python
-from cedar_intent import (
+from cedrus import (
     DraftPolicy,
     PrincipalScope,
     ActionScope,
@@ -134,7 +134,7 @@ identifier, and token usage.
 ## Compiling a typed intent
 
 ```python
-from cedar_intent import (
+from cedrus import (
     PolicyIntent,
     compile_intent,
 )
@@ -176,7 +176,7 @@ policy is not persisted.
 ## Running scenarios standalone
 
 ```python
-from cedar_intent import Scenario, run_scenarios
+from cedrus import Scenario, run_scenarios
 
 scenarios = [
     Scenario(
@@ -196,7 +196,7 @@ print(report.passed)
 ## Verification
 
 ```python
-from cedar_intent import verify_policies
+from cedrus import verify_policies
 
 policies = workspace.list_compiled_policies("hr")
 requirement_ids = [r.id for r in workspace.list_requirements("hr")]
@@ -218,7 +218,7 @@ for finding in report.findings:
 ## Deployment
 
 ```python
-from cedar_intent import BundleExporter, DeploymentClient
+from cedrus import BundleExporter, DeploymentClient
 
 # Build a deployment manifest.
 manifest = workspace.build_bundle("hr", metadata={"channel": "production"})
@@ -244,18 +244,18 @@ print(record.response)
 ## Storage
 
 ```python
-from cedar_intent import InMemoryRepository, SqliteRepository
+from cedrus import InMemoryRepository, SqliteRepository
 from pathlib import Path
 
 # In-memory repository (tests).
 repo = InMemoryRepository()
 
 # SQLite-backed repository.
-repo = SqliteRepository(Path("./.cedar-intent/store.db"))
+repo = SqliteRepository(Path("./.cedrus/store.db"))
 repo.close()
 
 # Both implement the Repository Protocol.
-from cedar_intent import Repository
+from cedrus import Repository
 
 assert isinstance(repo, Repository)
 ```
@@ -268,7 +268,7 @@ deployments.
 All exceptions inherit from `CedarIntentError`:
 
 ```python
-from cedar_intent import (
+from cedrus import (
     CedarIntentError,
     ConfigError,
     RequirementError,
@@ -293,9 +293,9 @@ except CedarIntentError as error:
 ## Versioning
 
 ```python
-import cedar_intent
+import cedrus
 
-print(cedar_intent.__version__)
+print(cedrus.__version__)
 ```
 
 ## Deployment: SSRF guard and pinned transport
@@ -307,7 +307,7 @@ guard and the request cannot redirect the deployment into a private
 network. Redirects are disabled by default.
 
 ```python
-from cedar_intent import DeploymentClient, DeploymentError
+from cedrus import DeploymentClient, DeploymentError
 
 client = DeploymentClient(
     timeout=30,

@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from cedar_intent import Requirement, load_requirement, load_requirements, render_requirement
-from cedar_intent.errors import RequirementError
-from cedar_intent.requirements import (
+from cedrus import Requirement, load_requirement, load_requirements, render_requirement
+from cedrus.errors import RequirementError
+from cedrus.requirements import (
     derive_domain,
     parse_front_matter,
     slugify,

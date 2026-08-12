@@ -2,7 +2,7 @@
 
 ## Our pledge
 
-We pledge to make participation in `cedar-intent` a welcoming and
+We pledge to make participation in `cedrus` a welcoming and
 respectful experience for everyone, regardless of age, body size,
 disability, ethnicity, sex characteristics, gender identity and
 expression, level of experience, education, socio-economic status,

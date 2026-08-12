@@ -1,6 +1,6 @@
 # Deployment guide
 
-`cedar-intent` produces a self-contained deployment bundle and pushes
+`cedrus` produces a self-contained deployment bundle and pushes
 it to either a local directory or an HTTP endpoint. This page explains
 the bundle format, the integrity model, and the operator workflow.
 
@@ -40,7 +40,7 @@ bundle and confirm the hash matches:
 
 ```python
 from pathlib import Path
-from cedar_intent import BundleExporter
+from cedrus import BundleExporter
 
 exporter = BundleExporter()
 manifest = exporter.read_directory(Path("/opt/policies/hr"))
@@ -56,7 +56,7 @@ Use a local directory target when the embedded Cedar engine reads
 policies from a shared filesystem or a mounted volume.
 
 ```bash
-cedar-intent deploy push --domain hr --target /opt/policies/hr
+cedrus deploy push --domain hr --target /opt/policies/hr
 ```
 
 The CLI creates the directory if it does not exist. Existing files in
@@ -81,13 +81,13 @@ Idempotency-Key: 7c4e…
 ```
 
 The service should respond with `2xx` for accepted deployments and a
-non-2xx for rejected ones. cedar-intent treats `2xx` as success and
+non-2xx for rejected ones. cedrus treats `2xx` as success and
 any other status as a `DeploymentError`.
 
 Custom headers can be added per deployment:
 
 ```bash
-cedar-intent deploy push \
+cedrus deploy push \
     --domain hr \
     --target https://policy-service.example.com/deploy \
     --header "Authorization: Bearer ..." \
@@ -135,7 +135,7 @@ Every successful deployment appends a row to the `deployments` table
 in SQLite. Use the CLI or the API to inspect the history:
 
 ```bash
-cedar-intent --json deploy history --domain hr
+cedrus --json deploy history --domain hr
 ```
 
 ```python
@@ -150,9 +150,9 @@ deployed bundle and redeploy an earlier bundle from your backup.
 ## Recommended workflow
 
 1. Develop the policy set in a workspace under version control.
-2. Run `cedar-intent check`, `cedar-intent verify --strict`, and
-   `cedar-intent policy apply` in CI before merging.
-3. After merge, run `cedar-intent deploy push` from a tagged release
+2. Run `cedrus check`, `cedrus verify --strict`, and
+   `cedrus policy apply` in CI before merging.
+3. After merge, run `cedrus deploy push` from a tagged release
    commit.
 4. Verify the deployment via `deploy history` and by reading back
    the manifest hash.
@@ -164,7 +164,7 @@ deployed bundle and redeploy an earlier bundle from your backup.
 | Local directory unwritable               | `DeploymentError` raised before any write.     |
 | HTTP endpoint returns non-2xx            | `DeploymentError` raised; response body captured. |
 | HTTP timeout                             | `DeploymentError` raised; underlying `TimeoutError` chained. |
-| Cedar schema mismatch (downstream)       | Surfaced by the consuming service; cedar-intent does not catch this. |
+| Cedar schema mismatch (downstream)       | Surfaced by the consuming service; cedrus does not catch this. |
 
 Always inspect the captured response body in `DeploymentRecord.response`
 when investigating HTTP deployment failures.

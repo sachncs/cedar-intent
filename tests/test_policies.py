@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cedar_intent import (
+from cedrus import (
     ActionScope,
     CedarSchema,
     CompiledPolicy,
@@ -23,8 +23,8 @@ from cedar_intent import (
     Requirement,
     ResourceScope,
 )
-from cedar_intent.compiler import PolicyIntent
-from cedar_intent.generator import DraftProposal
+from cedrus.compiler import PolicyIntent
+from cedrus.generator import DraftProposal
 
 
 def make_requirement(identifier: str = "HR-042") -> Requirement:

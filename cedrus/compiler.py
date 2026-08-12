@@ -2,7 +2,7 @@
 
 A :class:`PolicyIntent` is the typed intermediate representation produced
 by a generator. The compiler walks the intent and emits Cedar source
-text without any LLM involvement. It is the only code in cedar-intent
+text without any LLM involvement. It is the only code in cedrus
 that constructs Cedar syntax.
 
 The output is deterministic: calling :func:`compile_intent` twice with

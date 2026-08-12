@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from cedar_intent import cli
-from cedar_intent.cli import (
+from cedrus import cli
+from cedrus.cli import (
     main,
     parse_headers,
 )
@@ -285,7 +285,7 @@ def test_parse_headers_handles_multiple_entries() -> None:
 
 
 def test_parse_headers_rejects_invalid_entries() -> None:
-    from cedar_intent import ConfigError
+    from cedrus import ConfigError
 
     with pytest.raises(ConfigError):
         parse_headers(["not a header"])

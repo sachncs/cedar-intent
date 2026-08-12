@@ -1,6 +1,6 @@
 # Verification semantics
 
-`cedar-intent` ships a static verification pass that runs on the
+`cedrus` ships a static verification pass that runs on the
 compiled policy set for a domain. The checks are conservative
 approximations of the formal properties the upstream Cedar symbolic
 compiler would prove. This page documents exactly what each check
@@ -97,7 +97,7 @@ the current policy set.
 
 ## Recommendations
 
-- Run `cedar-intent verify --strict` in CI to fail builds on warnings.
+- Run `cedrus verify --strict` in CI to fail builds on warnings.
 - Resolve findings before deploying: warnings indicate either
   real bugs or stale inputs that should be cleaned up.
 - Treat the report as a starting point. The static checks cover the

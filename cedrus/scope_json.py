@@ -1,4 +1,4 @@
-"""JSON serialization for :mod:`cedar_intent.scopes` objects.
+"""JSON serialization for :mod:`cedrus.scopes` objects.
 
 Both the storage layer and the verification layer need to round-trip
 typed scope objects to and from JSON. This module centralizes the
@@ -19,7 +19,7 @@ Round-trip rules
   attributes.
 * The legacy short-form ``when``/``unless`` keys (carrying a list of
   body strings) are still accepted on read for backward compatibility
-  with rows stored by earlier cedar-intent versions, but every
+  with rows stored by earlier cedrus versions, but every
   writer now uses the canonical ``when_clauses``/``unless_clauses``
   shape.
 
@@ -225,7 +225,7 @@ def intent_from_dict(data: dict[str, Any] | None) -> PolicyIntent | None:
 
     Accepts both the canonical ``when_clauses``/``unless_clauses``
     shape and the legacy short form (``when``/``unless`` carrying a
-    list of body strings) so rows stored by earlier cedar-intent
+    list of body strings) so rows stored by earlier cedrus
     versions still load.
 
     Args:

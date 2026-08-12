@@ -1,4 +1,4 @@
-"""Command-line interface for cedar-intent.
+"""Command-line interface for cedrus.
 
 Each subcommand is implemented as a small handler that operates on a
 :class:`Workspace`. The :func:`main` entrypoint returns an exit code so
@@ -14,17 +14,17 @@ work to a workspace method, and returns a JSON-serializable dict for
 humanize/JSON output.
 
 The CLI is the documented entry-point handler for every
-:class:`~cedar_intent.errors.CedarIntentError` raised below; the
+:class:`~cedrus.errors.CedarIntentError` raised below; the
 top-level :func:`main` translates any of those into a single-line
-``cedar-intent: error: ...`` message on stderr and an exit code of 1.
+``cedrus: error: ...`` message on stderr and an exit code of 1.
 
 Online and offline modes
 ------------------------
 
 Generator selection is controlled by three pieces, in this order:
 
-1. ``--offline`` forces :class:`~cedar_intent.generator.OfflineGenerator`.
-2. ``--model <provider/name>`` forces :class:`~cedar_intent.generator.LiteLLMGenerator`.
+1. ``--offline`` forces :class:`~cedrus.generator.OfflineGenerator`.
+2. ``--model <provider/name>`` forces :class:`~cedrus.generator.LiteLLMGenerator`.
 3. Otherwise the environment variables ``CEDAR_INTENT_ONLINE`` and
    ``CEDAR_INTENT_MODEL`` decide. ``CEDAR_INTENT_ONLINE=1`` enables the
    LiteLLM generator when ``CEDAR_INTENT_MODEL`` is set; otherwise the
@@ -90,7 +90,7 @@ def _positive_int(value: str) -> int:
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level argument parser with every subcommand wired in."""
     parser = argparse.ArgumentParser(
-        prog="cedar-intent",
+        prog="cedrus",
         description="Compile organizational authorization intent into Cedar.",
     )
     parser.add_argument(
@@ -243,7 +243,7 @@ def add_verify_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
 def add_migrate_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the ``migrate`` subcommand.
 
-    ``cedar-intent migrate`` upgrades workspaces created before 0.6.0
+    ``cedrus migrate`` upgrades workspaces created before 0.6.0
     so they carry the per-slot scope JSON columns and the typed intent
     metadata. The default invocation reports the legacy row count;
     ``--apply`` performs the migration; ``--check`` exits non-zero when
@@ -317,7 +317,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     Returns:
         Process exit code: ``0`` on success, ``1`` when any
-        :class:`~cedar_intent.errors.CedarIntentError` is raised,
+        :class:`~cedrus.errors.CedarIntentError` is raised,
         ``2`` for argparse usage errors or unexpected exceptions.
     """
     parser = build_parser()
@@ -354,7 +354,7 @@ def _report_error(args: Namespace, error: CedarIntentError) -> int:
         }
         print(json.dumps(envelope, indent=2, default=str), file=sys.stderr)
     else:
-        print(f"cedar-intent: error: {message}", file=sys.stderr)
+        print(f"cedrus: error: {message}", file=sys.stderr)
     return 1
 
 
@@ -371,7 +371,7 @@ def _report_unexpected_error(args: Namespace, error: BaseException) -> int:
         print(json.dumps(envelope, indent=2, default=str), file=sys.stderr)
     else:
         print(
-            f"cedar-intent: internal error: {type(error).__name__}: {error}",
+            f"cedrus: internal error: {type(error).__name__}: {error}",
             file=sys.stderr,
         )
         print(
@@ -455,7 +455,7 @@ def command_domain(workspace: Workspace, args: Namespace) -> Any:
             {
                 str(path.parent.name)
                 for path in workspace.root.glob("*/schema.json")
-                if path.parent.name not in {".cedar-intent", ""}
+                if path.parent.name not in {".cedrus", ""}
             }
         )
         return {"domains": domains}
@@ -544,7 +544,7 @@ def command_check(workspace: Workspace, args: Namespace) -> Any:
             {
                 path.parent.name
                 for path in workspace.root.glob("*/schema.json")
-                if path.parent.name not in {".cedar-intent", ""}
+                if path.parent.name not in {".cedrus", ""}
             }
         )
     results: dict[str, Any] = {}
