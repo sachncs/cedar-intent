@@ -53,7 +53,8 @@ from typing import Any, cast
 from cedrus.case import Case, Run, Suite
 from cedrus.compile import Intent
 from cedrus.deploy import Bundler, Client, Manifest, Record
-from cedrus.error import Fault, Space
+from cedrus.error import Fault, Require, Store
+from cedrus.error import Space as SpaceError
 from cedrus.generate import Context, Generator, Result
 from cedrus.need import Need
 from cedrus.policies import Compiled, Draft, Existing, Kind
@@ -100,7 +101,7 @@ class Space:
         """
         root = Path(path).resolve()
         if not root.exists() or not root.is_dir():
-            raise Space(f"workspace root not found: {root}")
+            raise SpaceError(f"workspace root not found: {root}")
         storage_path = root / ".cedrus" / DEFAULT_STORAGE_FILENAME
         repository = Backend(storage_path)
         return cls(root=root, repository=repository, storage_path=storage_path)
@@ -235,7 +236,7 @@ class Space:
             return []
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, list):
-            raise Space(f"scenarios file must contain a list: {path}")
+            raise SpaceError(f"scenarios file must contain a list: {path}")
         return Case.load(data)
 
     def add_requirement_file(self, path: Path) -> Need:
@@ -324,7 +325,7 @@ class Space:
         stems_seen: set[str] = set()
         for path in sorted(directory.glob("*.cedar")):
             if path.stem in stems_seen:
-                raise Space(
+                raise SpaceError(
                     f"duplicate policy file stem {path.stem!r} in {directory}: "
                     "rename one of the files before importing"
                 )
@@ -366,6 +367,7 @@ class Space:
             intent = policy.to_intent()
         except Fault:
             intent = None
+        policy_action = getattr(policy, "action", None)
         stored = Stored(
             id=policy.id,
             domain=policy.requirement.domain,
@@ -375,7 +377,7 @@ class Space:
             status=policy.kind(),
             created_at=policy.created_at,
             updated_at=datetime.now(UTC),
-            action=policy.action,
+            action=policy_action,
         )
         stored.upsert(self.repository)
 
@@ -462,7 +464,7 @@ class Space:
             # can happen in practice.
             try:
                 requirement = Need.get(self.repository, requirement_id)
-            except Store:
+            except (Store, Require):
                 continue
             result.append(
                 Compiled(
@@ -640,7 +642,7 @@ class Space:
             report = self.verify_domain(domain, schema)
             if not report.passed:
                 issues = ", ".join(finding.message for finding in report.findings)
-                raise Space(
+                raise SpaceError(
                     f"verifier rejected domain {domain!r}: {issues}; "
                     "pass skip_verify=True to bypass"
                 )
@@ -690,11 +692,11 @@ class Space:
                 unresolved items, or any scenario fails.
         """
         if draft.cedar is None or not draft.cedar.strip():
-            raise Space(
+            raise SpaceError(
                 f"draft {draft.id} has no Cedar source; call generate before apply"
             )
         if draft.unresolved:
-            raise Space(
+            raise SpaceError(
                 f"draft {draft.id} has unresolved items: {', '.join(draft.unresolved)}"
             )
         report = Vreport.from_cedar([draft.cedar], schema)
@@ -709,7 +711,7 @@ class Space:
                     for result in test_report.results
                     if not result.passed
                 ]
-                raise Space(
+                raise SpaceError(
                     f"draft {draft.id} failed scenarios: "
                     + ", ".join(failure.scenario.name for failure in failures)
                 )
@@ -774,7 +776,7 @@ class Space:
         try:
             stored_draft = DraftStored.latest(self.repository, placeholder.id)
         except Store as error:
-            raise Space(
+            raise SpaceError(
                 f"no draft exists for requirement {requirement_id!r}; "
                 "run 'cedrus policy generate' first"
             ) from error
@@ -811,7 +813,7 @@ class Space:
             if policy.cedar
         ]
         if not policies:
-            raise Space(f"no compiled policies for domain {domain!r}")
+            raise SpaceError(f"no compiled policies for domain {domain!r}")
         return Vreport.from_cedar(policies, schema)
 
     def test_domain(
@@ -836,14 +838,14 @@ class Space:
         """
         scenarios = self.load_scenarios(domain)
         if not scenarios:
-            raise Space(f"no scenarios for domain {domain!r}")
+            raise SpaceError(f"no scenarios for domain {domain!r}")
         policies = [
             policy.cedar
             for policy in self.list_compiled_policies(domain)
             if policy.cedar
         ]
         if not policies:
-            raise Space(f"no compiled policies for domain {domain!r}")
+            raise SpaceError(f"no compiled policies for domain {domain!r}")
         effective_schema = schema or Schema.from_mapping(
             {"": {"entityTypes": {}, "actions": {}}}
         )
@@ -871,7 +873,7 @@ class Space:
         """
         policies = self.list_compiled_policies(domain)
         if not policies:
-            raise Space(f"no policies to export for domain {domain!r}")
+            raise SpaceError(f"no policies to export for domain {domain!r}")
         output.parent.mkdir(parents=True, exist_ok=True)
         bundle = "\n\n".join(policy.cedar for policy in policies if policy.cedar)
         output.write_text(bundle + "\n", encoding="utf-8")
@@ -1037,7 +1039,7 @@ class Space:
             if identifier and identifier in actions:
                 matches.append(namespace)
         if len(matches) > 1 and not action.namespace:
-            raise Space(
+            raise SpaceError(
                 f"action {identifier!r} is declared in multiple namespaces "
                 f"({', '.join(matches)}); set action.namespace explicitly to "
                 "disambiguate"
@@ -1111,12 +1113,12 @@ class Space:
         try:
             intent = Intent.from_dict(payload)
         except (KeyError, TypeError, ValueError) as error:
-            raise Space(
+            raise SpaceError(
                 f"stored draft {draft.id!r} has corrupt intent ({error}); "
                 "re-run `cedrus policy generate` for the requirement"
             ) from error
         if intent is None:
-            raise Space(
+            raise SpaceError(
                 f"stored draft {draft.id!r} has empty intent JSON; "
                 "re-run `cedrus policy generate` for the requirement"
             )
