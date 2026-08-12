@@ -5,14 +5,21 @@ language description to a stable identifier. Identifiers are read from
 YAML-style front matter at the top of a Markdown file, with the
 filename stem as a fallback.
 
-Why a custom loader instead of PyYAML
-------------------------------------
+Why a custom loader instead of PyYAML:
+    Front matter is intentionally limited to ``key: value`` pairs. This
+    keeps the parser dependency-free, makes Markdown requirements diff-
+    friendly in pull requests, and forces the schema to be flat. Nested
+    structures (lists, maps) belong in the Cedar schema, not in the
+    requirement front matter.
 
-Front matter is intentionally limited to ``key: value`` pairs. This
-keeps the parser dependency-free, makes Markdown requirements diff-
-friendly in pull requests, and forces the schema to be flat. Nested
-structures (lists, maps) belong in the Cedar schema, not in the
-requirement front matter.
+Attributes:
+    Need: An atomic authorization requirement loaded from disk.
+    parse_front_matter: Split a Markdown document into front matter + body.
+    slugify: Build a deterministic kebab-case slug from ``text``.
+    derive_domain: Derive the domain name from a requirement file path.
+    load_requirement: Load a single requirement from a Markdown file.
+    load_requirements: Load every ``*.md`` requirement in a directory.
+    render_requirement: Render a :class:`Need` back to Markdown form.
 """
 
 from __future__ import annotations
@@ -23,10 +30,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .error import Require
+from cedrus.error import Require
 
 if TYPE_CHECKING:
-    from .store.sqlite import Backend
+    from cedrus.store.sqlite import Backend
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,11 +41,14 @@ class Need:
     """An atomic authorization requirement loaded from disk.
 
     Attributes:
-        id: Stable identifier for the requirement (for example ``HR-042``).
+        id: Stable identifier for the requirement (for example
+            ``HR-042``).
         text: Full body text of the requirement.
         domain: Logical authorization domain the requirement belongs to.
-        source_path: Path of the Markdown file the requirement was loaded from.
-        created_at: Timestamp at which the requirement object was constructed.
+        source_path: Path of the Markdown file the requirement was
+            loaded from.
+        created_at: Timestamp at which the requirement object was
+            constructed.
     """
 
     id: str
@@ -48,6 +58,11 @@ class Need:
     created_at: datetime
 
     def __post_init__(self) -> None:
+        """Validate the typed fields.
+
+        Raises:
+            Require: When ``id``, ``text`` or ``domain`` is empty.
+        """
         if not self.id or not self.id.strip():
             raise Require("requirement id must be non-empty")
         if not self.text or not self.text.strip():
@@ -155,17 +170,17 @@ class Need:
 def parse_front_matter(source: str) -> tuple[Mapping[str, str], str]:
     """Split a Markdown document into ``(front_matter, body)``.
 
-    The front matter is a YAML-like block delimited by ``---`` lines at the
-    top of the file. Only ``key: value`` pairs are supported; nested YAML and
-    JSON blocks are not interpreted.
+    The front matter is a YAML-like block delimited by ``---`` lines at
+    the top of the file. Only ``key: value`` pairs are supported;
+    nested YAML and JSON blocks are not interpreted.
 
     Args:
         source: Full Markdown document text.
 
     Returns:
-        A tuple of ``(front_matter, body)``. ``front_matter`` is a mapping of
-        string keys to string values; ``body`` is the trimmed remainder of
-        the document after the front matter.
+        A tuple of ``(front_matter, body)``. ``front_matter`` is a
+        mapping of string keys to string values; ``body`` is the
+        trimmed remainder of the document after the front matter.
     """
     body = source.strip()
     if not body.startswith("---"):
@@ -196,10 +211,18 @@ def parse_front_matter(source: str) -> tuple[Mapping[str, str], str]:
 def slugify(text: str) -> str:
     """Return a deterministic kebab-case slug for ``text``.
 
-    Non-alphanumeric characters are replaced with single hyphens and the
-    result is stripped of leading and trailing hyphens.
+    Non-alphanumeric characters are replaced with single hyphens and
+    the result is stripped of leading and trailing hyphens.
+
+    Args:
+        text: Arbitrary text to slugify.
+
+    Returns:
+        A kebab-case slug string.
     """
-    lowered = "".join(character.lower() if character.isalnum() else "-" for character in text)
+    lowered = "".join(
+        character.lower() if character.isalnum() else "-" for character in text
+    )
     while "--" in lowered:
         lowered = lowered.replace("--", "-")
     return lowered.strip("-")
@@ -208,9 +231,17 @@ def slugify(text: str) -> str:
 def derive_domain(source_path: Path, workspace_root: Path) -> str:
     """Return the domain for a requirement file based on its directory layout.
 
-    The first directory below ``workspace_root`` is treated as the domain
-    name. Files placed directly under the workspace root fall back to
-    ``"default"``.
+    The first directory below ``workspace_root`` is treated as the
+    domain name. Files placed directly under the workspace root fall
+    back to ``"default"``.
+
+    Args:
+        source_path: Path to the requirement file.
+        workspace_root: Workspace root path.
+
+    Returns:
+        The domain name, or ``"default"`` when the file is at the
+        workspace root.
     """
     relative = source_path.resolve().relative_to(workspace_root.resolve())
     parts = relative.parts
@@ -224,8 +255,8 @@ def load_requirement(path: Path, workspace_root: Path | None = None) -> Need:
 
     Args:
         path: Path to the Markdown file.
-        workspace_root: Optional workspace root used to derive the domain
-            when the front matter does not provide one.
+        workspace_root: Optional workspace root used to derive the
+            domain when the front matter does not provide one.
 
     Returns:
         The parsed :class:`Need`.
@@ -254,7 +285,9 @@ def load_requirement(path: Path, workspace_root: Path | None = None) -> Need:
     )
 
 
-def load_requirements(directory: Path, workspace_root: Path | None = None) -> list[Need]:
+def load_requirements(
+    directory: Path, workspace_root: Path | None = None
+) -> list[Need]:
     """Load every ``*.md`` requirement in ``directory`` non-recursively.
 
     Args:
@@ -277,7 +310,15 @@ def load_requirements(directory: Path, workspace_root: Path | None = None) -> li
 
 
 def render_requirement(requirement: Need) -> str:
-    """Render a requirement back to Markdown form with front matter."""
+    """Render a requirement back to Markdown form with front matter.
+
+    Args:
+        requirement: The :class:`Need` to render.
+
+    Returns:
+        A Markdown document string with ``id`` / ``domain`` front
+        matter and the requirement body.
+    """
     return (
         "---\n"
         f"id: {requirement.id}\n"

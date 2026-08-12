@@ -71,7 +71,7 @@ from .store import (
     Repository,
     Stored,
 )
-from .validate import Vreport, validate_cedar
+from .validate import Vreport
 from .verify import Report, verify_policies
 
 DEFAULT_STORAGE_FILENAME = "store.db"
@@ -699,7 +699,7 @@ class Workspace:
             raise Space(
                 f"draft {draft.id} has unresolved items: {', '.join(draft.unresolved)}"
             )
-        report = validate_cedar([draft.cedar], schema)
+        report = Vreport.from_cedar([draft.cedar], schema)
         if scenarios:
             scenario_list: list[Case] = list(scenarios)
             test_report = draft.test(
@@ -818,7 +818,7 @@ class Workspace:
         ]
         if not policies:
             raise Space(f"no compiled policies for domain {domain!r}")
-        return validate_cedar(policies, schema)
+        return Vreport.from_cedar(policies, schema)
 
     def test_domain(
         self,

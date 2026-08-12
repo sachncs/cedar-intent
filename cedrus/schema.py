@@ -2,18 +2,21 @@
 
 The schema is the authority over entity types, actions, attributes,
 and context. It is required both at compile time (to validate a
-proposal) and at runtime (for authorization decisions). cedrus
-wraps ``cedarpy`` to provide a single, typed entrypoint.
+proposal) and at runtime (for authorization decisions). cedrus wraps
+``cedarpy`` to provide a single, typed entrypoint.
 
-Why an eager handle
-------------------
+Why an eager handle:
+    The cedarpy :class:`Schema` handle is constructed eagerly in
+    ``__post_init__`` so any malformed schema raises :class:`Validate`
+    the moment the :class:`Schema` is built, rather than at the first
+    downstream call. This makes schema errors surface at the CLI or
+    API boundary and prevents a half-constructed :class:`Schema` from
+    leaking into the rest of the pipeline.
 
-The cedarpy :class:`Schema` handle is constructed eagerly in
-``__post_init__`` so any malformed schema raises :class:`Validate`
-the moment the :class:`Schema` is built, rather than at the
-first downstream call. This makes schema errors surface at the CLI or
-API boundary and prevents a half-constructed :class:`Schema`
-from leaking into the rest of the pipeline.
+Attributes:
+    Schema: Parsed Cedar JSON schema (eagerly built cedarpy handle).
+    qualify: Join ``namespace`` and ``name`` with the Cedar namespace
+        separator.
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ from typing import Any
 
 from cedarpy import Schema as _CedarSchema
 
-from .error import Validate
+from cedrus.error import Validate
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,20 +38,29 @@ class Schema:
 
     Attributes:
         source: The original JSON schema as a mapping.
-        handle: The parsed ``cedarpy.Schema`` ready for validation calls.
+        handle: The parsed ``cedarpy.Schema`` ready for validation
+            calls.
     """
 
     source: Mapping[str, Any]
     handle: _CedarSchema = field(init=False)
 
     def __post_init__(self) -> None:
+        """Build the eager cedarpy handle from ``self.source``.
+
+        Raises:
+            Validate: When ``self.source`` is not a non-empty mapping
+                or cedarpy cannot parse the schema.
+        """
         if not isinstance(self.source, Mapping) or not self.source:
             raise Validate(("schema must be a non-empty Cedar JSON object",), "")
         try:
             object.__setattr__(
                 self,
                 "handle",
-                _CedarSchema.from_json_str(json.dumps(dict(self.source), sort_keys=True)),
+                _CedarSchema.from_json_str(
+                    json.dumps(dict(self.source), sort_keys=True)
+                ),
             )
         except (TypeError, ValueError) as error:
             raise Validate((f"invalid Cedar JSON schema: {error}",), "") from error
@@ -58,7 +70,8 @@ class Schema:
         """Build a :class:`Schema` from a JSON-like mapping.
 
         Args:
-            mapping: Cedar JSON schema expressed as nested mappings and lists.
+            mapping: Cedar JSON schema expressed as nested mappings
+                and lists.
 
         Returns:
             A fully parsed :class:`Schema`.
@@ -87,13 +100,22 @@ class Schema:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as error:
-            raise Validate((f"schema file is not valid JSON: {error}",), "") from error
+            raise Validate(
+                (f"schema file is not valid JSON: {error}",), ""
+            ) from error
         if not isinstance(data, Mapping):
-            raise Validate((f"schema file must contain a JSON object: {path}",), "")
+            raise Validate(
+                (f"schema file must contain a JSON object: {path}",), ""
+            )
         return cls.from_mapping(data)
 
     def entity_type_names(self) -> set[str]:
-        """Return the set of fully qualified entity type names declared in the schema."""
+        """Return the set of fully qualified entity type names declared in the schema.
+
+        Returns:
+            Every ``<namespace>::<type_name>`` from the schema's
+            ``entityTypes`` blocks.
+        """
         names: set[str] = set()
         for namespace, declaration in self.source.items():
             if not isinstance(namespace, str) or not isinstance(declaration, Mapping):
@@ -109,8 +131,12 @@ class Schema:
     def action_names(self) -> set[tuple[str, str]]:
         """Return the set of ``(namespace, action_id)`` pairs declared in the schema.
 
-        Namespace and action identifier are returned as a tuple so the
-        verifier can distinguish ``hr::view`` from ``finance::view``.
+        Namespace and action identifier are returned as a tuple so
+        the verifier can distinguish ``hr::view`` from ``finance::view``.
+
+        Returns:
+            Every ``(namespace, action_id)`` pair from the schema's
+            ``actions`` blocks.
         """
         names: set[tuple[str, str]] = set()
         for namespace, declaration in self.source.items():
@@ -163,6 +189,10 @@ class Schema:
         Built once per call. The verifier uses this to expand
         ``action in Action::"group"`` into the group's member actions
         during coverage analysis.
+
+        Returns:
+            Nested mapping; an action with no ``members`` list is
+            omitted from its namespace.
         """
         result: dict[str, dict[str, tuple[str, ...]]] = {}
         for namespace, declaration in self.source.items():
@@ -182,7 +212,16 @@ class Schema:
         return result
 
     def namespace_of(self, type_name: str) -> str | None:
-        """Return the namespace prefix for a fully qualified type name."""
+        """Return the namespace prefix for a fully qualified type name.
+
+        Args:
+            type_name: Fully qualified Cedar type name (e.g.
+                ``hr::User``).
+
+        Returns:
+            The namespace prefix (``hr``), or ``None`` when the name
+            has no ``::`` separator.
+        """
         if "::" not in type_name:
             return None
         namespace, _, _ = type_name.partition("::")
@@ -196,8 +235,8 @@ class Schema:
 
         Returns:
             The qualified name when ``type_name`` matches exactly one
-            namespace in the schema, or the original value if it is already
-            qualified or does not match any namespace.
+            namespace in the schema, or the original value if it is
+            already qualified or does not match any namespace.
         """
         if type_name is None:
             return None
@@ -216,8 +255,17 @@ class Schema:
 
 
 def qualify(namespace: str, name: str) -> str:
-    """Join ``namespace`` and ``name`` with the Cedar namespace separator."""
+    """Join ``namespace`` and ``name`` with the Cedar namespace separator.
+
+    Args:
+        namespace: Namespace prefix (may be empty).
+        name: Local name.
+
+    Returns:
+        ``"<namespace>::<name>"`` when ``namespace`` is non-empty,
+        else just ``name``.
+    """
     return f"{namespace}::{name}" if namespace else name
 
 
-__all__ = ["Schema"]
+__all__ = ["Schema", "qualify"]

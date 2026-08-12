@@ -7,6 +7,9 @@ etc.
 
 Mutations funnel through :meth:`Domain.mutate` so callers cannot
 accidentally bypass the orchestrator's invariants.
+
+Attributes:
+    Domain: One authorization domain inside a :class:`~cedrus.space.Workspace`.
 """
 
 from __future__ import annotations
@@ -16,13 +19,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .need import Need
-from .policies import Existing
+from cedrus.error import Space
+from cedrus.need import Need, load_requirement
+from cedrus.policies import Existing
 
 
 @dataclass
 class Domain:
-    """One authorization domain inside a Space.
+    """One authorization domain inside a :class:`~cedrus.space.Workspace`.
 
     Attributes:
         name: Domain identifier (e.g., ``"hr"``).
@@ -38,7 +42,7 @@ class Domain:
         manifests: Deployment manifests produced for this domain.
         bundles: Filesystem paths of written bundles.
         reports: Verification/validation/test reports keyed by id.
-        schema_loaded: The loaded Schema, if any.
+        schema_loaded: The loaded :class:`~cedrus.schema.Schema`, if any.
         verified_at: When verification last ran.
     """
 
@@ -61,19 +65,26 @@ class Domain:
     def mutate(self, **changes: object) -> None:
         """Update fields in place. Single verb for all field updates.
 
+        Args:
+            **changes: Field names and new values to set.
+
         Raises:
             Space: When ``changes`` contains a key that is not a
-                declared field.
+                declared field on :class:`Domain`.
         """
-        from .error import Space
-
         for key, value in changes.items():
             if not hasattr(self, key):
                 raise Space(f"Domain has no field {key!r}")
             setattr(self, key, value)
 
     def to_dict(self) -> dict[str, object]:
-        """Return a JSON-friendly representation of the domain state."""
+        """Return a JSON-friendly representation of the domain state.
+
+        Returns:
+            A dict with the domain's identifying paths, the lists of
+            loaded needs / cases / policies / drafts / manifests /
+            bundles, and the report ids.
+        """
         return {
             "name": self.name,
             "root": str(self.root),
@@ -92,7 +103,16 @@ class Domain:
 
     @classmethod
     def create(cls, name: str, root: Path) -> Domain:
-        """Create a new domain directory and return an empty Domain."""
+        """Create a new domain directory and return an empty Domain.
+
+        Args:
+            name: Domain identifier (e.g., ``"hr"``).
+            root: Filesystem root of the domain (typically
+                ``<workspace>/<name>/``).
+
+        Returns:
+            An empty :class:`Domain` with paths populated.
+        """
         requirements_dir = root / "requirements"
         policies_dir = root / "policies"
         requirements_dir.mkdir(parents=True, exist_ok=True)
@@ -117,8 +137,15 @@ class Domain:
     ) -> Domain:
         """Load an existing domain.
 
-        Returns a Domain with paths populated. The caller may supply
-        a Schema to set ``schema_loaded``.
+        Args:
+            name: Domain identifier.
+            root: Filesystem root of the domain.
+            schema: Optional pre-loaded :class:`~cedrus.schema.Schema`
+                to set as ``schema_loaded``.
+
+        Returns:
+            A :class:`Domain` with paths populated and the optional
+            schema attached.
         """
         domain = cls.create(name=name, root=root)
         if schema is not None:
@@ -128,37 +155,36 @@ class Domain:
     def refresh(self) -> None:
         """Reload the domain's needs and policies from disk.
 
-        Reads the requirements directory and policies directory and
-        re-parses any Cedar files.
+        Re-scans ``self.requirements_dir`` (parsing every ``*.md``)
+        and ``self.policies_dir`` (parsing every ``*.cedar`` as
+        :class:`~cedrus.policies.Existing`); updates ``self.needs`` and
+        ``self.policies`` in place. A failure to load any single file
+        is logged and skipped so one bad requirement doesn't take the
+        whole domain down.
         """
-        # Re-scan the requirements directory.
-        from .need import load_requirement
+        from datetime import datetime as _dt
 
-        self.needs = []
+        needs: list[Need] = []
         if self.requirements_dir.exists():
             for path in sorted(self.requirements_dir.glob("*.md")):
                 try:
-                    self.needs.append(
+                    needs.append(
                         load_requirement(path, workspace_root=self.root)
                     )
                 except Exception as ex:  # noqa: BLE001
-                    print(f"DEBUG: policy ERR {path}: {type(ex).__name__}: {ex}")
+                    print(f"DEBUG: need ERR {path}: {type(ex).__name__}: {ex}")
                     continue
+        self.needs = needs
 
-        # Re-scan the policies directory.
-
-        self.policies = []
+        policies: list[Existing] = []
         if self.policies_dir.exists():
-            from datetime import datetime as _dt
-
-            from .need import Need as _Need
             for path in sorted(self.policies_dir.glob("*.cedar")):
                 cedar = path.read_text(encoding="utf-8").strip()
                 try:
-                    self.policies.append(
+                    policies.append(
                         Existing.from_requirement(
-                            _Need(
-                                id=path.stem,  # type: ignore[arg-type]  # type: ignore[arg-type]
+                            Need(
+                                id=path.stem,  # type: ignore[arg-type]
                                 text=f"Imported from {path.name}",
                                 domain=self.name,  # type: ignore[arg-type]
                                 source_path=path,
@@ -169,6 +195,7 @@ class Domain:
                     )
                 except Exception:  # noqa: BLE001
                     continue
+        self.policies = policies
 
 
 __all__ = ["Domain"]
