@@ -38,10 +38,10 @@ See Also:
     :mod:`cedrus.data.unresolved`: Typed wrapper for unresolved items.
 """
 
-from .persist import DraftStored, ReportStored, Stored
-from .transit import Context, Proposal, Result
-from .unresolved import Unresolved
-from .wire import (
+from cedrus.data.persist import DraftStored, ReportStored, Stored
+from cedrus.data.transit import Context, Proposal, Result
+from cedrus.data.unresolved import Unresolved
+from cedrus.data.wire import (
     Body,
     Headers,
     Metadata,
