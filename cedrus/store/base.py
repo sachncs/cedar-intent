@@ -9,11 +9,16 @@ Storage lifecycle:
     Every repository covers the same five tables:
 
     * ``requirements`` - one row per loaded :class:`~cedrus.need.Need`.
-    * ``policies`` - one row per compiled policy, with the typed intent
-      and action namespace stored as JSON.
+    * ``policies`` - one row per compiled policy, with the typed
+      :class:`~cedrus.compile.Intent` and the typed
+      :class:`~cedrus.scope.Action` scope.
     * ``drafts`` - the full history of generator proposals per policy,
-      including the proposal's typed intent and per-slot scope JSON.
-    * ``reports`` - the full history of validation and scenario reports.
+      including the typed intent and the three typed scopes
+      (:class:`~cedrus.scope.Principal`,
+      :class:`~cedrus.scope.Action`,
+      :class:`~cedrus.scope.Resource`).
+    * ``reports`` - the full history of validation and scenario reports,
+      with a typed :class:`~cedrus.data.Payload`.
     * ``deployments`` - the full audit log of bundle deployments.
 
     Drafts and reports reference policies by identifier string, which
@@ -31,9 +36,9 @@ Thread safety:
 
 Schema migration:
     Starting with cedrus 0.6.0, :class:`DraftStored` carries the
-    typed intent and per-slot scope JSON, and :class:`Stored` carries
-    the action namespace. Older databases created before this version
-    are upgraded on first open by
+    typed intent and per-slot scope objects, and :class:`Stored`
+    carries the typed action scope. Older databases created before
+    this version are upgraded on first open by
     :func:`cedrus.migrate.detect_legacy_rows` and
     :func:`cedrus.migrate.migrate_legacy_rows`, exposed via the
     ``cedrus migrate`` CLI subcommand. Until the migration runs,
@@ -55,7 +60,7 @@ See Also:
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
