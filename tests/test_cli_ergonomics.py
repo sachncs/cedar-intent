@@ -76,9 +76,9 @@ def test_cli_rejects_invalid_domain(tmp_path) -> None:
 
 def test_cli_rejects_negative_timeout(tmp_path) -> None:
     """--timeout -1 is rejected by argparse before any handler runs."""
-    from cedrus import Workspace
+    from cedrus import Space
 
-    workspace = Workspace.create(tmp_path / "acme")
+    workspace = Space.create(tmp_path / "acme")
     exit_code = main(
         [
             "--workspace",
@@ -97,9 +97,9 @@ def test_cli_rejects_negative_timeout(tmp_path) -> None:
 
 
 def test_cli_rejects_infinite_timeout(tmp_path) -> None:
-    from cedrus import Workspace
+    from cedrus import Space
 
-    workspace = Workspace.create(tmp_path / "acme")
+    workspace = Space.create(tmp_path / "acme")
     exit_code = main(
         [
             "--workspace",
