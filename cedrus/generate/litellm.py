@@ -198,12 +198,12 @@ class Llm:
 
     The instance owns both the LiteLLM configuration (``model``,
     ``timeout``, ``retries``, ``max_tokens``, ``fallbacks``) and the
-    polymorphic converters :meth:`build` and :meth:`format`. ``build``
-    is dispatched on ``kind`` and turns JSON-like data into a typed
-    ``Scope``, a tuple of :class:`Clause`, or a fully composed
-    :class:`Intent`. ``format`` is dispatched on the object's runtime
-    type and turns a ``Scope`` into JSON or an :class:`Intent` into a
-    one-line summary.
+    polymorphic converters :meth:`build` and :meth:`format`.
+    :meth:`build` is a thin dispatcher that delegates to the typed
+    objects' own parsers (:meth:`Clause.normalize`,
+    :meth:`Intent.parse`, :meth:`Scope.parse`). :meth:`format` is
+    dispatched on the object's runtime type and turns a ``Scope``
+    into JSON or an :class:`Intent` into a one-line summary.
 
     Attributes:
         model: LiteLLM model identifier (for example ``"openai/gpt-4o"``).
@@ -227,6 +227,7 @@ class Llm:
     fallbacks: Sequence[str] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
+        """Validate the LiteLLM configuration at construction time."""
         if not self.model or not self.model.strip():
             raise Generate("Llm requires a non-empty model name")
         if self.timeout <= 0 or self.max_tokens <= 0:
@@ -236,6 +237,13 @@ class Llm:
 
     def generate(self, context: Context) -> Result:
         """Call LiteLLM with the structured prompt and parse the response.
+
+        Orchestrates the four pipeline stages: prompt construction
+        (:meth:`__modify` on a fresh :class:`Prompt`), the LiteLLM
+        call (with error wrapping), response payload extraction
+        (:meth:`extract`), and typed proposal construction
+        (:meth:`build` for the intent plus :class:`Notes` and
+        :class:`Usage`).
 
         Args:
             context: Input bundle for this generation call (requirement,
