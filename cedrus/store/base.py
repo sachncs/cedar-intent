@@ -1,25 +1,31 @@
-"""Storage Protocol and shared data structures for the persistence layer.
+"""Storage Protocol, typed-object row dataclasses, and shared SQL helpers.
 
 The :class:`Repository` Protocol is the seam between cedrus and any
 backing store. Two implementations are shipped: :class:`Memory` for
-tests and ephemeral use, and :class:`Sqlite` for the default
+tests and ephemeral use, and :class:`Backend` for the default
 on-disk behaviour.
 
-Storage lifecycle:
-    Every repository covers the same five tables:
+All CRUD lives on the typed objects themselves (see
+:func:`Need.save` / :func:`Need.get` / :func:`Need.list`,
+:func:`Stored.upsert` / :func:`Stored.latest_draft` /
+:func:`Stored.list_drafts`, :func:`DraftStored.save` /
+:func:`DraftStored.update` / :func:`DraftStored.latest` /
+:func:`DraftStored.list`, :func:`ReportStored.save` /
+:func:`ReportStored.latest`, :func:`Record.save` /
+:func:`Record.list`); the backends expose only the SQL primitives
+those calls need.
 
-    * ``requirements`` - one row per loaded :class:`~cedrus.need.Need`.
-    * ``policies`` - one row per compiled policy, with the typed
-      :class:`~cedrus.compile.Intent` and the typed
-      :class:`~cedrus.scope.Action` scope.
-    * ``drafts`` - the full history of generator proposals per policy,
-      including the typed intent and the three typed scopes
-      (:class:`~cedrus.scope.Principal`,
-      :class:`~cedrus.scope.Action`,
-      :class:`~cedrus.scope.Resource`).
-    * ``reports`` - the full history of validation and scenario reports,
-      with a typed :class:`~cedrus.data.Payload`.
-    * ``deployments`` - the full audit log of bundle deployments.
+Schema:
+    The normalized schema (version 3) covers 12 tables:
+
+    * Top-level rows: ``requirements``, ``policies``, ``drafts``,
+      ``reports``, ``deployments``.
+    * First-class typed objects: ``principals``, ``actions``,
+      ``resources``, ``clauses``, ``intents``.
+    * Composition rows: ``clause_attributes``,
+      ``intent_when_clauses``, ``intent_unless_clauses``,
+      ``intent_notes``, ``draft_unresolved``, ``report_payload``,
+      ``deployment_responses``.
 
     Drafts and reports reference policies by identifier string, which
     allows them to survive policy deletion. The SQLite foreign key
@@ -34,17 +40,6 @@ Thread safety:
     on sqlite3's per-connection serialization, so callers should use a
     single repository instance per process or open one per thread.
 
-Schema migration:
-    Starting with cedrus 0.6.0, :class:`DraftStored` carries the
-    typed intent and per-slot scope objects, and :class:`Stored`
-    carries the typed action scope. Older databases created before
-    this version are upgraded on first open by
-    :func:`cedrus.migrate.detect_legacy_rows` and
-    :func:`cedrus.migrate.migrate_legacy_rows`, exposed via the
-    ``cedrus migrate`` CLI subcommand. Until the migration runs,
-    :class:`Sqlite` raises :class:`Store` on open so operators cannot
-    accidentally work with a half-migrated store.
-
 Attributes:
     Stored: Policy row stored in the repository.
     DraftStored: Draft proposal row stored in the repository.
@@ -54,8 +49,7 @@ Attributes:
 See Also:
     :mod:`cedrus.store.memory`: In-memory repository implementation.
     :mod:`cedrus.store.sqlite`: SQLite repository implementation.
-    :mod:`cedrus.data.persist`: The newer typed persistence rows.
-    :mod:`cedrus.migrate`: Migration helpers for pre-0.6 databases.
+    :mod:`cedrus.data.persist`: Newer typed persistence rows.
 """
 
 from __future__ import annotations
