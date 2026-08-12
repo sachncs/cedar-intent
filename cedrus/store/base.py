@@ -61,8 +61,10 @@ from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 from cedrus.compile import Intent
+from cedrus.data import Payload
 from cedrus.deploy import Record
 from cedrus.need import Need
+from cedrus.scope import Action, Principal, Resource
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,9 +83,9 @@ class Stored:
             ``"compiled"``).
         created_at: Timestamp at which the row was first inserted.
         updated_at: Timestamp of the most recent upsert.
-        action_scope_json: Optional JSON-serialized :class:`Action`
-            captured when the policy was compiled, used to keep the
-            action namespace authoritative across reloads.
+        action: :class:`Action` scope captured when the policy was
+            compiled, used to keep the action namespace authoritative
+            across reloads.
     """
 
     id: str
@@ -94,7 +96,7 @@ class Stored:
     status: str
     created_at: datetime
     updated_at: datetime
-    action_scope_json: str | None = None
+    action: Action | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,15 +111,10 @@ class DraftStored:
         unresolved: Items the generator could not safely resolve.
         cedar: Cedar source text produced by the generator.
         created_at: Timestamp at which the draft was recorded.
-        intent_json: JSON-serialized :class:`Intent` carried by the
-            generator proposal. Required for verification to reason
-            about the proposal without re-parsing.
-        principal_scope_json: JSON-serialized principal scope carried
-            by the proposal.
-        action_scope_json: JSON-serialized action scope carried by the
-            proposal.
-        resource_scope_json: JSON-serialized resource scope carried by
-            the proposal.
+        intent: :class:`Intent` carried by the generator proposal.
+        principal: :class:`Principal` scope carried by the proposal.
+        action: :class:`Action` scope carried by the proposal.
+        resource: :class:`Resource` scope carried by the proposal.
     """
 
     id: str
@@ -127,10 +124,10 @@ class DraftStored:
     unresolved: tuple[str, ...]
     cedar: str
     created_at: datetime
-    intent_json: str | None = None
-    principal_scope_json: str | None = None
-    action_scope_json: str | None = None
-    resource_scope_json: str | None = None
+    intent: Intent
+    principal: Principal
+    action: Action
+    resource: Resource
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,7 +138,8 @@ class ReportStored:
         policy_id: Identifier of the policy the report applies to.
         kind: Report kind (``"validation"`` or ``"test"``).
         passed: ``True`` when the report indicates success.
-        payload: Raw report payload as a dictionary.
+        payload: Typed report payload; defaults to an empty
+            :class:`Payload` when the report has no findings.
         created_at: Timestamp at which the report was recorded;
             ``None`` for legacy rows.
     """
@@ -149,7 +147,7 @@ class ReportStored:
     policy_id: str
     kind: str
     passed: bool
-    payload: dict[str, object] = field(default_factory=dict)
+    payload: Payload = field(default_factory=Payload)
     created_at: datetime | None = None
 
 
