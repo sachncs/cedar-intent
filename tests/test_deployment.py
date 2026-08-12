@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 from datetime import UTC, datetime
@@ -163,22 +164,8 @@ def test_deployment_client_local_record_id_default() -> None:
     assert record.bundle_hash == manifest.bundle_hash
 
 
-class _CaptureHandler(BaseHTTPRequestHandler):
-    received: list[bytes] = []
-    status_code = 200
-    response_body = b"ok"
-
-    def do_POST(self) -> None:  # noqa: N802 - stdlib API
-        length = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(length)
-        self.received.append(body)
-        self.send_response(self.status_code)
-        self.send_header("Content-Type", "text/plain")
-        self.end_headers()
-        self.wfile.write(self.response_body)
-
-    def log_message(self, *_args: object) -> None:
-        return
+class _BuildHandler:
+    """Factory for HTTP test handlers."""
 
 
 def _build_handler(received: list[bytes], status_code: int, response_body: bytes) -> type:
@@ -223,12 +210,16 @@ def test_deployment_client_http_push(tmp_path: Path) -> None:
     payload = json.loads(received[0].decode("utf-8"))
     assert payload["bundle_hash"] == manifest.bundle_hash
     assert record.response["status_code"] == "200"
-    assert record.response["body"] == "thanks"
+    expected_sha = hashlib.sha256(b"thanks").hexdigest()
+    assert record.response["body_sha256"] == expected_sha
+    assert "body" not in record.response
+    assert record.response["idempotency_key"]
+    assert record.response["retry_count"] == "0"
 
 
 def test_deployment_client_http_push_failure(tmp_path: Path) -> None:
     received: list[bytes] = []
-    handler_class = _build_handler(received, 500, b"nope")
+    handler_class = _build_handler(received, 500, b"super-secret-token-AKIA")
     server = HTTPServer(("127.0.0.1", 0), handler_class)
     thread = threading.Thread(target=server.serve_forever)
     thread.daemon = True
@@ -237,8 +228,10 @@ def test_deployment_client_http_push_failure(tmp_path: Path) -> None:
         url = f"http://127.0.0.1:{server.server_address[1]}/cedar"
         manifest = BundleExporter().build("hr", [make_policy("HR-001")])
         client = DeploymentClient(allow_private_targets=True, allow_loopback=True)
-        with pytest.raises(DeploymentError):
+        with pytest.raises(DeploymentError) as excinfo:
             client.deploy_http(manifest, url)
+        # Body must NEVER be embedded in error messages.
+        assert b"super-secret-token" not in str(excinfo.value).encode("utf-8")
         assert received
     finally:
         server.shutdown()

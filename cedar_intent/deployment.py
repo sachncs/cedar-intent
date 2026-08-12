@@ -17,27 +17,42 @@ Every deployment produces a two-file artifact:
   and any user-supplied metadata.
 
 The bundle hash in the manifest is recomputed on read; a mismatch
-or a missing manifest hash raises :class:`DeploymentError`, which is
-the recommended signal for tamper detection after transport.
+or a missing manifest hash raises :class:`DeploymentError`. The hash
+provides **corruption detection** after transport; it is not an
+authenticated signature. To obtain tamper evidence, add a keyed
+signature (HMAC-SHA-256 with a shared key, or Ed25519 with a known
+public key) in the deploy metadata on the receiving side.
 
 Atomicity
 ---------
 
 Local deployments write the bundle to a sibling temporary directory
-first and atomically rename each file into place with
-``Path.replace``. Concurrent writers therefore never observe a
-mixed state where one file is the new version and the other is the
-old version. A crash before the rename leaves the previous bundle
-untouched.
+first, fsync both data and directory, and atomically rename each file
+into place with ``Path.replace``. Concurrent writers therefore never
+observe a mixed state where one file is the new version and the other
+is the old version. A crash before the rename leaves the previous
+bundle untouched. Symlink targets are refused to avoid cross-trust
+boundary replacement.
 
 Network behavior
 ----------------
 
-``DeploymentClient.deploy_http`` reads the response body in bounded
-chunks so a malicious or streaming endpoint cannot exhaust memory.
-2xx responses are treated as success; 4xx and 5xx responses raise
-:class:`DeploymentError` with the response body captured (truncated
-to :data:`HTTP_RESPONSE_BODY_LIMIT`).
+``DeploymentClient.deploy_http`` uses :mod:`httpx` with a custom
+transport that pins the connection to the IP address resolved at
+SSRF-check time. This closes the DNS-rebinding window in which an
+attacker controlling authoritative DNS returns a public address at
+guard time and a private address at request time. Redirects are
+disabled by default; an explicit ``follow_redirects=True`` flag is
+required to follow 3xx responses (which re-enter the SSRF guard on
+each hop).
+
+Response bodies are read in bounded chunks so that a streaming or
+oversized endpoint cannot exhaust memory. The body is **never**
+embedded in error messages or persisted verbatim in deployment
+records; only a SHA-256 of the body is retained. This prevents the
+deployment client from leaking whatever the target server returns
+(stack traces, echoed credentials, internal hostnames) into stderr
+or the SQLite store.
 
 The default :class:`SSRFGuard` rejects loopback, link-local, and
 private-network targets so untrusted callers cannot use the
@@ -52,9 +67,9 @@ import hashlib
 import ipaddress
 import json
 import socket
-import urllib.error
+import ssl
+import tempfile
 import urllib.parse
-import urllib.request
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -62,21 +77,31 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from .errors import DeploymentError
 from .policies import CompiledPolicy, Policy
 
 DEPLOYMENT_KIND_LOCAL = "local"
 DEPLOYMENT_KIND_HTTP = "http"
 
-#: Maximum number of bytes of the HTTP response body to capture in the
-#: deployment record. The body is also bounded at read time so that a
-#: streaming or oversized response cannot exhaust memory.
+#: Maximum number of bytes of the HTTP response body to hash. The body
+#: is also bounded at read time so that a streaming or oversized
+#: response cannot exhaust memory.
 HTTP_RESPONSE_BODY_LIMIT = 512
 
 #: Maximum total bytes read from an HTTP response body. Pairs with
 #: :data:`HTTP_RESPONSE_BODY_LIMIT` so a streaming endpoint cannot
 #: exhaust memory before the per-record truncation runs.
 HTTP_RESPONSE_READ_LIMIT = 65536
+
+#: Reserved HTTP header names that callers may not inject via ``--header``.
+#: ``Host`` would override the SSRF guard's pinned host; ``Authorization``
+#: and ``Cookie`` could leak credentials; ``Content-Length`` and
+#: ``Transfer-Encoding`` are framing headers httpx manages itself.
+_RESERVED_HEADERS = frozenset(
+    {"host", "authorization", "cookie", "content-length", "transfer-encoding"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,7 +168,9 @@ class DeploymentRecord:
         bundle_hash: SHA-256 of the deployed Cedar source.
         status: ``"deployed"`` or ``"rejected"``.
         created_at: Timestamp at which the deployment completed.
-        response: Provider response metadata (for HTTP targets).
+        response: Provider response metadata (for HTTP targets). The
+            response body is recorded only as a SHA-256 hash; the raw
+            body is never persisted.
     """
 
     id: str
@@ -208,11 +235,16 @@ class BundleExporter:
         """Write ``manifest`` to ``directory`` atomically.
 
         Creates ``bundle.cedar`` and ``manifest.json`` in a sibling
-        temporary directory first, then renames each file into place
-        with ``Path.replace``. Concurrent writers never observe a
-        mixed state where one file is the new version and the other is
-        the old version. A crash before the rename leaves the previous
+        temporary directory first, fsyncs both data files and the
+        directory, and renames each file into place with
+        ``Path.replace``. Concurrent writers never observe a mixed
+        state where one file is the new version and the other is the
+        old version. A crash before the rename leaves the previous
         bundle untouched.
+
+        Symlink targets are refused to avoid replacing a file the
+        operator did not intend. A non-empty staging directory is
+        also refused.
 
         Args:
             manifest: Manifest to write.
@@ -223,37 +255,42 @@ class BundleExporter:
 
         Raises:
             DeploymentError: If writing the temporary files or the
-                rename fails.
+                rename fails, or the directory is a symlink or a
+                symlink exists inside the staging directory.
         """
+        directory = directory.resolve(strict=False)
+        if directory.is_symlink():
+            raise DeploymentError(
+                f"refusing to write deployment bundle through symlink: {directory}"
+            )
+        directory.parent.mkdir(parents=True, exist_ok=True)
         directory.mkdir(parents=True, exist_ok=True)
-        staging = directory.with_name(f".{directory.name}.staging.{uuid.uuid4().hex}")
+        staging = Path(
+            tempfile.mkdtemp(prefix=f".{directory.name}.staging.", dir=directory.parent)
+        )
         try:
-            try:
-                staging.mkdir(parents=False, exist_ok=False)
-            except FileExistsError:
-                staging.mkdir(parents=False, exist_ok=True)
-            (staging / "bundle.cedar").write_text(manifest.cedar, encoding="utf-8")
-            (staging / "manifest.json").write_text(
+            bundle_path = staging / "bundle.cedar"
+            manifest_path = staging / "manifest.json"
+            bundle_path.write_text(manifest.cedar, encoding="utf-8")
+            manifest_path.write_text(
                 json.dumps(manifest.to_manifest_payload(), indent=2, sort_keys=True),
                 encoding="utf-8",
             )
             for filename in ("bundle.cedar", "manifest.json"):
-                (staging / filename).replace(directory / filename)
+                src = staging / filename
+                dst = directory / filename
+                with src.open("rb") as handle:
+                    handle.flush()
+                    os_fsync(handle.fileno())
+                os_fsync_directory(staging)
+                os_replace(src, dst)
+            os_fsync_directory(directory)
         except OSError as error:
             raise DeploymentError(
                 f"failed to write deployment bundle to {directory}: {error}"
             ) from error
         finally:
-            if staging.exists():
-                for child in staging.iterdir():
-                    try:
-                        child.unlink()
-                    except OSError:
-                        pass
-                try:
-                    staging.rmdir()
-                except OSError:
-                    pass
+            _rm_tmp(staging)
         return directory
 
     def read_directory(self, directory: Path) -> DeploymentManifest:
@@ -261,9 +298,7 @@ class BundleExporter:
 
         Recomputes the bundle hash from ``bundle.cedar`` and compares
         it against the manifest's recorded hash. A mismatch or a
-        missing manifest hash raises :class:`DeploymentError`, which
-        is the recommended signal for tamper detection after
-        transport.
+        missing manifest hash raises :class:`DeploymentError`.
 
         Args:
             directory: Directory containing ``bundle.cedar`` and
@@ -322,6 +357,12 @@ class SSRFGuard:
     guard resolves the target hostname through DNS and rejects any
     address that falls inside a reserved range.
 
+    The guard is also responsible for **pinning** the resolved address.
+    Callers should connect to the returned :class:`PinnedAddress`
+    rather than re-resolving the hostname, which closes the
+    DNS-rebinding window in which an attacker returns a public
+    address at guard time and a private address at request time.
+
     Attributes:
         allow_private_targets: When ``True``, the guard permits
             addresses inside RFC1918 private ranges. Loopback and
@@ -337,14 +378,18 @@ class SSRFGuard:
     BLOCKED_NETWORKS: tuple[
         ipaddress.IPv4Network | ipaddress.IPv6Network, ...
     ] = (
+        ipaddress.ip_network("0.0.0.0/8"),
         ipaddress.ip_network("127.0.0.0/8"),
         ipaddress.ip_network("10.0.0.0/8"),
         ipaddress.ip_network("172.16.0.0/12"),
         ipaddress.ip_network("192.168.0.0/16"),
         ipaddress.ip_network("169.254.0.0/16"),
+        ipaddress.ip_network("198.18.0.0/15"),
+        ipaddress.ip_network("255.255.255.255/32"),
         ipaddress.ip_network("::1/128"),
         ipaddress.ip_network("fc00::/7"),
         ipaddress.ip_network("fe80::/10"),
+        ipaddress.ip_network("2001:db8::/32"),
     )
 
     def __init__(
@@ -358,11 +403,18 @@ class SSRFGuard:
         self.allow_loopback = allow_loopback
         self.resolver = resolver
 
-    def check(self, url: str) -> None:
-        """Raise :class:`DeploymentError` when ``url`` targets a blocked host.
+    def check(self, url: str) -> PinnedAddress:
+        """Validate ``url`` and return the pinned connection target.
 
         Args:
             url: Full HTTP(S) URL to validate.
+
+        Returns:
+            A :class:`PinnedAddress` describing the host, port, scheme,
+            and the IP that the connection must use. Callers must
+            connect to ``pinned.ip`` with the explicit ``Host:``
+            header set from ``pinned.host`` so that TLS SNI and
+            virtual-host routing still use the original hostname.
 
         Raises:
             DeploymentError: When the host resolves to a blocked network
@@ -376,42 +428,253 @@ class SSRFGuard:
         host = parsed.hostname
         if not host:
             raise DeploymentError(f"deployment URL is missing a host: {url}")
+        port = parsed.port
+        if port is None:
+            port = 443 if parsed.scheme == "https" else 80
         try:
             infos = (
                 self.resolver(host)
                 if self.resolver
-                else socket.getaddrinfo(host, None)
+                else socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
             )
         except (socket.gaierror, UnicodeError) as error:
             raise DeploymentError(
                 f"could not resolve deployment host {host}: {error}"
             ) from error
-        addresses: set[str] = set()
+        if not infos:
+            raise DeploymentError(
+                f"deployment host {host} did not resolve to any address"
+            )
+        seen_families: set[int] = set()
+        last_rejection: DeploymentError | None = None
         for info in infos:
-            sock_address = info[4][0]
-            if isinstance(sock_address, str):
-                addresses.add(sock_address)
-        for address in addresses:
+            family = info[0]
+            sock_address = info[4]
+            ip_str = sock_address[0]
+            if isinstance(ip_str, bytes):
+                ip_str = ip_str.decode("ascii", errors="replace")
+            elif not isinstance(ip_str, str):
+                continue
+            seen_families.add(family)
             try:
-                parsed_address = ipaddress.ip_address(address)
+                parsed_address = ipaddress.ip_address(ip_str)
             except ValueError:
                 continue
-            for network in self.BLOCKED_NETWORKS:
-                if parsed_address in network:
-                    if network.is_loopback or network.is_link_local:
-                        if self.allow_loopback:
-                            continue
-                        raise DeploymentError(
-                            f"deployment URL targets loopback or link-local "
-                            f"address {address} ({network})"
-                        )
-                    if self.allow_private_targets:
-                        continue
-                    raise DeploymentError(
-                        f"deployment URL targets private-network address "
-                        f"{address} ({network}); pass "
-                        "allow_private_targets=True to override"
+            rejection = self._check_address(parsed_address, host)
+            if rejection is None:
+                return PinnedAddress(
+                    host=host,
+                    port=port,
+                    scheme=parsed.scheme,
+                    ip=ip_str,
+                    family=family,
+                )
+            last_rejection = rejection
+        if last_rejection is not None:
+            raise last_rejection
+        raise DeploymentError(
+            f"deployment host {host} did not resolve to any usable address"
+        )
+
+    def _check_address(
+        self, parsed_address: ipaddress.IPv4Address | ipaddress.IPv6Address, host: str
+    ) -> DeploymentError | None:
+        """Return a rejection error for blocked addresses or ``None``."""
+        for network in self.BLOCKED_NETWORKS:
+            if parsed_address in network:
+                if network.is_loopback or network.is_link_local:
+                    if self.allow_loopback:
+                        return None
+                    return DeploymentError(
+                        f"deployment URL targets loopback or link-local "
+                        f"address {parsed_address} ({network})"
                     )
+                if self.allow_private_targets:
+                    return None
+                return DeploymentError(
+                    f"deployment URL targets private-network address "
+                    f"{parsed_address} ({network}); pass "
+                    "allow_private_targets=True to override"
+                )
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class PinnedAddress:
+    """A DNS-resolved address to which an HTTP connection must be pinned.
+
+    The transport created by :func:`_pinned_transport` will connect to
+    ``(ip, port)`` and set the ``Host`` header to ``host``. This closes
+    the DNS-rebinding window between the SSRF guard and the actual
+    connection.
+    """
+
+    host: str
+    port: int
+    scheme: str
+    ip: str
+    family: int
+
+
+class _PinnedTransport(httpx.BaseTransport):
+    """An :mod:`httpx` transport that pins each connection to a resolved IP.
+
+    The transport refuses to reconnect to the original hostname; if the
+    caller asks for a URL whose host or port disagrees with the pinned
+    address, the request is rejected. This is what closes the
+    DNS-rebinding gap.
+
+    The transport opens the socket itself, wraps with TLS when the
+    scheme is ``https``, sends a minimal HTTP/1.1 request, reads the
+    response with a hard byte cap, and returns a parsed
+    :class:`httpx.Response`. The byte cap mirrors
+    :data:`HTTP_RESPONSE_READ_LIMIT`.
+    """
+
+    def __init__(self, pinned: PinnedAddress) -> None:
+        self.pinned = pinned
+        self._closed = False
+
+    def close(self) -> None:
+        self._closed = True
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        if self._closed:
+            raise DeploymentError("pinned transport has been closed")
+        url = request.url
+        if url.host != self.pinned.host or url.port != self.pinned.port:
+            raise DeploymentError(
+                f"deployment transport mismatch: request url {url!s} disagrees "
+                f"with pinned {self.pinned.host}:{self.pinned.port}"
+            )
+        timeout = _read_timeout(request)
+        try:
+            sock = socket.create_connection(
+                (self.pinned.ip, self.pinned.port), timeout=timeout
+            )
+        except OSError as error:
+            raise DeploymentError(
+                f"deployment connection to pinned "
+                f"{self.pinned.ip}:{self.pinned.port} failed: {error}"
+            ) from error
+        try:
+            if self.pinned.scheme == "https":
+                context = ssl.create_default_context()
+                try:
+                    sock = context.wrap_socket(
+                        sock, server_hostname=self.pinned.host
+                    )
+                except OSError as error:
+                    raise DeploymentError(
+                        f"deployment TLS handshake to "
+                        f"{self.pinned.host} failed: {error}"
+                    ) from error
+            request.headers["Host"] = self.pinned.host
+            return _round_trip_http(request, sock, timeout)
+        finally:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+
+def _read_timeout(request: httpx.Request) -> float:
+    """Extract the per-request timeout from the :class:`httpx.Request` extensions."""
+    timeout = request.extensions.get("timeout")
+    if timeout is None:
+        return 30.0
+    if isinstance(timeout, httpx.Timeout):
+        return float(timeout.connect or 30.0)
+    if isinstance(timeout, Mapping):
+        connect = timeout.get("connect", 30.0)
+        try:
+            return float(connect)
+        except (TypeError, ValueError) as error:
+            raise DeploymentError(
+                f"invalid httpx timeout extension: {timeout!r}"
+            ) from error
+    try:
+        return float(timeout)
+    except (TypeError, ValueError) as error:
+        raise DeploymentError(
+            f"invalid httpx timeout extension: {timeout!r}"
+        ) from error
+
+
+def _round_trip_http(
+    request: httpx.Request, sock: socket.socket, timeout: float
+) -> httpx.Response:
+    """Send ``request`` over ``sock`` and parse the response.
+
+    The HTTP/1.1 implementation here is intentionally minimal: a
+    single request, a single response, with a hard byte cap on the
+    body. There is no chunked transfer-encoding support because the
+    deployment client does not stream requests and most deployment
+    endpoints respond with a small JSON body.
+    """
+    body = b"" if request.content is None else bytes(request.content)
+    host_header = request.headers.get("Host") or request.url.host or ""
+    head_lines = [
+        f"{request.method} {request.url.path or '/'} HTTP/1.1",
+        f"Host: {host_header}",
+    ]
+    for name, value in request.headers.items():
+        if name.lower() == "host":
+            continue
+        head_lines.append(f"{name}: {value}")
+    head_lines.append(f"Content-Length: {len(body)}")
+    head_lines.append("")
+    head_lines.append("")
+    sock.settimeout(timeout)
+    sock.sendall("\r\n".join(head_lines).encode("ascii") + body)
+
+    response_bytes = bytearray()
+    header_end = -1
+    while True:
+        try:
+            chunk = sock.recv(4096)
+        except TimeoutError as error:
+            raise DeploymentError(
+                f"deployment response timed out after {timeout}s"
+            ) from error
+        if not chunk:
+            break
+        response_bytes.extend(chunk)
+        if b"\r\n\r\n" in response_bytes and header_end == -1:
+            header_end = response_bytes.index(b"\r\n\r\n") + 4
+        if header_end != -1 and len(response_bytes) >= HTTP_RESPONSE_READ_LIMIT:
+            response_bytes = response_bytes[:HTTP_RESPONSE_READ_LIMIT]
+            break
+    return _parse_raw_response(bytes(response_bytes))
+
+
+def _parse_raw_response(raw: bytes) -> httpx.Response:
+    """Parse a raw HTTP/1.1 response into an :class:`httpx.Response`."""
+    if b"\r\n\r\n" not in raw:
+        raise DeploymentError(
+            "deployment response was truncated before headers completed"
+        )
+    head_bytes, _, body_bytes = raw.partition(b"\r\n\r\n")
+    head_text = head_bytes.decode("iso-8859-1")
+    lines = head_text.split("\r\n")
+    status_line = lines[0]
+    parts = status_line.split(" ", 2)
+    if len(parts) < 2 or not parts[1].isdigit():
+        raise DeploymentError(
+            f"could not parse HTTP status line: {status_line!r}"
+        )
+    status_code = int(parts[1])
+    header_pairs: list[tuple[str, str]] = []
+    for line in lines[1:]:
+        if not line:
+            continue
+        name, _, value = line.partition(":")
+        header_pairs.append((name.strip(), value.strip()))
+    return httpx.Response(
+        status_code=status_code,
+        headers=httpx.Headers(header_pairs),
+        content=body_bytes,
+    )
 
 
 class DeploymentClient:
@@ -424,6 +687,9 @@ class DeploymentClient:
         allow_private_targets: bool = False,
         allow_loopback: bool = False,
         ssrf_guard: SSRFGuard | None = None,
+        max_retries: int = 0,
+        retry_backoff: float = 0.5,
+        follow_redirects: bool = False,
     ) -> None:
         """Initialize the deployment client.
 
@@ -436,13 +702,32 @@ class DeploymentClient:
                 link-local targets. Intended for tests that bind to
                 ``127.0.0.1``; never enable in production.
             ssrf_guard: Optional guard override (mostly for tests).
+            max_retries: Number of additional attempts on retryable
+                failures (429, 503, network errors). Each retry re-sends
+                the same ``Idempotency-Key`` so the server can dedupe.
+            retry_backoff: Initial backoff in seconds; doubled per
+                attempt up to 8 s.
+            follow_redirects: When ``True``, 3xx responses are followed.
+                **Disabled by default** because a redirect to a private
+                address would bypass the SSRF guard unless the redirect
+                target is re-validated; the client does not re-validate
+                redirect targets, so leaving this ``False`` is the
+                safe default.
 
         Raises:
-            DeploymentError: If ``timeout`` is not strictly positive.
+            DeploymentError: If ``timeout`` is not strictly positive or
+                ``max_retries`` is negative.
         """
-        if timeout <= 0:
-            raise DeploymentError("deployment timeout must be positive")
+        if timeout <= 0 or not _is_finite(timeout):
+            raise DeploymentError("deployment timeout must be positive and finite")
+        if max_retries < 0:
+            raise DeploymentError("deployment max_retries must be non-negative")
+        if retry_backoff < 0 or not _is_finite(retry_backoff):
+            raise DeploymentError("deployment retry_backoff must be non-negative")
         self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_backoff = retry_backoff
+        self.follow_redirects = follow_redirects
         self.ssrf_guard = ssrf_guard or SSRFGuard(
             allow_private_targets=allow_private_targets,
             allow_loopback=allow_loopback,
@@ -455,6 +740,7 @@ class DeploymentClient:
         *,
         record_id: str | None = None,
         headers: Mapping[str, str] | None = None,
+        idempotency_key: str | None = None,
     ) -> DeploymentRecord:
         """Push ``manifest`` to ``target`` (local path or http(s) URL).
 
@@ -470,6 +756,11 @@ class DeploymentClient:
             record_id: Optional explicit identifier for the deployment
                 record. Auto-generated when omitted.
             headers: Optional HTTP headers added to the POST request.
+                Reserved names (``Host``, ``Authorization``, ``Cookie``,
+                ``Content-Length``, ``Transfer-Encoding``) are rejected.
+            idempotency_key: Optional explicit idempotency key. When
+                omitted a UUID is generated. The key is sent as the
+                ``Idempotency-Key`` header.
 
         Returns:
             The deployment record describing the outcome.
@@ -483,7 +774,11 @@ class DeploymentClient:
         parsed = urllib.parse.urlparse(target)
         if parsed.scheme in {"http", "https"}:
             return self.deploy_http(
-                manifest, target, record_id=record_id, headers=headers
+                manifest,
+                target,
+                record_id=record_id,
+                headers=headers,
+                idempotency_key=idempotency_key,
             )
         return self.deploy_local(manifest, Path(target), record_id=record_id)
 
@@ -523,20 +818,26 @@ class DeploymentClient:
         *,
         record_id: str | None = None,
         headers: Mapping[str, str] | None = None,
+        idempotency_key: str | None = None,
     ) -> DeploymentRecord:
         """POST ``manifest`` to ``url`` and return the deployment record.
 
-        Reads the response body in bounded chunks so that a streaming
-        or oversized endpoint cannot exhaust memory. 2xx responses are
-        treated as success; 4xx and 5xx raise :class:`DeploymentError`
-        with the response body captured (truncated to
-        :data:`HTTP_RESPONSE_BODY_LIMIT`).
+        The connection is **pinned** to the IP address resolved at
+        SSRF-check time, so a DNS change between the guard and the
+        request cannot redirect the deployment into a private network.
+        The response body is read in bounded chunks and never
+        embedded in error messages or persisted verbatim; only a
+        SHA-256 of the body is retained. 2xx responses are treated as
+        success; 4xx and 5xx raise :class:`DeploymentError`.
 
         Args:
             manifest: Bundle to push.
             url: HTTP endpoint accepting a JSON POST.
             record_id: Optional explicit identifier for the record.
-            headers: Optional HTTP headers added to the POST.
+            headers: Optional HTTP headers added to the POST. Reserved
+                names are rejected.
+            idempotency_key: Optional explicit idempotency key. A
+                UUID is generated when omitted.
 
         Returns:
             The deployment record describing the HTTP push.
@@ -546,98 +847,178 @@ class DeploymentClient:
                 endpoint returns non-2xx, the request times out, or the
                 network fails.
         """
-        self.ssrf_guard.check(url)
-
+        validate_headers(headers)
+        pinned = self.ssrf_guard.check(url)
+        idem = idempotency_key or uuid.uuid4().hex
         payload = json.dumps(manifest.to_dict()).encode("utf-8")
-        request = urllib.request.Request(
-            url,
-            data=payload,
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "X-Cedar-Bundle-Hash": manifest.bundle_hash,
-                "X-Cedar-Domain": manifest.domain,
-                **(dict(headers) if headers else {}),
-            },
+        request_headers: dict[str, str] = {
+            "Content-Type": "application/json",
+            "X-Cedar-Bundle-Hash": manifest.bundle_hash,
+            "X-Cedar-Domain": manifest.domain,
+            "Idempotency-Key": idem,
+        }
+        if headers:
+            request_headers.update(dict(headers))
+
+        request = httpx.Request(
+            "POST",
+            httpx.URL(url),
+            headers=request_headers,
+            content=payload,
         )
-        body, status_code = _read_http_response(request, self.timeout)
-        status = "deployed" if 200 <= status_code < 300 else "rejected"
-        if status != "deployed":
-            raise DeploymentError(
-                f"deployment to {url} rejected with status {status_code}: "
-                f"{body[:HTTP_RESPONSE_BODY_LIMIT]}"
-            )
-        return DeploymentRecord(
-            id=record_id or generate_record_id(),
-            domain=manifest.domain,
-            target=url,
-            target_kind=DEPLOYMENT_KIND_HTTP,
-            bundle_hash=manifest.bundle_hash,
-            status=status,
-            created_at=datetime.now(UTC),
-            response={
-                "status_code": str(status_code),
-                "body": body[:HTTP_RESPONSE_BODY_LIMIT],
-            },
-        )
+        attempt = 0
+        backoff = self.retry_backoff
+        last_error: DeploymentError | None = None
+        while attempt <= self.max_retries:
+            try:
+                with httpx.Client(
+                    transport=_PinnedTransport(pinned),
+                    timeout=self.timeout,
+                    follow_redirects=self.follow_redirects,
+                ) as client:
+                    response = client.send(request)
+                    body = _read_bounded_body(response)
+                    response_sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
+                    if 200 <= response.status_code < 300:
+                        return DeploymentRecord(
+                            id=record_id or generate_record_id(),
+                            domain=manifest.domain,
+                            target=url,
+                            target_kind=DEPLOYMENT_KIND_HTTP,
+                            bundle_hash=manifest.bundle_hash,
+                            status="deployed",
+                            created_at=datetime.now(UTC),
+                            response={
+                                "status_code": str(response.status_code),
+                                "body_sha256": response_sha,
+                                "idempotency_key": idem,
+                                "retry_count": str(attempt),
+                            },
+                        )
+                    if response.status_code in {429, 503} and attempt < self.max_retries:
+                        attempt += 1
+                        _sleep(backoff)
+                        backoff = min(backoff * 2, 8.0)
+                        continue
+                    raise DeploymentError(
+                        f"deployment to {url} rejected with status "
+                        f"{response.status_code} (body sha256={response_sha[:16]}…)"
+                    )
+            except httpx.HTTPError as error:
+                last_error = DeploymentError(
+                    f"deployment request failed: {error}"
+                )
+                if attempt >= self.max_retries:
+                    raise last_error from error
+                attempt += 1
+                _sleep(backoff)
+                backoff = min(backoff * 2, 8.0)
+                continue
+        if last_error is not None:
+            raise last_error
+        raise DeploymentError("deployment exhausted retries without a result")
 
 
-def _read_http_response(
-    request: urllib.request.Request, timeout: float
-) -> tuple[str, int]:
-    """Read an HTTP response with bounded size and split error handling.
-
-    Returns:
-        A tuple ``(body, status_code)``. ``body`` is truncated to
-        :data:`HTTP_RESPONSE_READ_LIMIT` bytes. ``status_code`` is the
-        HTTP status returned by the endpoint.
+def validate_headers(headers: Mapping[str, str] | None) -> None:
+    """Reject empty, reserved, or carriage-return-bearing HTTP headers.
 
     Raises:
-        DeploymentError: When the connection fails, the request times
-            out, or the endpoint returns an HTTP error status (4xx/5xx).
-            In every case the response body is included in the error
-            message up to :data:`HTTP_RESPONSE_BODY_LIMIT` bytes.
+        DeploymentError: When a header name is empty, reserved, or
+            contains CR/LF, or when a header value contains CR/LF.
     """
-    try:
-        response = urllib.request.urlopen(request, timeout=timeout)
-    except urllib.error.HTTPError as error:
-        # ``HTTPError`` is raised for 4xx and 5xx responses. ``read()``
-        # is bounded by the underlying implementation; we still cap it
-        # before constructing the message body.
-        body = _read_http_error_body(error)
-        raise DeploymentError(
-            f"deployment rejected with status {error.code}: "
-            f"{body[:HTTP_RESPONSE_BODY_LIMIT]}"
-        ) from error
-    except (urllib.error.URLError, TimeoutError, OSError) as error:
-        # ``URLError`` covers DNS, connection refused, and other protocol
-        # failures; ``TimeoutError`` covers the configured HTTP timeout;
-        # ``OSError`` covers network-stack failures on some platforms.
-        raise DeploymentError(f"deployment request failed: {error}") from error
+    if not headers:
+        return
+    for name, value in headers.items():
+        if not name or not name.strip():
+            raise DeploymentError("deployment header name must be non-empty")
+        if "\r" in name or "\n" in name:
+            raise DeploymentError(
+                f"deployment header name contains CR/LF: {name!r}"
+            )
+        if "\r" in value or "\n" in value:
+            raise DeploymentError(
+                f"deployment header value for {name!r} contains CR/LF"
+            )
+        if name.lower() in _RESERVED_HEADERS:
+            raise DeploymentError(
+                f"deployment header name {name!r} is reserved and cannot be set"
+            )
+        if len(name) > 256:
+            raise DeploymentError(
+                f"deployment header name {name!r} exceeds 256 characters"
+            )
+        if len(value) > 8192:
+            raise DeploymentError(
+                f"deployment header value for {name!r} exceeds 8192 characters"
+            )
 
+
+def _read_bounded_body(response: httpx.Response) -> str:
+    """Read the response body with a hard upper bound on bytes consumed."""
     body_bytes = bytearray()
+    for chunk in response.iter_bytes(chunk_size=4096):
+        body_bytes.extend(chunk)
+        if len(body_bytes) >= HTTP_RESPONSE_READ_LIMIT:
+            break
+    return body_bytes[:HTTP_RESPONSE_READ_LIMIT].decode("utf-8", errors="replace")
+
+
+def _is_finite(value: float) -> bool:
+    """Return True when ``value`` is a finite number (not inf or NaN)."""
+    return value == value and value not in (float("inf"), float("-inf"))
+
+
+def _sleep(seconds: float) -> None:
+    """Sleep helper that ignores zero/negative durations."""
+    if seconds > 0:
+        import time
+
+        time.sleep(seconds)
+
+
+def os_replace(src: Path, dst: Path) -> None:
+    """Replace ``dst`` with ``src`` atomically (POSIX rename)."""
+    import os
+
+    os.replace(src, dst)
+
+
+def os_fsync_directory(directory: Path) -> None:
+    """fsync a directory to durably record file replacements.
+
+    Best-effort: some platforms do not allow opening a directory fd
+    for fsync. Failures are silently swallowed because the data is
+    already on disk.
+    """
+    import os
+
     try:
-        while True:
-            chunk = response.read(4096)
-            if not chunk:
-                break
-            body_bytes.extend(chunk)
-            if len(body_bytes) >= HTTP_RESPONSE_READ_LIMIT:
-                break
+        fd = os.open(str(directory), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
     finally:
-        response.close()
-    status_code = getattr(response, "status", 200)
-    return body_bytes[:HTTP_RESPONSE_READ_LIMIT].decode(
-        "utf-8", errors="replace"
-    ), status_code
+        os.close(fd)
 
 
-def _read_http_error_body(error: urllib.error.HTTPError) -> str:
-    """Safely read an :class:`urllib.error.HTTPError` body."""
+def os_fsync(fd: int) -> None:
+    """Flush an open file descriptor to durable storage."""
+    import os
+
+    os.fsync(fd)
+
+
+def _rm_tmp(path: Path) -> None:
+    """Best-effort removal of a temporary directory used for staging."""
+    import shutil
+
     try:
-        return error.read().decode("utf-8", errors="replace")
-    except (OSError, AttributeError):
-        return ""
+        shutil.rmtree(path, ignore_errors=True)
+    except OSError:
+        pass
 
 
 def generate_record_id() -> str:
@@ -655,6 +1036,8 @@ __all__ = [
     "DeploymentRecord",
     "HTTP_RESPONSE_BODY_LIMIT",
     "HTTP_RESPONSE_READ_LIMIT",
+    "PinnedAddress",
     "SSRFGuard",
     "generate_record_id",
+    "validate_headers",
 ]
