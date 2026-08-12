@@ -1,50 +1,56 @@
 """Storage Protocol and shared data structures for the persistence layer.
 
-The Repository Protocol is the seam between cedrus and any backing
-store. Two implementations are shipped: :class:`Memory` for
+The :class:`Repository` Protocol is the seam between cedrus and any
+backing store. Two implementations are shipped: :class:`Memory` for
 tests and ephemeral use, and :class:`Sqlite` for the default
 on-disk behaviour.
 
-Storage lifecycle
------------------
+Storage lifecycle:
+    Every repository covers the same five tables:
 
-Every repository covers the same five tables:
+    * ``requirements`` - one row per loaded :class:`~cedrus.need.Need`.
+    * ``policies`` - one row per compiled policy, with the typed intent
+      and action namespace stored as JSON.
+    * ``drafts`` - the full history of generator proposals per policy,
+      including the proposal's typed intent and per-slot scope JSON.
+    * ``reports`` - the full history of validation and scenario reports.
+    * ``deployments`` - the full audit log of bundle deployments.
 
-* ``requirements`` - one row per loaded :class:`~cedrus.need.Need`.
-* ``policies`` - one row per compiled policy, with the typed intent
-  and action namespace stored as JSON.
-* ``drafts`` - the full history of generator proposals per policy,
-  including the proposal's typed intent and per-slot scope JSON.
-* ``reports`` - the full history of validation and scenario reports.
-* ``deployments`` - the full audit log of bundle deployments.
+    Drafts and reports reference policies by identifier string, which
+    allows them to survive policy deletion. The SQLite foreign key
+    between ``policies.requirement_id`` and ``requirements.id`` cascades
+    to ``NULL`` on requirement delete, leaving orphan policies that
+    :func:`list_compiled_policies` skips gracefully.
 
-Drafts and reports reference policies by identifier string, which
-allows them to survive policy deletion. The SQLite foreign key
-between ``policies.requirement_id`` and ``requirements.id`` cascades
-to ``NULL`` on requirement delete, leaving orphan policies that
-:func:`list_compiled_policies` skips gracefully.
+Thread safety:
+    Implementations are expected to be safe for concurrent use from a
+    single process. The in-memory repository is implicitly thread-safe
+    because it uses plain dicts and lists; the SQLite repository relies
+    on sqlite3's per-connection serialization, so callers should use a
+    single repository instance per process or open one per thread.
 
-Thread safety
--------------
+Schema migration:
+    Starting with cedrus 0.6.0, :class:`DraftStored` carries the
+    typed intent and per-slot scope JSON, and :class:`Stored` carries
+    the action namespace. Older databases created before this version
+    are upgraded on first open by
+    :func:`cedrus.migrate.detect_legacy_rows` and
+    :func:`cedrus.migrate.migrate_legacy_rows`, exposed via the
+    ``cedrus migrate`` CLI subcommand. Until the migration runs,
+    :class:`Sqlite` raises :class:`Store` on open so operators cannot
+    accidentally work with a half-migrated store.
 
-Implementations are expected to be safe for concurrent use from a
-single process. The in-memory repository is implicitly thread-safe
-because it uses plain dicts and lists; the SQLite repository relies
-on sqlite3's per-connection serialization, so callers should use a
-single repository instance per process or open one per thread.
+Attributes:
+    Stored: Policy row stored in the repository.
+    DraftStored: Draft proposal row stored in the repository.
+    ReportStored: Validation or test report row.
+    Repository: Minimum surface every storage backend must implement.
 
-Schema migration
-----------------
-
-Starting with cedrus 0.6.0, :class:`DraftStored` carries the
-typed intent and per-slot scope JSON, and :class:`Stored`
-carries the action namespace. Older databases created before this
-version are upgraded on first open by
-:func:`cedrus.migrate.detect_legacy_rows` and
-:func:`cedrus.migrate.migrate_legacy_rows`, exposed via the
-``cedrus migrate`` CLI subcommand. Until the migration runs,
-:class:`Sqlite` raises :class:`Store` on open so
-operators cannot accidentally work with a half-migrated store.
+See Also:
+    :mod:`cedrus.store.memory`: In-memory repository implementation.
+    :mod:`cedrus.store.sqlite`: SQLite repository implementation.
+    :mod:`cedrus.data.persist`: The newer typed persistence rows.
+    :mod:`cedrus.migrate`: Migration helpers for pre-0.6 databases.
 """
 
 from __future__ import annotations
@@ -54,9 +60,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
-from ..compile import Intent
-from ..deploy import Record
-from ..need import Need
+from cedrus.compile import Intent
+from cedrus.deploy import Record
+from cedrus.need import Need
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,12 +72,13 @@ class Stored:
     Attributes:
         id: Policy identifier.
         domain: Domain the policy belongs to.
-        requirement_id: Optional identifier of the originating requirement.
+        requirement_id: Identifier of the originating requirement, or
             ``None`` for orphan policies whose requirement was deleted.
-        intent: Optional parsed :class:`Intent`. ``None`` for
-            policies imported from raw Cedar source with no parsed intent.
+        intent: Optional parsed :class:`Intent`. ``None`` for policies
+            imported from raw Cedar source with no parsed intent.
         cedar: Cedar source text for the policy.
-        status: Lifecycle status (``"draft"``, ``"existing"``, ``"compiled"``).
+        status: Lifecycle status (``"draft"``, ``"existing"``,
+            ``"compiled"``).
         created_at: Timestamp at which the row was first inserted.
         updated_at: Timestamp of the most recent upsert.
         action_scope_json: Optional JSON-serialized :class:`Action`
@@ -102,11 +109,11 @@ class DraftStored:
         unresolved: Items the generator could not safely resolve.
         cedar: Cedar source text produced by the generator.
         created_at: Timestamp at which the draft was recorded.
-        intent_json: JSON-serialized :class:`Intent` carried by
-            the generator proposal. Required for verification to reason
+        intent_json: JSON-serialized :class:`Intent` carried by the
+            generator proposal. Required for verification to reason
             about the proposal without re-parsing.
-        principal_scope_json: JSON-serialized principal scope carried by
-            the proposal.
+        principal_scope_json: JSON-serialized principal scope carried
+            by the proposal.
         action_scope_json: JSON-serialized action scope carried by the
             proposal.
         resource_scope_json: JSON-serialized resource scope carried by
@@ -135,7 +142,8 @@ class ReportStored:
         kind: Report kind (``"validation"`` or ``"test"``).
         passed: ``True`` when the report indicates success.
         payload: Raw report payload as a dictionary.
-        created_at: Timestamp at which the report was recorded.
+        created_at: Timestamp at which the report was recorded;
+            ``None`` for legacy rows.
     """
 
     policy_id: str
@@ -166,7 +174,9 @@ class Repository(Protocol):
     def remove_policy(self, policy_id: str) -> None: ...
 
     def record_draft(self, draft: DraftStored) -> None: ...
-    def update_draft_json(self, draft_id: str, json_columns: Mapping[str, str | None]) -> None: ...
+    def update_draft_json(
+        self, draft_id: str, json_columns: Mapping[str, str | None]
+    ) -> None: ...
     def latest_draft(self, policy_id: str) -> DraftStored: ...
     def list_drafts(self, policy_id: str | None = None) -> Sequence[DraftStored]: ...
 
@@ -183,6 +193,9 @@ class Repository(Protocol):
         upsert in a single atomic write. For the SQLite backend this
         wraps the connection's transaction context manager; for the
         in-memory backend it is a no-op.
+
+        Returns:
+            A context manager.
         """
         ...
     def list_deployments(
@@ -191,8 +204,8 @@ class Repository(Protocol):
 
 
 __all__ = [
-    "Repository",
     "DraftStored",
-    "Stored",
     "ReportStored",
+    "Repository",
+    "Stored",
 ]
