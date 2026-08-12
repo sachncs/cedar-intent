@@ -4,12 +4,11 @@ Uses only the standard library ``sqlite3`` module. The database schema
 is created on demand and the schema migration is idempotent.
 
 This module exposes the SQL primitives (``fetch``, ``execute``,
-``transaction``, ``column_exists``, ``migrate``) that the typed
-objects (``Need``, ``Stored``, ``DraftStored``, ``ReportStored``,
-``Record``) call from their ``save`` / ``get`` / ``list`` / ``latest``
-/ ``update`` / ``upsert`` methods. The backend itself does not own
-any CRUD — see :mod:`cedrus.store.base` for the typed-object
-methods that do.
+``transaction``, ``migrate``) that the typed objects (``Need``,
+``Stored``, ``DraftStored``, ``ReportStored``, ``Record``) call from
+their ``save`` / ``get`` / ``list`` / ``latest`` / ``update`` /
+``upsert`` methods. The backend itself does not own any CRUD — see
+:mod:`cedrus.store.base` for the typed-object methods that do.
 
 Schema:
     The normalized schema (version 3) has 12 tables:
@@ -67,11 +66,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from cedrus.deploy import Record
 from cedrus.error import Store
-from cedrus.need import Need
-from cedrus.scope import Action, Principal, Resource
-from cedrus.store.base import DraftStored, ReportStored, Stored
 
 #: Current schema version. Bump whenever the SQLite schema changes in
 #: a way that requires row data to be migrated.
@@ -252,15 +247,6 @@ SCHEMA_STATEMENTS = (
 )
 
 
-#: Tables whose names are allowed in dynamic SQL. Anything outside
-#: this allow-list is rejected, preventing the f-string interpolation
-#: in :meth:`Backend.column_exists` from becoming a SQL injection
-#: vector.
-KNOWN_TABLES = frozenset(
-    {"requirements", "policies", "drafts", "reports", "deployments", "meta"}
-)
-
-
 # ---------------------------------------------------------------------------
 # SQLite repository
 # ---------------------------------------------------------------------------
@@ -271,8 +257,9 @@ class Backend:
     """SQLite-backed :class:`~cedrus.store.base.Repository`.
 
     Exposes only the SQL primitives (``fetch``, ``execute``,
-    ``transaction``, ``column_exists``, ``migrate``) that the typed
-    objects use. CRUD lives on :class:`~cedrus.store.base.Need` /
+    ``transaction``, ``migrate``, ``remove_requirement``,
+    ``remove_policy``, ``close``) that the typed objects use. CRUD
+    lives on :class:`~cedrus.store.base.Need` /
     :class:`~cedrus.store.base.Stored` /
     :class:`~cedrus.store.base.DraftStored` /
     :class:`~cedrus.store.base.ReportStored` /
@@ -305,54 +292,26 @@ class Backend:
         self.connection.execute("PRAGMA synchronous = NORMAL")
         self.migrate()
 
-    def column_exists(self, table: str, column: str) -> bool:
-        """Return ``True`` when ``table.column`` exists in the schema.
-
-        Args:
-            table: Table name to inspect. Must be a known table name
-                (``requirements``, ``policies``, ``drafts``,
-                ``reports``, ``deployments``, ``meta``); anything
-                else raises :class:`Store` rather than interpolating
-                user input into a SQL statement.
-            column: Column name to look up.
-
-        Returns:
-            ``True`` if the column is present.
-
-        Raises:
-            Store: If ``table`` is not a known table.
-        """
-        if table not in KNOWN_TABLES:
-            raise Store(f"unknown table for column_exists: {table!r}")
-        rows = self.connection.execute(
-            "SELECT name FROM pragma_table_info(?) WHERE name = ?", (table, column)
-        ).fetchall()
-        return bool(rows)
-
     def migrate(self) -> None:
-        """Create schema objects and add 0.6.0 columns when missing.
+        """Create the schema and stamp the current version in one transaction.
 
-        Idempotent: every ``CREATE`` uses ``IF NOT EXISTS`` and every
-        ``ALTER`` is guarded by :meth:`column_exists`. The schema
-        version is set inside the same transaction as the schema
-        changes, so a partially-migrated database either has its
-        declared version or does not exist at all.
+        Idempotent: every ``CREATE`` uses ``IF NOT EXISTS`` so the
+        statement is safe to re-run on a database that's already at
+        the current version. The schema version is set inside the same
+        transaction as the schema objects, so a partially-created
+        database either has its declared version or does not exist
+        at all.
         """
-        with self.connection:
+        with self.transaction():
             for statement in SCHEMA_STATEMENTS:
                 self.connection.execute(statement)
-            for statement in ALTER_INTENT_JSON:
-                column = statement.split("ADD COLUMN")[-1].split()[0]
-                if not self.column_exists("policies", column):
-                    self.connection.execute(statement)
-            for statement in ALTER_DRAFT_COLUMNS:
-                column = statement.split("ADD COLUMN")[-1].split()[0]
-                if not self.column_exists("drafts", column):
-                    self.connection.execute(statement)
             self.stamp_schema_version()
 
     def stamp_schema_version(self) -> None:
-        """Insert or update the ``meta.schema_version`` row in this transaction."""
+        """Insert or update the ``meta.schema_version`` row in this transaction.
+
+        Must be called inside a :meth:`transaction` block.
+        """
         row = self.connection.execute("SELECT schema_version FROM meta").fetchone()
         if row is None:
             self.connection.execute(
@@ -362,17 +321,6 @@ class Backend:
             self.connection.execute(
                 "UPDATE meta SET schema_version = ?", (SCHEMA_VERSION,)
             )
-
-    def schema_version(self) -> int:
-        """Return the schema version recorded in the ``meta`` table.
-
-        Returns ``0`` when the database has not yet been stamped (which
-        means an empty or pre-0.6.0 database).
-        """
-        row = self.connection.execute("SELECT schema_version FROM meta").fetchone()
-        if row is None:
-            return 0
-        return int(row["schema_version"])
 
     def close(self) -> None:
         """Close the underlying database connection.
@@ -438,7 +386,7 @@ class Backend:
         Raises:
             Store: If no requirement exists with that id.
         """
-        with self.connection:
+        with self.transaction():
             cursor = self.connection.execute(
                 "DELETE FROM requirements WHERE id = ?", (requirement_id,)
             )
@@ -454,7 +402,7 @@ class Backend:
         Raises:
             Store: If no policy exists with that id.
         """
-        with self.connection:
+        with self.transaction():
             cursor = self.connection.execute(
                 "DELETE FROM policies WHERE id = ?", (policy_id,)
             )
