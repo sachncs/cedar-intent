@@ -30,100 +30,25 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal
 
 from cedrus.compile import Intent
 from cedrus.data import Notes, Unresolved, Usage
 from cedrus.generate.base import Context, Proposal, Result
-from cedrus.need import slugify
 from cedrus.scope import Action, Clause, Principal, Resource
-
-Effect = Literal["permit", "forbid"]
 
 PROHIBIT_KEYWORDS = re.compile(r"\b(forbid|deny|never|prohibit|disallow)\b")
 WHEN_PATTERN = re.compile(r"\bwhen\s+(.+?)(?:\.|$)", flags=re.IGNORECASE | re.DOTALL)
-
-
-def detect_effect(text: str) -> Effect:
-    """Infer ``permit`` vs ``forbid`` from simple keyword cues in ``text``.
-
-    Args:
-        text: The requirement body.
-
-    Returns:
-        ``"forbid"`` if a prohibit keyword is present, otherwise
-        ``"permit"``.
-    """
-    if PROHIBIT_KEYWORDS.search(text.lower()):
-        return "forbid"
-    return "permit"
-
-
-def detect_when_clauses(text: str) -> tuple[Clause, ...]:
-    """Extract :class:`Clause` instances from the ``when`` segment of ``text``.
-
-    Captures the substring after the first ``when`` keyword until the
-    next sentence boundary as a single clause body. Strips trailing
-    punctuation and skips empty bodies.
-
-    Args:
-        text: The requirement body.
-
-    Returns:
-        A tuple of :class:`Clause` (empty when no ``when`` clause is
-        present or the body is blank).
-    """
-    match = WHEN_PATTERN.search(text)
-    if not match:
-        return ()
-    body = match.group(1).strip().rstrip(".")
-    if not body:
-        return ()
-    return Clause.normalize(body)
-
-
-def detect_unresolved(context: Context) -> tuple[str, ...]:
-    """Surface the kinds of issues the offline generator can identify.
-
-    Flags two situations:
-
-    * Both action and resource are ``any`` and the requirement does
-      not mention ``public``. The generator cannot pick a sensible
-      action or resource, so it tells the caller to refine.
-    * Principal is ``any``. The generator encourages tightening the
-      principal scope to a specific type or id.
-
-    Args:
-        context: The generation context.
-
-    Returns:
-        A tuple of human-readable unresolved item strings.
-    """
-    issues: list[str] = []
-    if (
-        context.action == Action(kind="any")
-        and context.resource == Resource(kind="any")
-        and "public" not in context.need.text.lower()
-    ):
-        issues.append(
-            "Need does not specify an action or resource; "
-            "manual refinement required."
-        )
-    if context.principal == Principal(kind="any"):
-        issues.append(
-            "Principal scope is 'any'; tighten to a specific principal type or id."
-        )
-    return tuple(issues)
 
 
 @dataclass(frozen=True, slots=True)
 class Offline:
     """A deterministic generator for offline and test use.
 
-    Builds an :class:`Intent` by feeding the heuristic outputs through
-    :meth:`Intent.parse` so the typed-object parser is the single
-    place that constructs an intent. The generator never touches the
-    network, so it is safe to use in CI without provider credentials.
+    Builds an :class:`Intent` by feeding the inlined heuristic outputs
+    through :meth:`Intent.parse` so the typed-object parser is the
+    single place that constructs an intent. The generator never
+    touches the network, so it is safe to use in CI without provider
+    credentials.
 
     Attributes:
         name: Generator identifier surfaced in provenance metadata.
@@ -137,10 +62,10 @@ class Offline:
         """Produce a :class:`Result` for ``context``.
 
         Runs the three heuristics (effect, when clauses, unresolved
-        flags), assembles a payload dict, and routes it through
+        flags) inline, assembles a payload dict, and routes it through
         :meth:`Intent.parse` for typed construction. The unresolved
-        flags from :func:`detect_unresolved` are layered on top of
-        whatever the heuristic-extracted clauses already flagged.
+        flags from the heuristic block are layered on top of whatever
+        the when-clause heuristic already captured.
 
         Args:
             context: The generation context supplied by the workspace.
@@ -149,8 +74,19 @@ class Offline:
             A :class:`Result` carrying the typed proposal and
             deterministic provenance.
         """
-        effect = detect_effect(context.need.text)
-        when_clauses = detect_when_clauses(context.need.text)
+        # --- Effect heuristic ----------------------------------------
+        text_lower = context.need.text.lower()
+        effect = "forbid" if PROHIBIT_KEYWORDS.search(text_lower) else "permit"
+
+        # --- When-clause heuristic -----------------------------------
+        when_clauses: tuple[Clause, ...] = ()
+        match = WHEN_PATTERN.search(context.need.text)
+        if match:
+            body = match.group(1).strip().rstrip(".")
+            if body:
+                when_clauses = Clause.normalize(body)
+
+        # --- Intent construction via the polymorphic parser ----------
         payload = {
             "effect": effect,
             "principal": context.principal.to_dict(),
@@ -167,9 +103,26 @@ class Offline:
             resource=context.resource,
             generator_name=self.name,
         )
+
+        # --- Unresolved flags heuristic ------------------------------
+        issues: list[str] = []
+        if (
+            context.action == Action(kind="any")
+            and context.resource == Resource(kind="any")
+            and "public" not in text_lower
+        ):
+            issues.append(
+                "Need does not specify an action or resource; "
+                "manual refinement required."
+            )
+        if context.principal == Principal(kind="any"):
+            issues.append(
+                "Principal scope is 'any'; tighten to a specific principal type or id."
+            )
+
         proposal = Proposal(
             intent=intent,
-            unresolved=Unresolved(items=detect_unresolved(context)),
+            unresolved=Unresolved(items=tuple(issues)),
             notes=Notes.from_dict({"generator": self.name, "model": self.model}),
         )
         return Result(
@@ -180,4 +133,4 @@ class Offline:
         )
 
 
-__all__ = ["Effect", "Offline"]
+__all__ = ["Offline"]
