@@ -1034,9 +1034,10 @@ def find_action_namespace(action: ActionScope, schema: CedarSchema) -> str | Non
 
     Searches every namespace in ``schema.source`` for an action whose
     identifier matches either ``action.name`` or ``action.group``. When
-    multiple namespaces claim the same action, the first one wins
-    (schemas with that pattern should be normalized before reaching
-    here).
+    multiple namespaces claim the same action, raises
+    :class:`WorkspaceError` because the resolved namespace would
+    otherwise depend on dict iteration order, producing non-deterministic
+    compile output across schema reloads.
 
     Args:
         action: Action scope whose namespace to resolve.
@@ -1046,7 +1047,12 @@ def find_action_namespace(action: ActionScope, schema: CedarSchema) -> str | Non
         The matching namespace identifier, or ``None`` if the action is
         not found in any namespace. Falls back to ``action.namespace``
         when set, allowing the caller to preserve an existing namespace.
+
+    Raises:
+        WorkspaceError: When the action id is declared in more than one
+            namespace and the caller has not supplied ``action.namespace``.
     """
+    matches: list[str] = []
     for namespace, declaration in schema.source.items():
         if not isinstance(namespace, str) or not isinstance(declaration, Mapping):
             continue
@@ -1055,7 +1061,17 @@ def find_action_namespace(action: ActionScope, schema: CedarSchema) -> str | Non
             continue
         identifier = action.name or action.group
         if identifier and identifier in actions:
-            return namespace
+            matches.append(namespace)
+    if len(matches) > 1 and not action.namespace:
+        from .errors import WorkspaceError
+
+        raise WorkspaceError(
+            f"action {identifier!r} is declared in multiple namespaces "
+            f"({', '.join(matches)}); set action.namespace explicitly to "
+            "disambiguate"
+        )
+    if matches:
+        return matches[0]
     return action.namespace
 
 
@@ -1089,47 +1105,54 @@ def intent_from_draft(
 ) -> PolicyIntent | None:
     """Rebuild the typed intent for a stored draft.
 
-    When the stored draft carries ``intent_json``, that JSON is parsed
-    into a typed :class:`PolicyIntent`. When the JSON is missing (legacy
-    drafts migrated by :func:`migrate_legacy_rows`), a permissive
-    fallback intent is constructed so that downstream callers see a
-    typed object instead of ``None``.
+    Returns the parsed :class:`PolicyIntent` when the stored draft
+    carries ``intent_json`` that round-trips successfully. Returns
+    ``None`` when no intent can be reconstructed (legacy drafts
+    without ``intent_json`` or drafts whose stored JSON is corrupt).
+    Callers must handle the ``None`` case explicitly; this function
+    no longer synthesizes a permissive ``permit(any/any/any)`` fallback
+    because that would silently bypass verification gates downstream.
+
+    Raises:
+        WorkspaceError: When ``intent_json`` is present but cannot be
+            parsed into the expected scope shape.
     """
+    from .errors import WorkspaceError
     from .scope_json import (
         action_scope_from_dict,
         principal_scope_from_dict,
         resource_scope_from_dict,
     )
 
-    if draft.intent_json:
-        data = loads_optional_json(draft.intent_json)
-        if data is not None:
-            return PolicyIntent(
-                id=str(data.get("id", intent_id)),
-                requirement_id=str(data.get("requirement_id", requirement_id)),
-                effect=data.get("effect", "permit"),
-                principal=principal_scope_from_dict(data.get("principal"))
-                or PrincipalScope(),
-                action=action_scope_from_dict(data.get("action")) or ActionScope(),
-                resource=resource_scope_from_dict(data.get("resource"))
-                or ResourceScope(),
-                when_clauses=tuple(
-                    ConditionClause(body=body) for body in data.get("when", []) or []
-                ),
-                unless_clauses=tuple(
-                    ConditionClause(body=body) for body in data.get("unless", []) or []
-                ),
-                notes=dict(data.get("notes", {}) or {}),
-            )
-    text = draft.cedar.strip().lower()
-    effect = "forbid" if text.startswith("forbid") else "permit"
+    if not draft.intent_json:
+        return None
+    data = loads_optional_json(draft.intent_json)
+    if data is None:
+        raise WorkspaceError(
+            f"stored draft {draft.id!r} has unparseable intent_json; "
+            "re-run `cedar-intent policy generate` for the requirement"
+        )
+    try:
+        principal = principal_scope_from_dict(data.get("principal")) or PrincipalScope()
+        action = action_scope_from_dict(data.get("action")) or ActionScope()
+        resource = resource_scope_from_dict(data.get("resource")) or ResourceScope()
+        when = tuple(ConditionClause(body=body) for body in data.get("when", []) or [])
+        unless = tuple(ConditionClause(body=body) for body in data.get("unless", []) or [])
+    except (KeyError, TypeError, ValueError) as error:
+        raise WorkspaceError(
+            f"stored draft {draft.id!r} has corrupt intent JSON ({error}); "
+            "re-run `cedar-intent policy generate` for the requirement"
+        ) from error
     return PolicyIntent(
-        id=intent_id,
-        requirement_id=requirement_id,
-        effect=effect,  # type: ignore[arg-type]
-        principal=PrincipalScope(),
-        action=ActionScope(),
-        resource=ResourceScope(),
+        id=str(data.get("id", intent_id)),
+        requirement_id=str(data.get("requirement_id", requirement_id)),
+        effect=data.get("effect", "permit"),
+        principal=principal,
+        action=action,
+        resource=resource,
+        when_clauses=when,
+        unless_clauses=unless,
+        notes=dict(data.get("notes", {}) or {}),
     )
 
 
