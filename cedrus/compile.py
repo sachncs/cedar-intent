@@ -20,10 +20,11 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from .error import Compile
-from .scope import Action, Clause, Principal, Resource
+from .need import slugify
+from .scope import Action, Clause, Principal, Resource, Scope
 
 Effect = Literal["permit", "forbid"]
 
@@ -145,6 +146,70 @@ class Intent:
             when_clauses=when_clauses,
             unless_clauses=unless_clauses,
             notes=notes,
+        )
+
+    @classmethod
+    def parse(
+        cls,
+        data: Any,
+        *,
+        need: Any,
+        principal: Principal,
+        action: Action,
+        resource: Resource,
+        generator_name: str,
+    ) -> Intent:
+        """Parse JSON-like data into a typed :class:`Intent`.
+
+        Polymorphic entry point used by generators. Recurses through
+        :meth:`Scope.parse` for the three scope slots and
+        :meth:`Clause.normalize` for ``when`` / ``unless`` lists.
+        Missing scope fields fall back to the supplied defaults.
+        Effect must be ``"permit"`` or ``"forbid"``; any other value
+        raises :class:`Compile`.
+
+        Args:
+            data: ``intent`` sub-dict from the model response.
+            need: :class:`~cedrus.need.Need` providing ``id`` and
+                ``domain`` for the derived intent identifier and the
+                ``requirement_id``.
+            principal: Default :class:`Principal` used when the model
+                omitted or failed to produce one.
+            action: Default :class:`Action` used when the model
+                omitted or failed to produce one.
+            resource: Default :class:`Resource` used when the model
+                omitted or failed to produce one.
+            generator_name: Name of the generating component, recorded
+                in ``notes["generator"]``.
+
+        Returns:
+            A fully typed :class:`Intent`.
+
+        Raises:
+            Compile: When ``data`` is not a dict or ``effect`` is not
+                ``"permit"`` / ``"forbid"``.
+        """
+        if not isinstance(data, dict):
+            raise Compile("intent must be a JSON object")
+        effect = data.get("effect")
+        if effect not in {"permit", "forbid"}:
+            raise Compile(f"intent has invalid effect {effect!r}")
+        parsed_principal = Scope.parse(data.get("principal") or {}) or principal
+        parsed_action = Scope.parse(data.get("action") or {}) or action
+        parsed_resource = Scope.parse(data.get("resource") or {}) or resource
+        when_clauses = Clause.normalize(data.get("when") or [])
+        unless_clauses = Clause.normalize(data.get("unless") or [])
+        intent_id = f"{need.domain}-{slugify(need.id)}"
+        return cls(
+            id=intent_id,
+            requirement_id=need.id,
+            effect=effect,
+            principal=parsed_principal,
+            action=parsed_action,
+            resource=parsed_resource,
+            when_clauses=when_clauses,
+            unless_clauses=unless_clauses,
+            notes={"generator": generator_name},
         )
 
 

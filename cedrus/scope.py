@@ -51,6 +51,42 @@ class Scope(ABC):
     def from_dict(cls, data: dict[str, Any]) -> Scope:
         """Reconstruct a scope from its JSON-friendly representation."""
 
+    @classmethod
+    def parse(cls, data: Any) -> Scope | None:
+        """Parse JSON-like data into the right :class:`Scope` subclass.
+
+        Polymorphic entry point that dispatches on the discriminator
+        fields documented in the SYSTEM_PROMPT contract:
+
+        * ``parent_type`` or ``parent_id`` → :class:`Resource`
+        * ``group_type`` or ``group_id`` → :class:`Principal`
+        * ``name`` → :class:`Action`
+
+        :class:`Clause` is not constructed here — callers normalize
+        clauses through :meth:`Clause.normalize`. Returns ``None`` for
+        ambiguous or invalid data; :class:`Scope` validation failures
+        inside :meth:`from_dict` are also swallowed and reported as
+        ``None`` so callers can fall back to their own defaults.
+
+        Args:
+            data: Raw JSON-like value.
+
+        Returns:
+            A typed :class:`Scope` instance, or ``None``.
+        """
+        if not isinstance(data, dict):
+            return None
+        try:
+            if "parent_type" in data or "parent_id" in data:
+                return Resource.from_dict(data)
+            if "group_type" in data or "group_id" in data:
+                return Principal.from_dict(data)
+            if "name" in data:
+                return Action.from_dict(data)
+        except ScopeFault:
+            return None
+        return None
+
 
 def _validate_kind(value: str, allowed: frozenset[str]) -> None:
     """Raise :class:`ScopeFault` if ``value`` is not in ``allowed``."""
@@ -294,6 +330,32 @@ class Clause(Scope):
         attrs_raw = data.get("attributes") or {}
         attrs: dict[str, Expression] = dict(attrs_raw) if isinstance(attrs_raw, dict) else {}
         return cls(body=str(data.get("body", "")), attributes=attrs)
+
+    @classmethod
+    def normalize(cls, values: Any) -> tuple[Clause, ...]:
+        """Normalize a JSON-friendly value to a tuple of :class:`Clause`.
+
+        Accepts a single string, a list of strings, or ``None`` / any
+        non-list value (which returns an empty tuple). Blank entries
+        are dropped.
+
+        Args:
+            values: ``when`` / ``unless`` payload from the JSON
+                response, or a single body string.
+
+        Returns:
+            A tuple of :class:`Clause` instances; empty when no
+            non-blank strings were supplied.
+        """
+        if isinstance(values, str):
+            values = [values]
+        if not isinstance(values, list):
+            return ()
+        return tuple(
+            cls(body=v.strip())
+            for v in values
+            if isinstance(v, str) and v.strip()
+        )
 
 
 __all__ = [
