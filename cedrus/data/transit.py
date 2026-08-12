@@ -17,6 +17,7 @@ from typing import Any
 from cedrus.compile import Intent
 from cedrus.data.unresolved import Unresolved
 from cedrus.data.wire import Notes, Usage
+from cedrus.schema import Schema
 from cedrus.scope import Action, Principal, Resource
 
 
@@ -34,7 +35,7 @@ class Context:
     """
 
     need: Any  # Need type (forward ref to avoid circular import)
-    schema: Any  # Schema type (forward ref to avoid circular import)
+    schema: Schema
     principal: Principal
     action: Action
     resource: Resource
