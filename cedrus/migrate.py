@@ -95,6 +95,21 @@ def detect_legacy_rows(repository: RepoLike) -> int:
     return count
 
 
+class Migrator:
+    """Legacy migration helper. Single entry point: :meth:`migrate`."""
+
+    def __init__(self, repo: RepoLike) -> None:
+        self.repo = repo
+
+    def detect(self) -> int:
+        """Return the number of legacy rows that still need migration."""
+        return detect_legacy_rows(self.repo)
+
+    def migrate(self) -> int:
+        """Migrate every legacy row in place. Returns rows upgraded."""
+        return migrate_legacy_rows(self.repo)
+
+
 def migrate_legacy_rows(repository: RepoLike) -> int:
     """Migrate every legacy row in ``repository``.
 

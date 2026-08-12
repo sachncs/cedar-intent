@@ -226,6 +226,37 @@ class Verifier:
         """Detect redundant duplicates."""
         return detect_redundancy([(p, extract_scope(p)) for p in policies])
 
+    def types(self, policies: Sequence[Any]) -> set[str]:
+        """Collect every entity type referenced in ``policies``."""
+        return collect_entity_types([(p, extract_scope(p)) for p in policies])
+
+    def coverage_action(
+        self,
+        policies: Sequence[Any],
+        names: Sequence[tuple[str, str]],
+    ) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+        """Coverage split for the actions in ``names``."""
+        extracted = [(p, extract_scope(p)) for p in policies]
+        return action_coverage(extracted, names, self.schema.actions_by_namespace())
+
+    def coverage_need(
+        self,
+        policies: Sequence[Any],
+        ids: Sequence[str],
+    ) -> tuple[set[str], set[str]]:
+        """Coverage split for the requirement ids in ``ids``."""
+        extracted = [(p, extract_scope(p)) for p in policies]
+        return requirement_coverage(extracted, ids)
+
+    def uncovered(
+        self,
+        items: list[Any],
+        kind: str,
+        template: str,
+    ) -> list[Finding]:
+        """Emit a coverage-finding list when ``items`` is non-empty."""
+        return missing_coverage_finding(kind, "", items, template)
+
 
 def verify_policies(
     domain: str,

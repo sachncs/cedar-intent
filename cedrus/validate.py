@@ -66,6 +66,25 @@ class Validator:
         """Validate Cedar statements against the schema."""
         return validate_cedar(cedars, self.schema)
 
+    def validate_policy(self, policy: Any) -> Vreport:
+        """Validate a single :class:`~cedrus.policy.Policy`.
+
+        Args:
+            policy: Any object with a ``cedar`` attribute and an ``id``.
+
+        Returns:
+            A :class:`Vreport`.
+
+        Raises:
+            Validate: When ``policy`` has no Cedar source.
+        """
+        cedar = getattr(policy, "cedar", "")
+        if not cedar:
+            raise Validate(
+                f"policy {getattr(policy, 'id', '?')} has no Cedar source"
+            )
+        return self.validate([cedar])
+
 
 def validate_cedar(policies: Sequence[str], schema: Schema) -> Vreport:
     """Validate Cedar statements against the schema and return a structured report.
