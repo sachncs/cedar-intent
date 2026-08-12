@@ -153,56 +153,93 @@ class Intent:
         cls,
         data: Any,
         *,
-        need: Any,
-        principal: Principal,
-        action: Action,
-        resource: Resource,
-        generator_name: str,
+        need: Any = None,
+        principal: Principal | None = None,
+        action: Action | None = None,
+        resource: Resource | None = None,
+        generator_name: str = "",
     ) -> Intent:
-        """Parse JSON-like data into a typed :class:`Intent`.
+        """Parse a dict into a typed :class:`Intent`.
 
-        Polymorphic entry point used by generators. Recurses through
-        :meth:`Scope.parse` for the three scope slots and
-        :meth:`Clause.normalize` for ``when`` / ``unless`` lists.
-        Missing scope fields fall back to the supplied defaults.
-        Effect must be ``"permit"`` or ``"forbid"``; any other value
-        raises :class:`Compile`.
+        Polymorphic on the shape of ``data``:
+
+        * LLM / JSON shape (CLI, generator): data has ``"effect"`` and
+          nested ``"principal"`` / ``"action"`` / ``"resource"`` /
+          ``"when"`` / ``"unless"`` / ``"notes"`` keys. ``need``,
+          ``principal``, ``action``, ``resource`` and
+          ``generator_name`` are used as defaults for missing fields.
+        * SQL shape (storage hydration): data has ``"intent"`` /
+          ``"principal"`` / ``"action"`` / ``"resource"`` /
+          ``"when_clauses"`` / ``"unless_clauses"`` / ``"notes"``
+          keys (the assembled JOIN result). The kwargs are ignored.
 
         Args:
-            data: ``intent`` sub-dict from the model response.
-            need: :class:`~cedrus.need.Need` providing ``id`` and
-                ``domain`` for the derived intent identifier and the
+            data: ``intent`` sub-dict from the model response (LLM
+                shape) or assembled dict of SQL rows (SQL shape).
+            need: Default :class:`~cedrus.need.Need` used by the LLM
+                path to derive the intent identifier and
                 ``requirement_id``.
-            principal: Default :class:`Principal` used when the model
-                omitted or failed to produce one.
-            action: Default :class:`Action` used when the model
-                omitted or failed to produce one.
-            resource: Default :class:`Resource` used when the model
-                omitted or failed to produce one.
-            generator_name: Name of the generating component, recorded
-                in ``notes["generator"]``.
+            principal: Default :class:`Principal` for the LLM path.
+            action: Default :class:`Action` for the LLM path.
+            resource: Default :class:`Resource` for the LLM path.
+            generator_name: Generator name recorded in
+                ``notes["generator"]`` (LLM path only).
 
         Returns:
             A fully typed :class:`Intent`.
 
         Raises:
-            Compile: When ``data`` is not a dict or ``effect`` is not
-                ``"permit"`` / ``"forbid"``.
+            Compile: When ``data`` is not a dict, ``effect`` is not
+                ``"permit"`` / ``"forbid"``, or the data shape is
+                neither LLM nor SQL.
         """
         if not isinstance(data, dict):
             raise Compile("intent must be a JSON object")
+        if "effect" in data:
+            return cls._parse_llm_shape(
+                data,
+                need=need,
+                principal=principal,
+                action=action,
+                resource=resource,
+                generator_name=generator_name,
+            )
+        if "intent" in data:
+            return cls._parse_sql_shape(data)
+        raise Compile(
+            "intent data has neither 'effect' (LLM shape) nor 'intent' "
+            "(SQL shape); cannot determine which parser to use"
+        )
+
+    @classmethod
+    def _parse_llm_shape(
+        cls,
+        data: dict[str, Any],
+        *,
+        need: Any,
+        principal: Principal | None,
+        action: Action | None,
+        resource: Resource | None,
+        generator_name: str,
+    ) -> Intent:
+        """Parse the LLM / JSON shape produced by generators."""
         effect = data.get("effect")
         if effect not in {"permit", "forbid"}:
             raise Compile(f"intent has invalid effect {effect!r}")
-        parsed_principal = Scope.parse(data.get("principal") or {}) or principal
-        parsed_action = Scope.parse(data.get("action") or {}) or action
-        parsed_resource = Scope.parse(data.get("resource") or {}) or resource
+        parsed_principal = Scope.parse(data.get("principal") or {}) or principal or Principal()
+        parsed_action = Scope.parse(data.get("action") or {}) or action or Action()
+        parsed_resource = Scope.parse(data.get("resource") or {}) or resource or Resource()
         when_clauses = Clause.normalize(data.get("when") or [])
         unless_clauses = Clause.normalize(data.get("unless") or [])
-        intent_id = f"{need.domain}-{slugify(need.id)}"
+        if need is not None:
+            intent_id = f"{need.domain}-{slugify(need.id)}"
+            requirement_id = need.id
+        else:
+            intent_id = str(data.get("id", ""))
+            requirement_id = str(data.get("requirement_id", ""))
         return cls(
             id=intent_id,
-            requirement_id=need.id,
+            requirement_id=requirement_id,
             effect=effect,
             principal=parsed_principal,
             action=parsed_action,
@@ -210,6 +247,30 @@ class Intent:
             when_clauses=when_clauses,
             unless_clauses=unless_clauses,
             notes={"generator": generator_name},
+        )
+
+    @classmethod
+    def _parse_sql_shape(cls, data: dict[str, Any]) -> Intent:
+        """Parse the SQL-shape dict assembled by the storage layer."""
+        intent_row = data["intent"]
+        principal = Principal.parse(data["principal"])
+        action = Action.parse(data["action"])
+        resource = Resource.parse(data["resource"])
+        when_clauses = tuple(Clause.parse(c) for c in data.get("when_clauses", ()))
+        unless_clauses = tuple(Clause.parse(c) for c in data.get("unless_clauses", ()))
+        notes: dict[str, str] = {
+            n["key"]: n["value"] for n in data.get("notes", ())
+        }
+        return cls(
+            id=intent_row["id"],
+            requirement_id=intent_row["requirement_id"],
+            effect=intent_row["effect"],
+            principal=principal,
+            action=action,
+            resource=resource,
+            when_clauses=when_clauses,
+            unless_clauses=unless_clauses,
+            notes=notes,
         )
 
 
