@@ -60,7 +60,6 @@ from cedrus.policies import Compiled, Draft, Existing, Kind
 from cedrus.schema import Schema
 from cedrus.scope import Action, Principal, Resource
 from cedrus.store import Backend, DraftStored, Memory, ReportStored, Repository, Stored
-from cedrus.utils import id as generate_id
 from cedrus.validate import Vreport
 from cedrus.verify import Report, Verifier
 
@@ -922,64 +921,6 @@ class Workspace:
             action=draft.action,
             resource=draft.resource,
             existing=tuple(existing_intents),
-        )
-
-    @staticmethod
-    def _build_stored_draft(
-        draft: Draft,
-        result: Result,
-        cedar: str,
-    ) -> DraftStored:
-        """Build a :class:`DraftStored` from a draft and a generation result.
-
-        The returned :class:`DraftStored` carries the typed intent
-        and the three scope JSON blobs alongside the existing Cedar
-        text. Those fields are required for verification and
-        deployment: when :meth:`apply_for_requirement` reads the draft
-        back, the reconstructed :class:`Draft` carries the original
-        scopes and intent, not a fabricated placeholder.
-
-        Args:
-            draft: Draft whose id, unresolved items, and provenance
-                are preserved in the stored row.
-            result: Generation result carrying the model identifier
-                and request id.
-            cedar: Compiled Cedar source text.
-
-        Returns:
-            A :class:`DraftStored` ready for insertion.
-        """
-        intent_json: str | None = None
-        if draft.intent is not None:
-            intent_json = json.dumps(draft.intent.to_dict(), sort_keys=True)
-        principal_json = (
-            json.dumps(draft.principal.to_dict(), sort_keys=True)
-            if draft.principal is not None
-            else None
-        )
-        action_json = (
-            json.dumps(draft.action.to_dict(), sort_keys=True)
-            if draft.action is not None
-            else None
-        )
-        resource_json = (
-            json.dumps(draft.resource.to_dict(), sort_keys=True)
-            if draft.resource is not None
-            else None
-        )
-
-        return DraftStored(
-            id=generate_id(),
-            policy_id=draft.id,
-            model=result.model,
-            request_id=result.request_id,
-            unresolved=draft.unresolved,
-            cedar=cedar,
-            created_at=datetime.now(UTC),
-            intent=intent,
-            principal=draft.principal,
-            action=draft.action,
-            resource=draft.resource,
         )
 
     @staticmethod
