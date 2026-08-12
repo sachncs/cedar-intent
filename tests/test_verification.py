@@ -365,7 +365,7 @@ def test_action_coverage_handles_same_action_in_two_namespaces() -> None:
     policies = [
         make_policy(
             "HR-001",
-            cedar='permit (principal, action == Hr::"view", resource);',
+            cedar='permit (principal, action == Hr::Action::"view", resource);',
         )
     ]
     report = verify_policies(
@@ -429,3 +429,86 @@ def test_verify_policies_records_finding_severity_warning() -> None:
     assert report.findings
     for finding in report.findings:
         assert finding.severity in {"warning", "info"}
+
+
+def test_malformed_policy_emits_warning() -> None:
+    """Policies that cedarpy cannot parse emit a malformed-policy finding."""
+    policies = [
+        make_policy(
+            "HR-001",
+            cedar="this is not valid Cedar at all",
+        )
+    ]
+    report = verify_policies(
+        domain="hr",
+        policies=policies,
+        requirement_ids=["HR-001"],
+        action_names=[("Foo", "view")],
+        entity_type_names=[],
+    )
+    malformed = [f for f in report.findings if f.kind == "malformed-policy"]
+    assert malformed
+    assert malformed[0].policy_id == "HR-001"
+    assert malformed[0].severity == "warning"
+
+
+def test_conditions_with_equivalent_ast_are_not_redundant() -> None:
+    """Two policies with the same condition AST are flagged as redundant."""
+    policies = [
+        make_policy(
+            "HR-001",
+            cedar=(
+                'permit (principal, action, resource) when { '
+                'principal == User::"alice" '
+                '};'
+            ),
+        ),
+        make_policy(
+            "HR-002",
+            cedar=(
+                'permit (principal, action, resource) when { '
+                'principal == User::"alice" '
+                '};'
+            ),
+        ),
+    ]
+    report = verify_policies(
+        domain="hr",
+        policies=policies,
+        requirement_ids=["HR-001", "HR-002"],
+        action_names=[],
+        entity_type_names=["User"],
+    )
+    redundancy = [f for f in report.findings if f.kind == "redundancy"]
+    assert redundancy, "two equivalent policies should be flagged redundant"
+
+
+def test_conditions_with_different_ast_have_different_signatures() -> None:
+    """Two policies with different conditions are NOT flagged redundant."""
+    policies = [
+        make_policy(
+            "HR-001",
+            cedar=(
+                'permit (principal, action, resource) when { '
+                'principal == User::"alice" '
+                '};'
+            ),
+        ),
+        make_policy(
+            "HR-002",
+            cedar=(
+                'permit (principal, action, resource) when { '
+                'principal == User::"bob" '
+                '};'
+            ),
+        ),
+    ]
+    report = verify_policies(
+        domain="hr",
+        policies=policies,
+        requirement_ids=["HR-001", "HR-002"],
+        action_names=[],
+        entity_type_names=["User"],
+    )
+    redundancy = [f for f in report.findings if f.kind == "redundancy"]
+    assert not redundancy, "distinct conditions should not be redundant"

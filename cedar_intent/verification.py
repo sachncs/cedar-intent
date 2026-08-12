@@ -38,6 +38,17 @@ Action::"readers"`` counts as covering every member action of the
 ``readers`` group. This keeps coverage faithful to Cedar's
 authorization semantics.
 
+Cedar parsing uses :func:`cedarpy.policies_to_json_str` to obtain a
+structured AST rather than a regex. The verifier therefore cannot
+be tricked by comments, embedded semicolons, or syntax that a regex
+would silently misclassify. When cedarpy cannot parse a policy, the
+verifier emits a ``malformed-policy`` warning rather than falling
+back to a permissive default.
+
+Conditions are compared by hashing the canonical JSON form of their
+AST bodies, so ``principal == User::"alice"`` and equivalent reorderings
+produce identical signatures.
+
 Complexity is O(n^2) for shadowing/redundancy across n policies and
 O(n*m) for coverage across n policies and m schema entries. That is
 acceptable for typical domain sizes (dozens to low hundreds of
@@ -47,10 +58,12 @@ would replace these approximations when needed.
 
 from __future__ import annotations
 
-import re
+import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
+
+import cedarpy
 
 VerificationSeverity = str  # "warning" | "info"
 
@@ -191,7 +204,30 @@ def verify_policies(
         A :class:`VerificationReport` aggregating findings and
         coverage metrics.
     """
-    extracted = [(policy, extract_scope(policy)) for policy in policies]
+    extracted: list[tuple[Any, CedarScopeExtraction]] = []
+    malformed: list[tuple[Any, str]] = []
+    for policy in policies:
+        try:
+            extraction = extract_scope(policy)
+        except VerificationParseError as error:
+            malformed.append((policy, str(error)))
+            continue
+        extracted.append((policy, extraction))
+
+    findings: list[VerificationFinding] = []
+    for policy, parse_error in malformed:
+        findings.append(
+            VerificationFinding(
+                kind="malformed-policy",
+                severity="warning",
+                policy_id=_policy_id(policy),
+                message=(
+                    f"policy {_policy_id(policy) or '(unknown)'} could not be parsed "
+                    f"by cedarpy and was skipped: {parse_error}"
+                ),
+            )
+        )
+
     return _verify_extracted(
         domain,
         extracted,
@@ -199,6 +235,7 @@ def verify_policies(
         action_names,
         entity_type_names,
         actions_by_namespace or {},
+        findings,
     )
 
 
@@ -209,8 +246,9 @@ def _verify_extracted(
     action_names: Sequence[tuple[str, str]],
     entity_type_names: Iterable[str],
     actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]],
+    prior_findings: Sequence[VerificationFinding],
 ) -> VerificationReport:
-    findings: list[VerificationFinding] = []
+    findings: list[VerificationFinding] = list(prior_findings)
     findings.extend(detect_shadowing(extracted))
     findings.extend(detect_redundancy(extracted))
 
@@ -255,15 +293,18 @@ def _verify_extracted(
     )
 
 
+class VerificationParseError(Exception):
+    """Raised when cedarpy cannot parse a Cedar policy."""
+
+
 def extract_scope(policy: Any) -> CedarScopeExtraction:
     """Extract scope and condition data from ``policy``.
 
-    Cedar source is parsed with a lenient regex parser that captures
-    the effect, principal/action/resource types, and condition
-    bodies. The verifier operates on regex-derived signatures so it
-    can analyze imported policies whose intent is ``None`` as well as
-    CLI-generated policies whose Cedar source is the authoritative
-    artifact.
+    Cedar source is parsed via :func:`cedarpy.policies_to_json_str`,
+    which yields a structured JSON AST. The verifier operates on
+    AST-derived signatures so it can analyze imported policies whose
+    intent is ``None`` as well as CLI-generated policies whose Cedar
+    source is the authoritative artifact.
 
     Args:
         policy: Policy (or any object with a ``.cedar`` attribute or
@@ -272,9 +313,12 @@ def extract_scope(policy: Any) -> CedarScopeExtraction:
     Returns:
         A :class:`CedarScopeExtraction` capturing principal, action,
         resource, conditions, and effect.
+
+    Raises:
+        VerificationParseError: When cedarpy cannot parse the policy.
     """
     cedar = _policy_cedar(policy)
-    return _parse_with_regex(cedar)
+    return _parse_with_ast(cedar)
 
 
 def _policy_id(policy: Any) -> str:
@@ -416,6 +460,7 @@ def scopes_match(
 def _resolve_action_namespace(
     action_signature: tuple[str, ...],
     actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]],
+    action_names: Sequence[tuple[str, str]] | None = None,
 ) -> tuple[str, ...]:
     """Resolve a possibly-namespaceless action signature against the schema.
 
@@ -430,6 +475,11 @@ def _resolve_action_namespace(
     and is resolved similarly by picking the namespace that hosts the
     group. When the group is ambiguous, the original signature is
     returned so downstream coverage flags the ambiguity.
+
+    When ``actions_by_namespace`` is empty but ``action_names`` is
+    provided, the resolver falls back to a single-namespace lookup
+    against ``action_names`` so coverage can still match against the
+    flat action list.
     """
     if len(action_signature) != 3:
         return action_signature
@@ -438,12 +488,18 @@ def _resolve_action_namespace(
     if action_signature[0]:
         return action_signature
     action_id = action_signature[1]
-    matches: list[str] = []
-    for namespace, actions in actions_by_namespace.items():
-        if action_id in actions:
-            matches.append(namespace)
-    if len(matches) == 1:
-        return (matches[0], action_signature[1], action_signature[2])
+    if actions_by_namespace:
+        matches: list[str] = []
+        for namespace, actions in actions_by_namespace.items():
+            if action_id in actions:
+                matches.append(namespace)
+        if len(matches) == 1:
+            return (matches[0], action_signature[1], action_signature[2])
+        return action_signature
+    if action_names is not None:
+        namespaces_for_id = {ns for ns, name in action_names if name == action_id}
+        if len(namespaces_for_id) == 1:
+            return (next(iter(namespaces_for_id)), action_id, action_signature[2])
     return action_signature
 
 
@@ -471,7 +527,9 @@ def action_coverage(
     covered: set[tuple[str, str]] = set()
     referenced: set[tuple[str, str]] = set()
     for _, extraction in policies:
-        signature = _resolve_action_namespace(extraction.action, actions_by_namespace)
+        signature = _resolve_action_namespace(
+            extraction.action, actions_by_namespace, action_names
+        )
         kind = _action_kind(signature)
         if kind == "named":
             namespace, name = _action_named(signature)
@@ -519,16 +577,12 @@ def collect_entity_types(
     """Return the set of entity type names referenced by ``policies``."""
     types: set[str] = set()
     for _, extraction in policies:
-        # Treat action slots as a unit so the action id is excluded
-        # from entity-type coverage.
         action = extraction.action
         if (
             isinstance(action, tuple)
             and len(action) >= 3
             and action[-1] in {"named", "in_group"}
         ):
-            # Slot 0 holds the action namespace (if any); skip the
-            # action id in slot 1 because it is not an entity type.
             for entry in action[:1]:
                 for name in _extract_type_names(entry):
                     if name:
@@ -560,7 +614,12 @@ def extract_entity_types(policies: Sequence[Any]) -> set[str]:
     Returns:
         Set of entity type identifiers referenced by any policy.
     """
-    extracted = [(policy, extract_scope(policy)) for policy in policies]
+    extracted: list[tuple[Any, CedarScopeExtraction]] = []
+    for policy in policies:
+        try:
+            extracted.append((policy, extract_scope(policy)))
+        except VerificationParseError:
+            continue
     return collect_entity_types(extracted)
 
 
@@ -584,13 +643,15 @@ def missing_coverage_finding(
     ]
 
 
-def _parse_with_regex(cedar: str) -> CedarScopeExtraction:
-    """Regex parser that extracts scope and condition data from Cedar.
+def _parse_with_ast(cedar: str) -> CedarScopeExtraction:
+    """Structured parser that extracts scope and condition data from Cedar.
 
-    Captures the effect, principal/action/resource types, and any
-    condition bodies. Returns a permissive default when no useful
-    information can be extracted so verification still runs against
-    every policy.
+    Uses :func:`cedarpy.policies_to_json_str` to obtain a normalized
+    JSON AST, then walks the AST to extract principal/action/resource
+    signatures and a canonicalized condition signature.
+
+    Raises:
+        VerificationParseError: When cedarpy cannot parse ``cedar``.
     """
     text = cedar.strip()
     if not text:
@@ -602,152 +663,154 @@ def _parse_with_regex(cedar: str) -> CedarScopeExtraction:
             effect="permit",
             cedar=cedar,
         )
-    head_match = re.match(
-        r"\s*(permit|forbid)\s*\(\s*(?P<principal>.*?)\s*,\s*action\s+(?P<action>[^,]*)\s*,\s*resource\s*(?P<resource>[^);]*?)\s*\)\s*(?P<tail>.*?);?\s*$",
-        text,
-        flags=re.DOTALL,
-    )
-    if not head_match:
-        return CedarScopeExtraction(
-            principal=("any",),
-            action=("any",),
-            resource=("any",),
-            conditions=(),
-            effect="permit",
-            cedar=cedar,
-        )
-    effect = head_match.group(1).strip()
-    principal_signature = _parse_principal_text(head_match.group("principal"))
-    raw_action = head_match.group("action").strip()
-    # Strip a leading ``action`` keyword if the head regex captured it.
-    if raw_action.startswith("action"):
-        raw_action = raw_action[len("action") :].lstrip()
-    action_signature = _parse_action_text(raw_action)
-    raw_resource = head_match.group("resource").strip()
-    if raw_resource.startswith("resource"):
-        raw_resource = raw_resource[len("resource") :].lstrip()
-    resource_signature = _parse_resource_text(raw_resource)
-    tail = head_match.group("tail") or ""
-    conditions: list[tuple[str, str]] = []
-    for match in re.finditer(r"\bwhen\s*\{(.*?)\}", tail, flags=re.DOTALL):
-        conditions.append(("when", match.group(1).strip()))
-    for match in re.finditer(r"\bunless\s*\{(.*?)\}", tail, flags=re.DOTALL):
-        conditions.append(("unless", match.group(1).strip()))
+    try:
+        json_text = cedarpy.policies_to_json_str(text + "\n")
+    except (ValueError, RuntimeError) as error:
+        raise VerificationParseError(str(error)) from error
+    try:
+        doc = json.loads(json_text)
+    except json.JSONDecodeError as error:
+        raise VerificationParseError(str(error)) from error
+    static_policies = doc.get("staticPolicies") or {}
+    if not static_policies:
+        raise VerificationParseError("cedarpy produced no static policies")
+    policy_node = next(iter(static_policies.values()))
+    effect = policy_node.get("effect", "permit")
+    principal = _parse_principal_node(policy_node.get("principal") or {})
+    action = _parse_action_node(policy_node.get("action") or {})
+    resource = _parse_resource_node(policy_node.get("resource") or {})
+    conditions = _parse_conditions(policy_node.get("conditions") or [])
     return CedarScopeExtraction(
-        principal=principal_signature,
-        action=action_signature,
-        resource=resource_signature,
-        conditions=tuple(sorted(conditions)),
+        principal=principal,
+        action=action,
+        resource=resource,
+        conditions=conditions,
         effect=effect,
         cedar=cedar,
     )
 
 
-def _parse_principal_text(text: str) -> tuple[str, ...]:
-    """Parse a Cedar principal expression into a signature tuple.
-
-    Accepts both ``principal`` and the bare operator form. The ``is``
-    branch uses a negative lookahead so it does not consume an
-    ``in X::Y`` tail.
-    """
-    normalized = text.strip()
-    if not normalized or normalized == "principal":
+def _parse_principal_node(node: Mapping[str, Any]) -> tuple[str, ...]:
+    """Convert a cedarpy principal node into a signature tuple."""
+    op = node.get("op")
+    if op == "All":
         return ("any",)
-    is_match = re.match(r"^(?:principal\s+)?is\s+((?:(?!.*\s+in\s+).)+)$", normalized)
-    if is_match:
-        return (is_match.group(1).strip(),)
-    eq_match = re.match(r'^(?:principal\s+)?==\s*(.+?)::"([^"]+)"$', normalized)
-    if eq_match:
-        return (f'{eq_match.group(1).strip()}::{eq_match.group(2).strip()}',)
-    in_match = re.match(r'^(?:principal\s+)?in\s+(.+?)::"([^"]+)"$', normalized)
-    if in_match:
-        # Group membership: return the group type only (not the group id,
-        # which is not an entity type).
-        return (in_match.group(1).strip(),)
-    return (normalized,)
+    if op == "is":
+        return (str(node.get("entity_type", "")).strip(),)
+    if op == "==":
+        entity = node.get("entity") or {}
+        return (f'{entity.get("type", "")}::{entity.get("id", "")}',)
+    if op == "in":
+        entity = node.get("entity") or {}
+        return (str(entity.get("type", "")).strip(),)
+    return (json.dumps(node, sort_keys=True),)
 
 
-def _parse_action_text(text: str) -> tuple[str, ...]:
-    """Parse a Cedar action expression into a signature tuple.
+def _parse_action_node(node: Mapping[str, Any]) -> tuple[str, ...]:
+    """Convert a cedarpy action node into a signature tuple.
 
-    Accepts both ``action`` and the bare operator form so it works
-    with both the head regex output and direct invocations from tests.
-    Recognizes ``Action::"id"`` (no namespace) and
-    ``Namespace::Action::"id"`` (with namespace), as well as
-    ``Namespace::"group"`` action-group references.
+    cedarpy emits ``"Action"`` as the type for namespace-less action
+    references like ``action == Action::"view"``. The verifier treats
+    that placeholder as the empty namespace so the downstream resolver
+    can pick the correct schema namespace.
     """
-    normalized = text.strip()
-    if not normalized or normalized == "action":
+    op = node.get("op")
+    if op == "All":
         return ("any",)
-    eq_with_ns = re.match(
-        r'^(?:action\s+)?==\s*([A-Za-z0-9_]+)::Action::"([^"]+)"$', normalized
-    )
-    if eq_with_ns:
-        return (eq_with_ns.group(1), eq_with_ns.group(2), "named")
-    eq_no_ns = re.match(r'^(?:action\s+)?==\s*Action::"([^"]+)"$', normalized)
-    if eq_no_ns:
-        return ("", eq_no_ns.group(1), "named")
-    eq_with_id = re.match(
-        r'^(?:action\s+)?==\s*([A-Za-z0-9_]+)::"([^"]+)"$', normalized
-    )
-    if eq_with_id:
-        return (eq_with_id.group(1), eq_with_id.group(2), "named")
-    eq_id_only = re.match(r'^(?:action\s+)?==\s*"([^"]+)"$', normalized)
-    if eq_id_only:
-        return ("", eq_id_only.group(1), "named")
-    in_with_ns = re.match(
-        r'^(?:action\s+)?in\s+([A-Za-z0-9_]+)::Action::"([^"]+)"$', normalized
-    )
-    if in_with_ns:
-        return (in_with_ns.group(1), in_with_ns.group(2), "in_group")
-    in_no_ns = re.match(r'^(?:action\s+)?in\s+Action::"([^"]+)"$', normalized)
-    if in_no_ns:
-        return ("", in_no_ns.group(1), "in_group")
-    in_with_id = re.match(
-        r'^(?:action\s+)?in\s+([A-Za-z0-9_]+)::"([^"]+)"$', normalized
-    )
-    if in_with_id:
-        return (in_with_id.group(1), in_with_id.group(2), "in_group")
-    in_id_only = re.match(r'^(?:action\s+)?in\s+"([^"]+)"$', normalized)
-    if in_id_only:
-        return ("", in_id_only.group(1), "in_group")
-    return (normalized,)
-
-
-def _parse_resource_text(text: str) -> tuple[str, ...]:
-    """Parse a Cedar resource expression into a signature tuple.
-
-    Accepts both ``resource`` and the bare operator form. The ``is``
-    branch uses a negative lookahead so it does not consume the
-    ``in X::Y`` tail. The nested ``in X::Z`` form returns a tuple
-    of the child type and parent type names so coverage analysis can
-    pick both up.
-    """
-    normalized = text.strip()
-    if not normalized or normalized == "resource":
-        return ("any",)
-    is_match = re.match(r"^(?:resource\s+)?is\s+((?:(?!.*\s+in\s+).)+)$", normalized)
-    if is_match:
-        return (is_match.group(1).strip(),)
-    in_match = re.match(
-        r'^(?:resource\s+)?is\s+(.+?)\s+in\s+(.+?)::"([^"]+)"$', normalized
-    )
-    if in_match:
+    if op == "==":
+        entity = node.get("entity") or {}
         return (
-            in_match.group(1).strip(),
-            in_match.group(2).strip(),
+            _normalize_action_type(entity.get("type", "")),
+            str(entity.get("id", "")),
+            "named",
         )
-    return (normalized,)
+    if op == "in":
+        # cedarpy emits ``entity`` (singular) for single-target ``in``
+        # expressions like ``action in Action::"readers"`` and
+        # ``entities`` (plural) for list forms like
+        # ``action in [Action::"view", Action::"edit"]``.
+        entities = node.get("entities")
+        if entities is None and node.get("entity") is not None:
+            entities = [node["entity"]]
+        if entities is None:
+            entities = []
+        if len(entities) == 1:
+            entity = entities[0]
+            return (
+                _normalize_action_type(entity.get("type", "")),
+                str(entity.get("id", "")),
+                "in_group",
+            )
+        kinds = ",".join(
+            f"{_normalize_action_type(e.get('type', ''))}::{e.get('id', '')}"
+            for e in entities
+        )
+        return (kinds, "list", "in_group")
+    return (json.dumps(node, sort_keys=True),)
+
+
+def _normalize_action_type(type_name: Any) -> str:
+    """Strip cedarpy's ``"Action"`` and ``"<Namespace>::Action"`` placeholders.
+
+    Cedar policies reference actions as ``Action::"id"`` (no
+    namespace) or ``<Namespace>::Action::"id"`` (with namespace).
+    cedarpy's JSON AST emits the type as ``"Action"`` or
+    ``"<Namespace>::Action"``. The verifier normalizes those to the
+    empty string (no namespace) or to the bare namespace so downstream
+    resolution matches the schema's flat ``(namespace, id)`` form.
+    """
+    text = str(type_name)
+    if text == "Action":
+        return ""
+    if text.endswith("::Action"):
+        return text[: -len("::Action")]
+    return text
+
+
+def _parse_resource_node(node: Mapping[str, Any]) -> tuple[str, ...]:
+    """Convert a cedarpy resource node into a signature tuple."""
+    op = node.get("op")
+    if op == "All":
+        return ("any",)
+    if op == "is":
+        entity_type = node.get("entity_type")
+        in_entity = node.get("in_entity")
+        in_node = node.get("in")
+        if in_entity is None and isinstance(in_node, Mapping):
+            in_entity = in_node.get("entity") or {}
+        if in_entity:
+            return (str(entity_type), str(in_entity.get("type", "")))
+        return (str(entity_type).strip(),)
+    if op == "==":
+        entity = node.get("entity") or {}
+        return (f'{entity.get("type", "")}::{entity.get("id", "")}',)
+    if op == "in":
+        entity = node.get("entity") or {}
+        return (str(entity.get("type", "")).strip(),)
+    return (json.dumps(node, sort_keys=True),)
+
+
+def _parse_conditions(
+    raw_conditions: Sequence[Mapping[str, Any]],
+) -> tuple[tuple[str, str], ...]:
+    """Convert cedarpy condition nodes into ``(kind, canonical_body)`` tuples.
+
+    The canonical body is the JSON-serialized form of the AST with
+    keys sorted. This means equivalent expressions produce identical
+    signatures regardless of source whitespace or operator ordering
+    choices.
+    """
+    pairs: list[tuple[str, str]] = []
+    for condition in raw_conditions:
+        kind = condition.get("kind", "when")
+        body = condition.get("body")
+        canonical = json.dumps(body, sort_keys=True) if body is not None else ""
+        pairs.append((str(kind), canonical))
+    return tuple(sorted(pairs))
 
 
 def _extract_type_names(token: Any) -> list[str]:
-    """Pull type-name identifiers out of a slot signature token.
-
-    Handles plain type-name strings (``Foo::User``), bare principal
-    placeholders (``any``), operator tokens (``==``, ``in``,
-    ``named``, ``in_group``), quoted action ids, and nested resource
-    tuples produced by ``resource is X in Y::Z``.
-    """
+    """Pull type-name identifiers out of a slot signature token."""
     if token is None:
         return []
     if isinstance(token, str):
@@ -763,8 +826,6 @@ def _extract_type_names(token: Any) -> list[str]:
             return []
         return [token]
     if isinstance(token, tuple):
-        # If the token itself is an action tuple (namespace, id, marker),
-        # skip the action id and only collect nested type references.
         if len(token) >= 3 and token[-1] in {"named", "in_group"}:
             return []
         names: list[str] = []
@@ -777,6 +838,7 @@ def _extract_type_names(token: Any) -> list[str]:
 __all__ = [
     "CedarScopeExtraction",
     "VerificationFinding",
+    "VerificationParseError",
     "VerificationReport",
     "detect_redundancy",
     "detect_shadowing",
