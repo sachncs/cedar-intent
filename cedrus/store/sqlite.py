@@ -86,7 +86,6 @@ from cedrus.compile import Intent
 from cedrus.data import Payload
 from cedrus.deploy import Record
 from cedrus.error import Store
-from cedrus.migrate import detect_legacy_rows
 from cedrus.need import Need
 from cedrus.scope import Action, Principal, Resource, Scope
 
@@ -535,23 +534,36 @@ class Sqlite:
         columns being populated. The CLI exposes ``cedrus migrate`` to
         upgrade legacy rows in place.
 
+        Detection is inlined against the SQL columns so it stays
+        authoritative even after the typed-object dataclass refactor
+        (where the typed fields always deserialize via fallbacks).
+
         Raises:
             Store: When one or more legacy rows remain.
         """
-        if self.schema_version() >= SCHEMA_VERSION:
-            pending = detect_legacy_rows(self)
-            if pending:
-                raise Store(
-                    f"workspace at {self.path} contains {pending} legacy rows; "
-                    "run 'cedrus migrate --apply' to upgrade to the 0.6.0 schema"
-                )
-            return
-        # Schema version not yet at current; treat the database as
-        # legacy until the migration runs.
-        raise Store(
-            f"workspace at {self.path} has not been migrated to schema "
-            f"version {SCHEMA_VERSION}; run 'cedrus migrate --apply'"
-        )
+        if self.schema_version() < SCHEMA_VERSION:
+            raise Store(
+                f"workspace at {self.path} has not been migrated to schema "
+                f"version {SCHEMA_VERSION}; run 'cedrus migrate --apply'"
+            )
+        # Schema is at current version; count rows that still have
+        # NULL in any of the 0.6.0 columns.
+        legacy_policies = self.connection.execute(
+            "SELECT COUNT(*) FROM policies WHERE action_scope_json IS NULL"
+        ).fetchone()[0]
+        legacy_drafts = self.connection.execute(
+            "SELECT COUNT(*) FROM drafts "
+            "WHERE intent_json IS NULL "
+            "OR principal_scope_json IS NULL "
+            "OR action_scope_json IS NULL "
+            "OR resource_scope_json IS NULL"
+        ).fetchone()[0]
+        pending = int(legacy_policies) + int(legacy_drafts)
+        if pending:
+            raise Store(
+                f"workspace at {self.path} contains {pending} legacy rows; "
+                "run 'cedrus migrate --apply' to upgrade to the 0.6.0 schema"
+            )
 
     def close(self) -> None:
         """Close the underlying database connection.
