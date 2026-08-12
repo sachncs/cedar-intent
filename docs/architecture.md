@@ -34,7 +34,7 @@ bundle, and which responsibilities belong to which class.
                           |
                   Case.test()  -> Suite
                           |
-              Workspace.verify_domain()  -> Report
+              Space.verify_domain()  -> Report
                           |
               Bundler.build()  -> Manifest
                           |
@@ -119,11 +119,11 @@ identifier string, allowing them to survive policy deletion.
 ## Extending the system
 
 - **New generator** — implement the `Generator` Protocol in
-  `cedrus.generator.base` and pass it to `Workspace.generate_draft`.
+  `cedrus.generator.base` and pass it to `Space.generate_draft`.
 - **New storage backend** — implement the `Repository` Protocol in
   `cedrus.storage.base` and construct the workspace with it.
 - **New verification check** — add a function returning a list of
-  `Finding` and call it from `verify_policies`.
+  `Finding` and call it from `verify`.
 - **New deployment target** — extend `Client.deploy` with a
   new branch for your protocol, or compose `Bundler` with your
   own transport.

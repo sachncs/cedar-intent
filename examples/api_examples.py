@@ -27,7 +27,7 @@ from cedrus import (
     Report,
     Resource,
     Schema,
-    Workspace,
+    Space,
     compile_intent,
     run_scenarios,
     validate_cedar,
@@ -62,9 +62,9 @@ PHOTOFLASH_SCHEMA = {
 }
 
 
-def make_workspace() -> Workspace:
+def make_workspace() -> Space:
     """Build a fresh in-memory workspace for the recipes."""
-    return Workspace.in_memory(Path("/tmp/cedrus-example"))
+    return Space.in_memory(Path("/tmp/cedrus-example"))
 
 
 def make_schema() -> Schema:
@@ -107,7 +107,7 @@ def recipe_validate_cedar() -> None:
     print("validate_cedar ->", report.passed, report.formatted)
 
 
-def recipe_offline_generator(workspace: Workspace) -> tuple[Draft, Any]:
+def recipe_offline_generator(workspace: Space) -> tuple[Draft, Any]:
     """Run the deterministic Offline on a draft policy."""
     schema = make_schema()
     draft = Draft(
@@ -136,7 +136,7 @@ def recipe_litellm_generator_factory() -> Llm:
     )
 
 
-def recipe_run_scenarios(workspace: Workspace, compiled: Compiled) -> None:
+def recipe_run_scenarios(workspace: Space, compiled: Compiled) -> None:
     """Run a small scenario suite against the compiled policy."""
     schema = make_schema()
     scenarios = [
@@ -161,7 +161,7 @@ def recipe_run_scenarios(workspace: Workspace, compiled: Compiled) -> None:
     print("run_scenarios ->", report.passed, [(r.scenario.name, r.actual) for r in report.results])
 
 
-def recipe_verify_policies(workspace: Workspace) -> Report:
+def recipe_verify_policies(workspace: Space) -> Report:
     """Run static verification on a domain's compiled policies."""
     schema = make_schema()
     policies = workspace.list_compiled_policies("hr")
@@ -181,7 +181,7 @@ def recipe_verify_policies(workspace: Workspace) -> Report:
     return report
 
 
-def recipe_deployment(workspace: Workspace) -> None:
+def recipe_deployment(workspace: Space) -> None:
     """Build a deployment bundle and write it to a local directory."""
     workspace.init_domain("hr")
     manifest = workspace.build_bundle("hr", metadata={"channel": "staging"})

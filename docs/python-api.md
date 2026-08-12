@@ -27,9 +27,9 @@ from cedrus import (
     Record,
     Bundler,
     Client,
-    verify_policies,
-    validate_cedar,
-    run_scenarios,
+    verify,
+    validate,
+    run,
 )
 ```
 
@@ -40,13 +40,13 @@ from pathlib import Path
 from cedrus import Workspace
 
 # On-disk workspace (SQLite-backed).
-workspace = Workspace.open(Path("./acme"))
+workspace = Space.open(Path("./acme"))
 
 # Brand-new workspace with SQLite storage.
-workspace = Workspace.create(Path("./new-workspace"))
+workspace = Space.create(Path("./new-workspace"))
 
 # In-memory workspace for tests or ephemeral sessions.
-workspace = Workspace.in_memory(Path("./ephemeral"))
+workspace = Space.in_memory(Path("./ephemeral"))
 ```
 
 ## Loading requirements
@@ -55,7 +55,7 @@ workspace = Workspace.in_memory(Path("./ephemeral"))
 from pathlib import Path
 from cedrus import Workspace, Need
 
-workspace = Workspace.open(Path("./acme"))
+workspace = Space.open(Path("./acme"))
 
 # Add a single requirement from a Markdown file.
 requirement = workspace.add_requirement_file(Path("./acme/hr/requirements/HR-042.md"))
@@ -176,7 +176,7 @@ policy is not persisted.
 ## Running scenarios standalone
 
 ```python
-from cedrus import Case, run_scenarios
+from cedrus import Case, run
 
 scenarios = [
     Case(
@@ -189,18 +189,18 @@ scenarios = [
     ),
 ]
 
-report = run_scenarios([compiled.cedar], entities=[], scenarios=scenarios, schema=schema)
+report = run([compiled.cedar], entities=[], scenarios=scenarios, schema=schema)
 print(report.passed)
 ```
 
 ## Verification
 
 ```python
-from cedrus import verify_policies
+from cedrus import verify
 
 policies = workspace.list_compiled_policies("hr")
 requirement_ids = [r.id for r in workspace.list_requirements("hr")]
-report = verify_policies(
+report = verify(
     domain="hr",
     policies=policies,
     requirement_ids=requirement_ids,
