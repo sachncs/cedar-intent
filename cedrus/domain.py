@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .need import Need
-from .policy import Compiled, Existing
+from .policies import Compiled, Existing
 
 
 @dataclass

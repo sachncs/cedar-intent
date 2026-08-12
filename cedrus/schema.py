@@ -103,7 +103,7 @@ class Schema:
                 continue
             for type_name in entity_types:
                 if isinstance(type_name, str):
-                    names.add(_qualify(namespace, type_name))
+                    names.add(qualify(namespace, type_name))
         return names
 
     def action_names(self) -> set[tuple[str, str]]:
@@ -209,13 +209,13 @@ class Schema:
                 continue
             entity_types = declaration.get("entityTypes", {})
             if isinstance(entity_types, Mapping) and type_name in entity_types:
-                matches.append(_qualify(namespace, type_name))
+                matches.append(qualify(namespace, type_name))
         if len(matches) == 1:
             return matches[0]
         return type_name
 
 
-def _qualify(namespace: str, name: str) -> str:
+def qualify(namespace: str, name: str) -> str:
     """Join ``namespace`` and ``name`` with the Cedar namespace separator."""
     return f"{namespace}::{name}" if namespace else name
 

@@ -51,7 +51,7 @@ ONLINE_ENV_VAR = "CEDAR_INTENT_ONLINE"
 MODEL_ENV_VAR = "CEDAR_INTENT_MODEL"
 
 
-def _positive_finite_float(value: str) -> float:
+def positive_finite_float(value: str) -> float:
     """argparse type for positive finite floats (reject inf/nan/<=0)."""
     try:
         number = float(value)
@@ -64,7 +64,7 @@ def _positive_finite_float(value: str) -> float:
     return number
 
 
-def _non_negative_int(value: str) -> int:
+def non_negative_int(value: str) -> int:
     """argparse type for non-negative integers."""
     try:
         number = int(value)
@@ -77,9 +77,9 @@ def _non_negative_int(value: str) -> int:
     return number
 
 
-def _positive_int(value: str) -> int:
+def positive_int(value: str) -> int:
     """argparse type for positive integers."""
-    number = _non_negative_int(value)
+    number = non_negative_int(value)
     if number <= 0:
         raise argparse.ArgumentTypeError(
             f"value must be positive, got {value!r}"
@@ -201,9 +201,9 @@ def add_policy_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
     generate_parser.add_argument(
         "--offline", action="store_true", help="Use Offline."
     )
-    generate_parser.add_argument("--timeout", type=_positive_finite_float, default=60)
-    generate_parser.add_argument("--retries", type=_non_negative_int, default=2)
-    generate_parser.add_argument("--max-tokens", type=_positive_int, default=4096)
+    generate_parser.add_argument("--timeout", type=positive_finite_float, default=60)
+    generate_parser.add_argument("--retries", type=non_negative_int, default=2)
+    generate_parser.add_argument("--max-tokens", type=positive_int, default=4096)
 
     apply_parser = sub_pol.add_parser(
         "apply", help="Validate and persist a previously generated draft."
@@ -274,7 +274,7 @@ def add_deploy_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
     push.add_argument(
         "--target", required=True, help="Local path or http(s) URL."
     )
-    push.add_argument("--timeout", type=_positive_finite_float, default=30)
+    push.add_argument("--timeout", type=positive_finite_float, default=30)
     push.add_argument(
         "--header",
         action="append",
@@ -331,9 +331,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         result, exit_code = run_command(args)
     except Error as error:
-        return _report_error(args, error)
+        return report_error(args, error)
     except Exception as error:
-        return _report_unexpected_error(args, error)
+        return report_unexpected_error(args, error)
     if result is not None:
         if args.json:
             print(json.dumps(result, indent=2, default=str))
@@ -342,7 +342,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return exit_code
 
 
-def _report_error(args: Namespace, error: Error) -> int:
+def report_error(args: Namespace, error: Error) -> int:
     """Emit a structured error envelope and return the exit code."""
     message = str(error)
     if getattr(args, "json", False):
@@ -358,7 +358,7 @@ def _report_error(args: Namespace, error: Error) -> int:
     return 1
 
 
-def _report_unexpected_error(args: Namespace, error: BaseException) -> int:
+def report_unexpected_error(args: Namespace, error: BaseException) -> int:
     """Wrap unexpected exceptions so CI never sees a raw stack trace."""
     if getattr(args, "json", False):
         envelope = {

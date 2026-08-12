@@ -77,14 +77,14 @@ class Finding:
         severity: ``"warning"`` or ``"info"``.
         policy_id: Identifier of the policy the finding concerns.
         message: Human-readable explanation.
-        related_policy_id: Optional identifier of a related policy.
+        relatedpolicy_id: Optional identifier of a related policy.
     """
 
     kind: str
     severity: VerificationSeverity
     policy_id: str
     message: str
-    related_policy_id: str | None = None
+    relatedpolicy_id: str | None = None
 
     def to_dict(self) -> Mapping[str, Any]:
         """Return a JSON-friendly representation of the finding."""
@@ -93,7 +93,7 @@ class Finding:
             "severity": self.severity,
             "policy_id": self.policy_id,
             "message": self.message,
-            "related_policy_id": self.related_policy_id,
+            "relatedpolicy_id": self.relatedpolicy_id,
         }
 
 
@@ -220,15 +220,15 @@ def verify_policies(
             Finding(
                 kind="malformed-policy",
                 severity="warning",
-                policy_id=_policy_id(policy),
+                policy_id=policy_id(policy),
                 message=(
-                    f"policy {_policy_id(policy) or '(unknown)'} could not be parsed "
+                    f"policy {policy_id(policy) or '(unknown)'} could not be parsed "
                     f"by cedarpy and was skipped: {parse_error}"
                 ),
             )
         )
 
-    return _verify_extracted(
+    return verify_extracted(
         domain,
         extracted,
         requirement_ids,
@@ -239,7 +239,7 @@ def verify_policies(
     )
 
 
-def _verify_extracted(
+def verify_extracted(
     domain: str,
     extracted: Sequence[tuple[Any, Extraction]],
     requirement_ids: Sequence[str],
@@ -317,16 +317,16 @@ def extract_scope(policy: Any) -> Extraction:
     Raises:
         Parse: When cedarpy cannot parse the policy.
     """
-    cedar = _policy_cedar(policy)
-    return _parse_with_ast(cedar)
+    cedar = policy_cedar(policy)
+    return parse_ast(cedar)
 
 
-def _policy_id(policy: Any) -> str:
+def policy_id(policy: Any) -> str:
     """Return the policy id, accepting Policy or Intent."""
     return getattr(policy, "id", None) or getattr(policy, "intent_id", None) or ""
 
 
-def _policy_requirement_id(policy: Any) -> str:
+def policy_requirement_id(policy: Any) -> str:
     """Return the requirement id associated with a policy-like object."""
     requirement = getattr(policy, "requirement", None)
     if requirement is not None:
@@ -334,7 +334,7 @@ def _policy_requirement_id(policy: Any) -> str:
     return getattr(policy, "requirement_id", "")
 
 
-def _policy_cedar(policy: Any) -> str:
+def policy_cedar(policy: Any) -> str:
     """Return the Cedar source text associated with a policy-like object."""
     cedar = getattr(policy, "cedar", None)
     if cedar:
@@ -381,11 +381,11 @@ def detect_shadowing(
                     Finding(
                         kind="shadowing",
                         severity="warning",
-                        policy_id=_policy_id(permit),
-                        related_policy_id=_policy_id(forbid),
+                        policy_id=policy_id(permit),
+                        relatedpolicy_id=policy_id(forbid),
                         message=(
-                            f"permit {_policy_id(permit)} is shadowed by forbid "
-                            f"{_policy_id(forbid)}; the permit will never produce Allow."
+                            f"permit {policy_id(permit)} is shadowed by forbid "
+                            f"{policy_id(forbid)}; the permit will never produce Allow."
                         ),
                     )
                 )
@@ -428,16 +428,16 @@ def detect_redundancy(
                 Finding(
                     kind="redundancy",
                     severity="warning",
-                    policy_id=_policy_id(policy),
-                    related_policy_id=existing,
+                    policy_id=policy_id(policy),
+                    relatedpolicy_id=existing,
                     message=(
-                        f"policy {_policy_id(policy)} has the same scope, effect, "
+                        f"policy {policy_id(policy)} has the same scope, effect, "
                         f"and conditions as policy {existing}; one is redundant."
                     ),
                 )
             )
         else:
-            seen[extraction.signature] = _policy_id(policy)
+            seen[extraction.signature] = policy_id(policy)
     return findings
 
 
@@ -457,7 +457,7 @@ def scopes_match(
     )
 
 
-def _resolve_action_namespace(
+def resolve_action_namespace(
     action_signature: tuple[str, ...],
     actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]],
     action_names: Sequence[tuple[str, str]] | None = None,
@@ -527,17 +527,17 @@ def action_coverage(
     covered: set[tuple[str, str]] = set()
     referenced: set[tuple[str, str]] = set()
     for _, extraction in policies:
-        signature = _resolve_action_namespace(
+        signature = resolve_action_namespace(
             extraction.action, actions_by_namespace, action_names
         )
-        kind = _action_kind(signature)
+        kind = action_kind(signature)
         if kind == "named":
-            namespace, name = _action_named(signature)
+            namespace, name = action_named(signature)
             referenced.add((namespace, name))
             for member in actions_by_namespace.get(namespace, {}).get(name, ()):
                 referenced.add((namespace, member))
         elif kind == "group":
-            namespace, group_name = _action_named(signature)
+            namespace, group_name = action_named(signature)
             for member in actions_by_namespace.get(namespace, {}).get(group_name, ()):
                 referenced.add((namespace, member))
     for pair in action_names:
@@ -546,7 +546,7 @@ def action_coverage(
     return covered, set(action_names) - covered
 
 
-def _action_kind(action_signature: tuple[str, ...]) -> str:
+def action_kind(action_signature: tuple[str, ...]) -> str:
     """Classify an action signature as ``any``, ``named``, or ``group``."""
     if not action_signature or action_signature == ("any",):
         return "any"
@@ -555,7 +555,7 @@ def _action_kind(action_signature: tuple[str, ...]) -> str:
     return "named"
 
 
-def _action_named(action_signature: tuple[str, ...]) -> tuple[str, str]:
+def action_named(action_signature: tuple[str, ...]) -> tuple[str, str]:
     """Return ``(namespace, action_id)`` from a named action signature."""
     if len(action_signature) >= 2:
         return action_signature[0], action_signature[1]
@@ -567,7 +567,7 @@ def requirement_coverage(
     requirement_ids: Sequence[str],
 ) -> tuple[set[str], set[str]]:
     """Return ``(covered, uncovered)`` requirement identifiers."""
-    covered = {_policy_requirement_id(policy) for policy, _ in policies}
+    covered = {policy_requirement_id(policy) for policy, _ in policies}
     return covered & set(requirement_ids), set(requirement_ids) - covered
 
 
@@ -584,19 +584,19 @@ def collect_entity_types(
             and action[-1] in {"named", "in_group"}
         ):
             for entry in action[:1]:
-                for name in _extract_type_names(entry):
+                for name in extract_type_names(entry):
                     if name:
                         types.add(name)
         else:
-            for name in _extract_type_names(action):
+            for name in extract_type_names(action):
                 if name:
                     types.add(name)
         for token in extraction.principal:
-            for name in _extract_type_names(token):
+            for name in extract_type_names(token):
                 if name:
                     types.add(name)
         for token in extraction.resource:
-            for name in _extract_type_names(token):
+            for name in extract_type_names(token):
                 if name:
                     types.add(name)
     return types
@@ -643,7 +643,7 @@ def missing_coverage_finding(
     ]
 
 
-def _parse_with_ast(cedar: str) -> Extraction:
+def parse_ast(cedar: str) -> Extraction:
     """Structured parser that extracts scope and condition data from Cedar.
 
     Uses :func:`cedarpy.policies_to_json_str` to obtain a normalized
@@ -670,10 +670,10 @@ def _parse_with_ast(cedar: str) -> Extraction:
         raise Parse("cedarpy produced no static policies")
     policy_node = next(iter(static_policies.values()))
     effect = policy_node.get("effect", "permit")
-    principal = _parse_principal_node(policy_node.get("principal") or {})
-    action = _parse_action_node(policy_node.get("action") or {})
-    resource = _parse_resource_node(policy_node.get("resource") or {})
-    conditions = _parse_conditions(policy_node.get("conditions") or [])
+    principal = parse_principal_node(policy_node.get("principal") or {})
+    action = parse_action_node(policy_node.get("action") or {})
+    resource = parse_resource_node(policy_node.get("resource") or {})
+    conditions = parse_conditions(policy_node.get("conditions") or [])
     return Extraction(
         principal=principal,
         action=action,
@@ -684,7 +684,7 @@ def _parse_with_ast(cedar: str) -> Extraction:
     )
 
 
-def _parse_principal_node(node: Mapping[str, Any]) -> tuple[str, ...]:
+def parse_principal_node(node: Mapping[str, Any]) -> tuple[str, ...]:
     """Convert a cedarpy principal node into a signature tuple."""
     op = node.get("op")
     if op == "All":
@@ -700,7 +700,7 @@ def _parse_principal_node(node: Mapping[str, Any]) -> tuple[str, ...]:
     return (json.dumps(node, sort_keys=True),)
 
 
-def _parse_action_node(node: Mapping[str, Any]) -> tuple[str, ...]:
+def parse_action_node(node: Mapping[str, Any]) -> tuple[str, ...]:
     """Convert a cedarpy action node into a signature tuple.
 
     cedarpy emits ``"Action"`` as the type for namespace-less action
@@ -714,7 +714,7 @@ def _parse_action_node(node: Mapping[str, Any]) -> tuple[str, ...]:
     if op == "==":
         entity = node.get("entity") or {}
         return (
-            _normalize_action_type(entity.get("type", "")),
+            normalize_action_type(entity.get("type", "")),
             str(entity.get("id", "")),
             "named",
         )
@@ -731,19 +731,19 @@ def _parse_action_node(node: Mapping[str, Any]) -> tuple[str, ...]:
         if len(entities) == 1:
             entity = entities[0]
             return (
-                _normalize_action_type(entity.get("type", "")),
+                normalize_action_type(entity.get("type", "")),
                 str(entity.get("id", "")),
                 "in_group",
             )
         kinds = ",".join(
-            f"{_normalize_action_type(e.get('type', ''))}::{e.get('id', '')}"
+            f"{normalize_action_type(e.get('type', ''))}::{e.get('id', '')}"
             for e in entities
         )
         return (kinds, "list", "in_group")
     return (json.dumps(node, sort_keys=True),)
 
 
-def _normalize_action_type(type_name: Any) -> str:
+def normalize_action_type(type_name: Any) -> str:
     """Strip cedarpy's ``"Action"`` and ``"<Namespace>::Action"`` placeholders.
 
     Cedar policies reference actions as ``Action::"id"`` (no
@@ -761,7 +761,7 @@ def _normalize_action_type(type_name: Any) -> str:
     return text
 
 
-def _parse_resource_node(node: Mapping[str, Any]) -> tuple[str, ...]:
+def parse_resource_node(node: Mapping[str, Any]) -> tuple[str, ...]:
     """Convert a cedarpy resource node into a signature tuple."""
     op = node.get("op")
     if op == "All":
@@ -784,7 +784,7 @@ def _parse_resource_node(node: Mapping[str, Any]) -> tuple[str, ...]:
     return (json.dumps(node, sort_keys=True),)
 
 
-def _parse_conditions(
+def parse_conditions(
     raw_conditions: Sequence[Mapping[str, Any]],
 ) -> tuple[tuple[str, str], ...]:
     """Convert cedarpy condition nodes into ``(kind, canonical_body)`` tuples.
@@ -803,7 +803,7 @@ def _parse_conditions(
     return tuple(sorted(pairs))
 
 
-def _extract_type_names(token: Any) -> list[str]:
+def extract_type_names(token: Any) -> list[str]:
     """Pull type-name identifiers out of a slot signature token."""
     if token is None:
         return []
@@ -824,7 +824,7 @@ def _extract_type_names(token: Any) -> list[str]:
             return []
         names: list[str] = []
         for entry in token:
-            names.extend(_extract_type_names(entry))
+            names.extend(extract_type_names(entry))
         return names
     return []
 

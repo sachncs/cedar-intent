@@ -55,6 +55,7 @@ from .deploy import (
     Transport,
     generate_record_id,
 )
+from .domain import Domain
 from .error import (
     Compile,
     Config,
@@ -124,6 +125,7 @@ __all__ = [
     "Config",
     "Context",
     "Deploy",
+    "Domain",
     "Draft",
     "Error",
     "Existing",

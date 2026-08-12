@@ -144,10 +144,10 @@ SCHEMA_STATEMENTS = (
 # 0.6.0. Each statement is wrapped in a check against ``sqlite_master``
 # so it is idempotent. ``ALTER TABLE ... ADD COLUMN`` does not accept
 # ``IF NOT EXISTS`` on older SQLite versions, hence the manual guard.
-_ALTER_INTENT_JSON = (
+ALTER_INTENT_JSON = (
     "ALTER TABLE policies ADD COLUMN action_scope_json TEXT",
 )
-_ALTER_DRAFT_COLUMNS = (
+ALTER_DRAFT_COLUMNS = (
     "ALTER TABLE drafts ADD COLUMN intent_json TEXT",
     "ALTER TABLE drafts ADD COLUMN principal_scope_json TEXT",
     "ALTER TABLE drafts ADD COLUMN action_scope_json TEXT",
@@ -159,7 +159,7 @@ _ALTER_DRAFT_COLUMNS = (
 #: this allow-list is rejected, preventing the f-string interpolation
 #: in :meth:`Sqlite.column_exists` from becoming a SQL
 #: injection vector.
-_KNOWN_TABLES = frozenset(
+KNOWN_TABLES = frozenset(
     {"requirements", "policies", "drafts", "reports", "deployments", "meta"}
 )
 
@@ -215,7 +215,7 @@ class Sqlite:
         Raises:
             Store: If ``table`` is not a known table.
         """
-        if table not in _KNOWN_TABLES:
+        if table not in KNOWN_TABLES:
             raise Store(f"unknown table for column_exists: {table!r}")
         rows = self.connection.execute(
             "SELECT name FROM pragma_table_info(?) WHERE name = ?", (table, column)
@@ -234,11 +234,11 @@ class Sqlite:
         with self.connection:
             for statement in SCHEMA_STATEMENTS:
                 self.connection.execute(statement)
-            for statement in _ALTER_INTENT_JSON:
+            for statement in ALTER_INTENT_JSON:
                 column = statement.split("ADD COLUMN")[-1].split()[0]
                 if not self.column_exists("policies", column):
                     self.connection.execute(statement)
-            for statement in _ALTER_DRAFT_COLUMNS:
+            for statement in ALTER_DRAFT_COLUMNS:
                 column = statement.split("ADD COLUMN")[-1].split()[0]
                 if not self.column_exists("drafts", column):
                     self.connection.execute(statement)

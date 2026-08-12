@@ -50,10 +50,10 @@ from .scope import (
 if TYPE_CHECKING:
     from .store.base import DraftStored, Stored
 
-_LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
-class _RepoLike(Protocol):
+class RepoLike(Protocol):
     """Subset of :class:`~cedrus.store.Repository` used by the migration."""
 
     def get_policy(self, policy_id: str) -> Stored: ...
@@ -65,7 +65,7 @@ class _RepoLike(Protocol):
     ) -> None: ...
 
 
-def detect_legacy_rows(repository: _RepoLike) -> int:
+def detect_legacy_rows(repository: RepoLike) -> int:
     """Return the number of legacy rows in ``repository``.
 
     A row is legacy when its policy has no ``action_scope_json`` or any
@@ -95,7 +95,7 @@ def detect_legacy_rows(repository: _RepoLike) -> int:
     return count
 
 
-def migrate_legacy_rows(repository: _RepoLike) -> int:
+def migrate_legacy_rows(repository: RepoLike) -> int:
     """Migrate every legacy row in ``repository``.
 
     Args:
@@ -108,15 +108,15 @@ def migrate_legacy_rows(repository: _RepoLike) -> int:
         return 0
     upgraded = 0
     for policy in list(repository.list_policies(None)):
-        upgraded += _migrate_policy(repository, policy)
+        upgraded += policy_migrate(repository, policy)
         for draft in list(repository.list_drafts(policy.id)):
-            upgraded += _migrate_draft(repository, draft)
+            upgraded += draft_migrate(repository, draft)
     if upgraded:
-        _LOGGER.info("migrated %d legacy rows to the 0.6.0 schema", upgraded)
+        LOGGER.info("migrated %d legacy rows to the 0.6.0 schema", upgraded)
     return upgraded
 
 
-def _migrate_policy(repository: _RepoLike, policy: Any) -> int:
+def policy_migrate(repository: RepoLike, policy: Any) -> int:
     """Re-derive ``action_scope_json`` for ``policy`` when missing."""
     from .store.base import Stored
 
@@ -124,15 +124,15 @@ def _migrate_policy(repository: _RepoLike, policy: Any) -> int:
         return 0
     if policy.action_scope_json is not None:
         return 0
-    action_scope = _parse_action_scope(policy.cedar)
+    action_scope = action_parse_cedar(policy.cedar)
     if action_scope is None:
         return 0
-    updated = replace(policy, action_scope_json=_dumps(action_scope))
+    updated = replace(policy, action_scope_json=dumps(action_scope))
     repository.upsert_policy(updated)
     return 1
 
 
-def _migrate_draft(repository: _RepoLike, draft: Any) -> int:
+def draft_migrate(repository: RepoLike, draft: Any) -> int:
     """Rebuild the intent and scope JSON columns for ``draft`` in place."""
     from .store.base import DraftStored
 
@@ -145,22 +145,22 @@ def _migrate_draft(repository: _RepoLike, draft: Any) -> int:
         and draft.resource_scope_json is not None
     ):
         return 0
-    intent = _parse_intent_from_cedar(draft.cedar, draft.id, draft.policy_id)
+    intent = intent_parse_cedar(draft.cedar, draft.id, draft.policy_id)
     if intent is None:
         return 0
     repository.update_draft_json(
         draft.id,
         {
-            "intent_json": _dumps(intent),
-            "principal_scope_json": _dumps(intent.principal),
-            "action_scope_json": _dumps(intent.action),
-            "resource_scope_json": _dumps(intent.resource),
+            "intent_json": dumps(intent),
+            "principal_scope_json": dumps(intent.principal),
+            "action_scope_json": dumps(intent.action),
+            "resource_scope_json": dumps(intent.resource),
         },
     )
     return 1
 
 
-def _parse_intent_from_cedar(
+def intent_parse_cedar(
     cedar: str, intent_id: str, requirement_id: str
 ) -> Intent | None:
     """Rebuild a typed :class:`Intent` from persisted Cedar text.
@@ -187,7 +187,7 @@ def _parse_intent_from_cedar(
     )
 
 
-def _parse_action_scope(cedar: str) -> Action | None:
+def action_parse_cedar(cedar: str) -> Action | None:
     """Best-effort parse of an action scope from Cedar text.
 
     Returns ``None`` when the Cedar does not name a single action
@@ -208,7 +208,7 @@ def _parse_action_scope(cedar: str) -> Action | None:
     return Action(kind="named", name=action_name, namespace=namespace or None)
 
 
-def _dumps(scope: Any) -> str:
+def dumps(scope: Any) -> str:
     """Serialize a scope object to JSON."""
     from .compile import intent_to_dict
 
@@ -225,7 +225,7 @@ def _dumps(scope: Any) -> str:
     return json.dumps(scope, sort_keys=True, default=str)
 
 
-def _migrate_draft_data(
+def draft_migrate_data(
     draft: Any,
 ) -> tuple[str, str, str, str] | None:
     """Return the four JSON strings needed to populate the new columns.
@@ -244,19 +244,19 @@ def _migrate_draft_data(
         and draft.resource_scope_json is not None
     ):
         return None
-    intent = _parse_intent_from_cedar(draft.cedar, draft.id, draft.policy_id)
+    intent = intent_parse_cedar(draft.cedar, draft.id, draft.policy_id)
     if intent is None:
         return None
     return (
-        _dumps(intent),
-        _dumps(intent.principal),
-        _dumps(intent.action),
-        _dumps(intent.resource),
+        dumps(intent),
+        dumps(intent.principal),
+        dumps(intent.action),
+        dumps(intent.resource),
     )
 
 
 __all__ = [
-    "_migrate_draft_data",
+    "draft_migrate_data",
     "detect_legacy_rows",
     "migrate_legacy_rows",
 ]

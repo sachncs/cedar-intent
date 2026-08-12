@@ -213,7 +213,7 @@ def test_verify_policies_detects_shadowing() -> None:
     shadow = next(finding for finding in report.findings if finding.kind == "shadowing")
     assert isinstance(shadow, Finding)
     assert shadow.policy_id == "HR-001"
-    assert shadow.related_policy_id == "HR-002"
+    assert shadow.relatedpolicy_id == "HR-002"
 
 
 def test_verify_policies_does_not_shadow_any_with_specific_forbid() -> None:

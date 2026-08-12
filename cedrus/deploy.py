@@ -99,7 +99,7 @@ HTTP_RESPONSE_READ_LIMIT = 65536
 #: ``Host`` would override the SSRF guard's pinned host; ``Authorization``
 #: and ``Cookie`` could leak credentials; ``Content-Length`` and
 #: ``Transfer-Encoding`` are framing headers httpx manages itself.
-_RESERVED_HEADERS = frozenset(
+RESERVED_HEADERS = frozenset(
     {"host", "authorization", "cookie", "content-length", "transfer-encoding"}
 )
 
@@ -290,7 +290,7 @@ class Bundler:
                 f"failed to write deployment bundle to {directory}: {error}"
             ) from error
         finally:
-            _rm_tmp(staging)
+            rm_tmp(staging)
         return directory
 
     def read_directory(self, directory: Path) -> Manifest:
@@ -460,7 +460,7 @@ class Guard:
                 parsed_address = ipaddress.ip_address(ip_str)
             except ValueError:
                 continue
-            rejection = self._check_address(parsed_address, host)
+            rejection = self.check_address(parsed_address, host)
             if rejection is None:
                 return Pin(
                     host=host,
@@ -476,7 +476,7 @@ class Guard:
             f"deployment host {host} did not resolve to any usable address"
         )
 
-    def _check_address(
+    def check_address(
         self, parsed_address: ipaddress.IPv4Address | ipaddress.IPv6Address, host: str
     ) -> Deploy | None:
         """Return a rejection error for blocked addresses or ``None``."""
@@ -547,7 +547,7 @@ class Transport(httpx.BaseTransport):
                 f"deployment transport mismatch: request url {url!s} disagrees "
                 f"with pinned {self.pinned.host}:{self.pinned.port}"
             )
-        timeout = _read_timeout(request)
+        timeout = read_timeout(request)
         try:
             sock = socket.create_connection(
                 (self.pinned.ip, self.pinned.port), timeout=timeout
@@ -570,7 +570,7 @@ class Transport(httpx.BaseTransport):
                         f"{self.pinned.host} failed: {error}"
                     ) from error
             request.headers["Host"] = self.pinned.host
-            return _round_trip_http(request, sock, timeout)
+            return round_trip(request, sock, timeout)
         finally:
             try:
                 sock.close()
@@ -578,7 +578,7 @@ class Transport(httpx.BaseTransport):
                 pass
 
 
-def _read_timeout(request: httpx.Request) -> float:
+def read_timeout(request: httpx.Request) -> float:
     """Extract the per-request timeout from the :class:`httpx.Request` extensions."""
     timeout = request.extensions.get("timeout")
     if timeout is None:
@@ -601,7 +601,7 @@ def _read_timeout(request: httpx.Request) -> float:
         ) from error
 
 
-def _round_trip_http(
+def round_trip(
     request: httpx.Request, sock: socket.socket, timeout: float
 ) -> httpx.Response:
     """Send ``request`` over ``sock`` and parse the response.
@@ -645,10 +645,10 @@ def _round_trip_http(
         if header_end != -1 and len(response_bytes) >= HTTP_RESPONSE_READ_LIMIT:
             response_bytes = response_bytes[:HTTP_RESPONSE_READ_LIMIT]
             break
-    return _parse_raw_response(bytes(response_bytes))
+    return parse_response(bytes(response_bytes))
 
 
-def _parse_raw_response(raw: bytes) -> httpx.Response:
+def parse_response(raw: bytes) -> httpx.Response:
     """Parse a raw HTTP/1.1 response into an :class:`httpx.Response`."""
     if b"\r\n\r\n" not in raw:
         raise Deploy(
@@ -718,11 +718,11 @@ class Client:
             Deploy: If ``timeout`` is not strictly positive or
                 ``max_retries`` is negative.
         """
-        if timeout <= 0 or not _is_finite(timeout):
+        if timeout <= 0 or not is_finite(timeout):
             raise Deploy("deployment timeout must be positive and finite")
         if max_retries < 0:
             raise Deploy("deployment max_retries must be non-negative")
-        if retry_backoff < 0 or not _is_finite(retry_backoff):
+        if retry_backoff < 0 or not is_finite(retry_backoff):
             raise Deploy("deployment retry_backoff must be non-negative")
         self.timeout = timeout
         self.max_retries = max_retries
@@ -877,7 +877,7 @@ class Client:
                     follow_redirects=self.follow_redirects,
                 ) as client:
                     response = client.send(request)
-                    body = _read_bounded_body(response)
+                    body = read_bounded(response)
                     response_sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
                     if 200 <= response.status_code < 300:
                         return Record(
@@ -897,7 +897,7 @@ class Client:
                         )
                     if response.status_code in {429, 503} and attempt < self.max_retries:
                         attempt += 1
-                        _sleep(backoff)
+                        sleep(backoff)
                         backoff = min(backoff * 2, 8.0)
                         continue
                     raise Deploy(
@@ -911,7 +911,7 @@ class Client:
                 if attempt >= self.max_retries:
                     raise last_error from error
                 attempt += 1
-                _sleep(backoff)
+                sleep(backoff)
                 backoff = min(backoff * 2, 8.0)
                 continue
         if last_error is not None:
@@ -939,7 +939,7 @@ def validate_headers(headers: Mapping[str, str] | None) -> None:
             raise Deploy(
                 f"deployment header value for {name!r} contains CR/LF"
             )
-        if name.lower() in _RESERVED_HEADERS:
+        if name.lower() in RESERVED_HEADERS:
             raise Deploy(
                 f"deployment header name {name!r} is reserved and cannot be set"
             )
@@ -953,7 +953,7 @@ def validate_headers(headers: Mapping[str, str] | None) -> None:
             )
 
 
-def _read_bounded_body(response: httpx.Response) -> str:
+def read_bounded(response: httpx.Response) -> str:
     """Read the response body with a hard upper bound on bytes consumed."""
     body_bytes = bytearray()
     for chunk in response.iter_bytes(chunk_size=4096):
@@ -963,12 +963,12 @@ def _read_bounded_body(response: httpx.Response) -> str:
     return body_bytes[:HTTP_RESPONSE_READ_LIMIT].decode("utf-8", errors="replace")
 
 
-def _is_finite(value: float) -> bool:
+def is_finite(value: float) -> bool:
     """Return True when ``value`` is a finite number (not inf or NaN)."""
     return value == value and value not in (float("inf"), float("-inf"))
 
 
-def _sleep(seconds: float) -> None:
+def sleep(seconds: float) -> None:
     """Sleep helper that ignores zero/negative durations."""
     if seconds > 0:
         import time
@@ -1011,7 +1011,7 @@ def os_fsync(fd: int) -> None:
     os.fsync(fd)
 
 
-def _rm_tmp(path: Path) -> None:
+def rm_tmp(path: Path) -> None:
     """Best-effort removal of a temporary directory used for staging."""
     import shutil
 
