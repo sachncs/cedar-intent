@@ -23,10 +23,18 @@ class Unresolved:
     Behaves like a tuple of strings: supports ``len()``, iteration, and
     truthiness from the underlying items. Empty by default. Use
     :meth:`add` to append a single item and :meth:`merge` to combine
-    several sources.
+    several sources. ``add`` and ``merge`` return new instances; the
+    dataclass is frozen so the underlying tuple never mutates.
 
     Attributes:
         items: Tuple of unresolved reference keys; defaults to empty.
+
+    Examples:
+        >>> u = Unresolved()
+        >>> u.add("hr::alice").add("hr::bob")
+        Unresolved(items=('hr::alice', 'hr::bob'))
+        >>> Unresolved.merge(["hr::alice", " hr::alice "], ("", "fn::x"))
+        Unresolved(items=('hr::alice', 'fn::x'))
     """
 
     items: tuple[str, ...] = field(default_factory=tuple)
