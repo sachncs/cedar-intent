@@ -173,6 +173,25 @@ class Principal(Scope):
             group_id=data.get("group_id"),
         )
 
+    @classmethod
+    def parse(cls, row: dict[str, Any]) -> Principal:
+        """Build a :class:`Principal` from a SQLite ``principals`` row dict.
+
+        Args:
+            row: Dict produced by ``SELECT * FROM principals``.
+
+        Returns:
+            The reconstructed :class:`Principal`.
+        """
+        return cls(
+            id=row["id"],
+            kind=row["kind"],
+            type_name=row["type_name"],
+            entity_id=row["entity_id"],
+            group_type=row["group_type"],
+            group_id=row["group_id"],
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class Action(Scope):
@@ -228,6 +247,23 @@ class Action(Scope):
             kind=data.get("kind", cls.ANY),
             name=data.get("name"),
             group=data.get("group"),
+        )
+
+    @classmethod
+    def parse(cls, row: dict[str, Any]) -> Action:
+        """Build an :class:`Action` from a SQLite ``actions`` row dict.
+
+        Args:
+            row: Dict produced by ``SELECT * FROM actions``.
+
+        Returns:
+            The reconstructed :class:`Action`.
+        """
+        return cls(
+            id=row["id"],
+            kind=row["kind"],
+            name=row["name"],
+            group=row["group"],
         )
 
 
@@ -303,6 +339,25 @@ class Resource(Scope):
             parent_id=data.get("parent_id"),
         )
 
+    @classmethod
+    def parse(cls, row: dict[str, Any]) -> Resource:
+        """Build a :class:`Resource` from a SQLite ``resources`` row dict.
+
+        Args:
+            row: Dict produced by ``SELECT * FROM resources``.
+
+        Returns:
+            The reconstructed :class:`Resource`.
+        """
+        return cls(
+            id=row["id"],
+            kind=row["kind"],
+            type_name=row["type_name"],
+            entity_id=row["entity_id"],
+            parent_type=row["parent_type"],
+            parent_id=row["parent_id"],
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class Clause(Scope):
@@ -364,6 +419,34 @@ class Clause(Scope):
             cls(body=v.strip())
             for v in values
             if isinstance(v, str) and v.strip()
+        )
+
+    @classmethod
+    def parse(cls, data: dict[str, Any]) -> Clause:
+        """Build a :class:`Clause` from its SQLite row dict(s).
+
+        ``data`` carries:
+        - ``"clauses"``: a single row dict from the ``clauses`` table
+        - ``"clause_attributes"``: a list of row dicts from
+          ``clause_attributes`` keyed by ``clause_id`` (defaults to
+          empty list when there are no attributes)
+
+        Args:
+            data: Assembled dict from the SQLite read path.
+
+        Returns:
+            The reconstructed :class:`Clause`.
+        """
+        clause_row = data["clauses"]
+        attrs = {
+            a["key"]: a["value"]
+            for a in data.get("clause_attributes", [])
+            if a.get("clause_id") == clause_row["id"]
+        }
+        return cls(
+            id=clause_row["id"],
+            body=clause_row["body"],
+            attributes=attrs,
         )
 
 
