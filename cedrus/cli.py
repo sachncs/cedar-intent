@@ -1,34 +1,42 @@
 """Command-line interface for cedrus.
 
 Each subcommand is implemented as a small handler that operates on a
-:class:`Workspace`. The :func:`main` entrypoint returns an exit code so
-the process can be wired into CI pipelines without parsing stdout.
+:class:`~cedrus.space.Workspace`. The :func:`main` entrypoint returns an
+exit code so the process can be wired into CI pipelines without
+parsing stdout.
 
-Design
-------
+Design:
+    The CLI is a thin layer over the public Python API. Every
+    subcommand opens the workspace through
+    :meth:`~cedrus.space.Workspace.open` (or constructs it through
+    :meth:`~cedrus.space.Workspace.create` for ``init``), delegates the
+    actual work to a workspace method, and returns a JSON-serializable
+    dict for humanize/JSON output.
 
-The CLI is a thin layer over the public Python API. Every subcommand
-opens the workspace through :meth:`Workspace.open` (or constructs it
-through :meth:`Workspace.create` for ``init``), delegates the actual
-work to a workspace method, and returns a JSON-serializable dict for
-humanize/JSON output.
+    The CLI is the documented entry-point handler for every
+    :class:`~cedrus.error.Error` raised below; the top-level
+    :func:`main` translates any of those into a single-line
+    ``cedrus: error: ...`` message on stderr and an exit code of 1.
 
-The CLI is the documented entry-point handler for every
-:class:`~cedrus.error.Error` raised below; the
-top-level :func:`main` translates any of those into a single-line
-``cedrus: error: ...`` message on stderr and an exit code of 1.
+Online and offline modes:
+    Generator selection is controlled by three pieces, in this order:
 
-Online and offline modes
-------------------------
+    1. ``--offline`` forces :class:`~cedrus.generate.Offline`.
+    2. ``--model <provider/name>`` forces :class:`~cedrus.generate.Llm`.
+    3. Otherwise the environment variables ``CEDAR_INTENT_ONLINE`` and
+       ``CEDAR_INTENT_MODEL`` decide. ``CEDAR_INTENT_ONLINE=1`` enables
+       the LiteLLM generator when ``CEDAR_INTENT_MODEL`` is set;
+       otherwise the offline generator runs.
 
-Generator selection is controlled by three pieces, in this order:
+Attributes:
+    main: Top-level entry point; returns the process exit code.
+    build_parser: Build the top-level :class:`argparse.ArgumentParser`
+        with every subcommand wired in.
 
-1. ``--offline`` forces :class:`~cedrus.generate.Offline`.
-2. ``--model <provider/name>`` forces :class:`~cedrus.generate.Llm`.
-3. Otherwise the environment variables ``CEDAR_INTENT_ONLINE`` and
-   ``CEDAR_INTENT_MODEL`` decide. ``CEDAR_INTENT_ONLINE=1`` enables the
-   LiteLLM generator when ``CEDAR_INTENT_MODEL`` is set; otherwise the
-   offline generator runs.
+See Also:
+    :mod:`cedrus.space`: Workspace / typed-object API the CLI delegates
+        to.
+    :mod:`cedrus.error`: Error types the CLI translates to stderr.
 """
 
 from __future__ import annotations
@@ -42,10 +50,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from . import Error, Llm, Offline, Workspace
-from .case import Case
-from .error import Config
-from .scope import Action, Principal, Resource
+from cedrus import Error, Llm, Offline, Workspace
+from cedrus.case import Case
+from cedrus.error import Config
+from cedrus.scope import Action, Principal, Resource
 
 ONLINE_ENV_VAR = "CEDAR_INTENT_ONLINE"
 MODEL_ENV_VAR = "CEDAR_INTENT_MODEL"
@@ -362,48 +370,132 @@ def run_command(args: Namespace) -> tuple[Any, int]:
 
     The ``init`` subcommand is handled before workspace open because
     no workspace exists yet. Every other subcommand opens the
-    workspace at ``args.workspace``, dispatches the handler, and
-    closes the workspace before returning. The exit code comes from
-    the handler (``verify`` returns 1 in strict mode; the others
-    return 0).
+    workspace at ``args.workspace``, dispatches the handler via
+    ``HANDLERS``, and closes the workspace before returning. The exit
+    code comes from the handler (``verify`` returns 1 in strict mode;
+    the others return 0).
 
     Args:
         args: Parsed CLI namespace.
 
     Returns:
         A tuple ``(result, exit_code)`` where ``result`` is the
-        JSON-serializable dict to emit and ``exit_code`` is the process
-        exit code.
+        JSON-serializable dict to emit and ``exit_code`` is the
+        process exit code.
 
     Raises:
-        Error: For any workspace, storage, generator, or
-            validation failure. The CLI's :func:`main` translates these
-            into a uniform error message and exit code ``1``.
+        Error: For any workspace, storage, generator, or validation
+            failure. The CLI's :func:`main` translates these into a
+            uniform error message and exit code ``1``.
     """
-    workspace_path = args.workspace.resolve()
     if args.command == "init":
         return command_init(args.path), 0
+    workspace_path = args.workspace.resolve()
     if not workspace_path.exists():
         raise Config(f"workspace directory does not exist: {workspace_path}")
     workspace = Workspace.open(workspace_path)
     try:
-        if args.command == "domain":
-            return command_domain(workspace, args), 0
-        if args.command == "requirement":
-            return command_requirement(workspace, args), 0
-        if args.command == "policy":
-            return command_policy(workspace, args), 0
-        if args.command == "export":
-            return command_export(workspace, args), 0
-        if args.command == "check":
-            return command_check(workspace, args), 0
-        if args.command == "verify":
-            return command_verify(workspace, args)
-        if args.command == "deploy":
-            return command_deploy(workspace, args)
+        handler = HANDLERS.get(args.command)
+        if handler is None:
+            raise Config(f"unknown command: {args.command}")
+        return handler(workspace, args)
     finally:
         workspace.close()
-    raise Config(f"unknown command: {args.command}")
+
+
+def command_init(path: str) -> dict[str, Any]:
+    """Initialize a new workspace and report the absolute path.
+
+    Args:
+        path: Workspace root path supplied via ``--path``.
+
+    Returns:
+        A dict with an ``"initialized"`` key whose value is the
+        resolved absolute path of the new workspace.
+
+    Raises:
+        Config: When ``path`` is empty, root, or otherwise invalid.
+    """
+    text = path.strip()
+    if not text or text in {".", "/"}:
+        raise Config("init --path must be a non-empty directory path")
+    target = Path(text)
+    workspace = Workspace.create(target)
+    workspace.close()
+    return {"initialized": str(target.resolve())}
+
+
+def command_domain(workspace: Workspace, args: Namespace) -> Any:
+    """Handle ``domain add`` and ``domain list`` subcommands.
+
+    Polymorphic dispatch on ``args.domain_command``:
+    ``add`` initializes a new domain directory; ``list`` enumerates
+    the domains present in the workspace.
+
+    Args:
+        workspace: Open workspace to operate on.
+        args: Parsed CLI namespace; ``args.domain_command`` selects
+            the action.
+
+    Returns:
+        A dict with the result. For ``add``: ``{"domain": ..., "schema": ...}``.
+        For ``list``: ``{"domains": [...]}``.
+
+    Raises:
+        Config: When ``args.domain_command`` is unknown or the
+            ``add`` identifier is invalid.
+    """
+    if args.domain_command == "add":
+        validate_identifier(args.name, "domain name")
+        schema_path = workspace.init_domain(args.name)
+        return {"domain": args.name, "schema": str(schema_path)}
+    if args.domain_command == "list":
+        domains = sorted(
+            {
+                str(path.parent.name)
+                for path in workspace.root.glob("*/schema.json")
+                if path.parent.name not in {".cedrus", ""}
+            }
+        )
+        return {"domains": domains}
+    raise Config(f"unknown domain command: {args.domain_command}")
+
+
+def command_requirement(workspace: Workspace, args: Namespace) -> Any:
+    """Handle ``requirement add`` and ``requirement list`` subcommands.
+
+    Polymorphic dispatch on ``args.requirement_command``:
+    ``add`` copies a Markdown requirement file into the domain's
+    requirements directory and persists it; ``list`` enumerates the
+    known requirements.
+
+    Args:
+        workspace: Open workspace to operate on.
+        args: Parsed CLI namespace; ``args.requirement_command``
+            selects the action.
+
+    Returns:
+        A dict with the result. For ``add``: ``{"id": ..., "domain": ...}``.
+        For ``list``: ``{"requirements": [...]}``.
+
+    Raises:
+        Config: When the source file is missing, the ``add``
+            identifier is invalid, or ``args.requirement_command`` is
+            unknown.
+    """
+    if args.requirement_command == "add":
+        validate_identifier(args.domain, "domain name")
+        if not args.path.exists():
+            raise Config(f"requirement file not found: {args.path}")
+        target = workspace.requirements_directory(args.domain) / args.path.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(args.path.read_text(encoding="utf-8"), encoding="utf-8")
+        requirement = workspace.add_requirement_file(target)
+        return {"id": requirement.id, "domain": requirement.domain}
+    if args.requirement_command == "list":
+        items = workspace.list_requirements(args.domain)
+        return {"requirements": [item.id for item in items]}
+    raise Config(f"unknown requirement command: {args.requirement_command}")
 
 
 def command_init(path: str) -> dict[str, Any]:
@@ -453,54 +545,109 @@ def command_requirement(workspace: Workspace, args: Namespace) -> Any:
 
 
 def command_policy(workspace: Workspace, args: Namespace) -> Any:
-    """Handle ``policy draft``, ``policy generate``, and ``policy apply`` subcommands."""
+    """Handle ``policy draft``, ``policy generate``, and ``policy apply`` subcommands.
+
+    Dispatch is keyed on ``args.policy_command``:
+    ``draft`` creates a draft, ``generate`` calls the configured
+    generator, ``apply`` validates and persists a generated draft.
+
+    Args:
+        workspace: Open workspace to operate on.
+        args: Parsed CLI namespace; ``args.policy_command`` selects
+            the action, ``args.domain`` / ``args.requirement_id`` the
+            target requirement, and the scope flags (``--principal``,
+            ``--action``, ``--resource``, etc.) are passed through.
+
+    Returns:
+        A dict with the result. For ``draft``: ``{"draft": ...}``.
+        For ``generate``: ``{"draft": ..., "model": ..., ...}``. For
+        ``apply``: ``{"compiled": ...}``.
+
+    Raises:
+        Config: When ``args.policy_command`` is unknown or an
+            identifier is invalid.
+    """
     validate_identifier(args.domain, "domain name")
     validate_identifier(args.requirement_id, "requirement id")
     schema = workspace.load_schema(args.domain)
-    if args.policy_command == "draft":
-        draft = workspace.create_draft(
-            args.requirement_id,
-            principal=build_principal(args),
-            action=build_action(args),
-            resource=build_resource(args),
-        )
-        return {"draft": draft.to_dict()}
-    if args.policy_command == "generate":
-        draft = workspace.create_draft(
-            args.requirement_id,
-            principal=build_principal(args),
-            action=build_action(args),
-            resource=build_resource(args),
-        )
-        generator = build_generator(args)
-        existing = workspace.list_existing_policies(args.domain)
-        draft, result = workspace.generate_draft(
-            draft, schema, generator, existing=existing
-        )
-        return {
-            "draft": draft.to_dict(),
-            "model": result.model,
-            "request_id": result.request_id,
-            "usage": result.usage,
-        }
-    if args.policy_command == "apply":
-        scopes = (
-            build_principal(args),
-            build_action(args),
-            build_resource(args),
-        )
-        scenarios: list[Case] = []
-        if not getattr(args, "no_scenarios", False):
-            scenarios = workspace.load_scenarios(args.domain)
-        compiled = workspace.apply_for_requirement(
-            args.requirement_id, schema, scopes=scopes, scenarios=scenarios
-        )
-        return {"compiled": compiled.to_dict()}
-    raise Config(f"unknown policy command: {args.policy_command}")
+    handler = POLICY_HANDLERS.get(args.policy_command)
+    if handler is None:
+        raise Config(f"unknown policy command: {args.policy_command}")
+    return handler(workspace, args, schema)
+
+
+def policy_draft(workspace: Workspace, args: Namespace, schema: Any) -> Any:
+    """``policy draft`` subcommand handler."""
+    draft = workspace.create_draft(
+        args.requirement_id,
+        principal=build_principal(args),
+        action=build_action(args),
+        resource=build_resource(args),
+    )
+    return {"draft": draft.to_dict()}
+
+
+def policy_generate(workspace: Workspace, args: Namespace, schema: Any) -> Any:
+    """``policy generate`` subcommand handler."""
+    draft = workspace.create_draft(
+        args.requirement_id,
+        principal=build_principal(args),
+        action=build_action(args),
+        resource=build_resource(args),
+    )
+    generator = build_generator(args)
+    existing = workspace.list_existing_policies(args.domain)
+    draft, result = workspace.generate_draft(
+        draft, schema, generator, existing=existing
+    )
+    return {
+        "draft": draft.to_dict(),
+        "model": result.model,
+        "request_id": result.request_id,
+        "usage": result.usage,
+    }
+
+
+def policy_apply(workspace: Workspace, args: Namespace, schema: Any) -> Any:
+    """``policy apply`` subcommand handler."""
+    scopes = (
+        build_principal(args),
+        build_action(args),
+        build_resource(args),
+    )
+    scenarios: list[Case] = []
+    if not getattr(args, "no_scenarios", False):
+        scenarios = workspace.load_scenarios(args.domain)
+    compiled = workspace.apply_for_requirement(
+        args.requirement_id, schema, scopes=scenarios, scenarios=scopes
+    )
+    return {"compiled": compiled.to_dict()}
+
+
+#: Polymorphic dispatch table: ``policy_command`` -> handler.
+#: Handlers take ``(workspace, args, schema)`` and return the
+#: subcommand's result dict.
+POLICY_HANDLERS: dict[str, Any] = {
+    "draft": policy_draft,
+    "generate": policy_generate,
+    "apply": policy_apply,
+}
 
 
 def command_export(workspace: Workspace, args: Namespace) -> Any:
-    """Export the domain's compiled Cedar to ``args.output``."""
+    """Export the domain's compiled Cedar to ``args.output``.
+
+    Args:
+        workspace: Open workspace to operate on.
+        args: Parsed CLI namespace; ``args.domain`` selects the
+            domain, ``args.output`` is the destination path.
+
+    Returns:
+        A dict with ``"domain"`` and ``"output"`` keys.
+
+    Raises:
+        Config: When the domain identifier is invalid.
+    """
     validate_identifier(args.domain, "domain name")
     schema = workspace.load_schema(args.domain)
     workspace.validate_policies(args.domain, schema)
@@ -509,7 +656,18 @@ def command_export(workspace: Workspace, args: Namespace) -> Any:
 
 
 def command_check(workspace: Workspace, args: Namespace) -> Any:
-    """Run validation across every domain (or the specified one)."""
+    """Run validation across every domain (or the specified one).
+
+    Args:
+        workspace: Open workspace to operate on.
+        args: Parsed CLI namespace; ``args.domain`` (when set) limits
+            the check to a single domain.
+
+    Returns:
+        A dict with ``"passed"`` (overall bool) and ``"domains"``
+        (per-domain result dict, with ``"passed"`` and optionally
+        ``"error"`` keys).
+    """
     if args.domain:
         domains = [args.domain]
     else:
@@ -535,7 +693,18 @@ def command_check(workspace: Workspace, args: Namespace) -> Any:
 
 
 def command_verify(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
-    """Run verification for ``args.domain`` and return its report."""
+    """Run verification for ``args.domain`` and return its report.
+
+    Args:
+        workspace: Open workspace to operate on.
+        args: Parsed CLI namespace; ``args.domain`` selects the domain
+            and ``args.strict`` flips the exit code on warnings.
+
+    Returns:
+        A tuple ``(report_dict, exit_code)`` where ``exit_code`` is
+        ``1`` when ``--strict`` is set and the report has warnings,
+        else ``0``.
+    """
     validate_identifier(args.domain, "domain name")
     schema = workspace.load_schema(args.domain)
     report = workspace.verify_domain(args.domain, schema)
@@ -544,36 +713,100 @@ def command_verify(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
 
 
 def command_deploy(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
-    """Handle the three ``deploy`` subcommands."""
+    """Handle the three ``deploy`` subcommands polymorphically.
+
+    Dispatch is keyed on ``args.deploy_command``:
+    ``push`` calls :meth:`Workspace.deploy`, ``bundle`` calls
+    :meth:`Workspace.write_bundle`, and ``history`` calls
+    :meth:`Workspace.list_deployments`.
+
+    Args:
+        workspace: Open workspace to operate on.
+        args: Parsed CLI namespace; ``args.deploy_command`` selects
+            the action.
+
+    Returns:
+        A tuple ``(result, exit_code)`` where ``result`` is the
+        subcommand-specific dict to emit and ``exit_code`` is always
+        ``0`` for the three subcommands.
+
+    Raises:
+        Config: When ``args.deploy_command`` is unknown.
+    """
     # ``deploy history`` accepts an optional domain filter; only
     # validate when the user actually supplied one.
     domain = getattr(args, "domain", None)
     if domain:
         validate_identifier(domain, "domain name")
-    if args.deploy_command == "push":
-        headers = parse_headers(getattr(args, "header", []) or [])
-        record = workspace.deploy(
-            args.domain,
-            args.target,
-            timeout=getattr(args, "timeout", 30),
-            headers=headers,
-            skip_verify=getattr(args, "skip_verify", False),
-            allow_private_targets=getattr(args, "allow_private_targets", False),
-            allow_loopback=getattr(args, "allow_loopback", False),
-        )
-        return {"deployment": deployment_to_dict(record)}, 0
-    if args.deploy_command == "bundle":
-        manifest = workspace.build_bundle(args.domain)
-        workspace.write_bundle(manifest, args.output)
-        return {"domain": args.domain, "output": str(args.output)}, 0
-    if args.deploy_command == "history":
-        records = workspace.list_deployments(getattr(args, "domain", None))
-        return {"deployments": [deployment_to_dict(record) for record in records]}, 0
-    raise Config(f"unknown deploy command: {args.deploy_command}")
+    handler = DEPLOY_HANDLERS.get(args.deploy_command)
+    if handler is None:
+        raise Config(f"unknown deploy command: {args.deploy_command}")
+    return handler(workspace, args), 0
+
+
+def deploy_push(workspace: Workspace, args: Namespace) -> Any:
+    """``deploy push`` subcommand handler."""
+    headers = parse_headers(getattr(args, "header", []) or [])
+    record = workspace.deploy(
+        args.domain,
+        args.target,
+        timeout=getattr(args, "timeout", 30),
+        headers=headers,
+        skip_verify=getattr(args, "skip_verify", False),
+        allow_private_targets=getattr(args, "allow_private_targets", False),
+        allow_loopback=getattr(args, "allow_loopback", False),
+    )
+    return {"deployment": deployment_to_dict(record)}
+
+
+def deploy_bundle(workspace: Workspace, args: Namespace) -> Any:
+    """``deploy bundle`` subcommand handler."""
+    manifest = workspace.build_bundle(args.domain)
+    workspace.write_bundle(manifest, args.output)
+    return {"domain": args.domain, "output": str(args.output)}
+
+
+def deploy_history(workspace: Workspace, args: Namespace) -> Any:
+    """``deploy history`` subcommand handler."""
+    records = workspace.list_deployments(getattr(args, "domain", None))
+    return {"deployments": [deployment_to_dict(record) for record in records]}
+
+
+#: Polymorphic dispatch table: ``deploy_command`` -> handler.
+#: Handlers take ``(workspace, args)`` and return the subcommand's
+#: result dict.
+DEPLOY_HANDLERS: dict[str, Any] = {
+    "push": deploy_push,
+    "bundle": deploy_bundle,
+    "history": deploy_history,
+}
+
+
+#: Polymorphic dispatch table: top-level ``command`` -> handler.
+#: Handlers take ``(workspace, args)`` and return ``(result,
+#: exit_code)``. ``init`` is the only subcommand that does not go
+#: through this table; it is handled inline in :func:`run_command`
+#: because there is no workspace to open before it runs.
+HANDLERS: dict[str, Any] = {
+    "domain": command_domain,
+    "requirement": command_requirement,
+    "policy": command_policy,
+    "export": command_export,
+    "check": command_check,
+    "verify": command_verify,
+    "deploy": command_deploy,
+}
 
 
 def parse_headers(raw: list[str]) -> dict[str, str]:
     """Parse ``["Name: Value", ...]`` into a header dictionary.
+
+    Args:
+        raw: Sequence of ``"Name: Value"`` strings (typically
+            collected from ``--header`` CLI flags).
+
+    Returns:
+        A dict mapping header name to value.
 
     Raises:
         Config: When a header is missing a colon, has an empty
@@ -604,9 +837,9 @@ def parse_headers(raw: list[str]) -> dict[str, str]:
 def validate_identifier(name: str, kind: str) -> str:
     """Validate that ``name`` is a safe workspace identifier.
 
-    Identifiers are used in filesystem paths (domain names, requirement
-    ids) so anything outside a conservative alphabet is rejected to
-    prevent path traversal or NUL injection.
+    Identifiers are used in filesystem paths (domain names,
+    requirement ids) so anything outside a conservative alphabet is
+    rejected to prevent path traversal or NUL injection.
 
     Args:
         name: Identifier supplied by the user.
@@ -634,7 +867,16 @@ def validate_identifier(name: str, kind: str) -> str:
 
 
 def deployment_to_dict(record: Any) -> dict[str, Any]:
-    """Serialize a :class:`Record` for CLI output."""
+    """Serialize a :class:`~cedrus.deploy.Record` for CLI output.
+
+    Args:
+        record: The :class:`Record` to serialize.
+
+    Returns:
+        A dict with ``id``, ``domain``, ``target``, ``target_kind``,
+        ``bundle_hash``, ``status``, ``response`` and ``created_at``
+        keys.
+    """
     return {
         "id": record.id,
         "domain": record.domain,
@@ -648,7 +890,23 @@ def deployment_to_dict(record: Any) -> dict[str, Any]:
 
 
 def build_generator(args: Namespace) -> Any:
-    """Select the right generator based on flags and environment."""
+    """Select the right generator based on flags and environment.
+
+    Dispatch:
+    * ``--offline`` forces :class:`~cedrus.generate.Offline`.
+    * ``--model <provider/name>`` forces :class:`~cedrus.generate.Llm`.
+    * Otherwise the environment variables ``CEDAR_INTENT_ONLINE`` and
+      ``CEDAR_INTENT_MODEL`` decide.
+
+    Args:
+        args: Parsed CLI namespace; reads ``args.offline``,
+            ``args.model``, ``args.timeout``, ``args.retries`` and
+            ``args.max_tokens`` when constructing the LLM.
+
+    Returns:
+        A ready-to-use :class:`~cedrus.generate.Offline` or
+        :class:`~cedrus.generate.Llm` instance.
+    """
     model = args.model or os.getenv(MODEL_ENV_VAR)
     online = os.getenv(ONLINE_ENV_VAR, "").lower() in {"1", "true", "yes"}
     if getattr(args, "offline", False):
@@ -664,7 +922,16 @@ def build_generator(args: Namespace) -> Any:
 
 
 def build_principal(args: Namespace) -> Principal:
-    """Build a :class:`Principal` from parsed CLI arguments."""
+    """Build a :class:`Principal` from parsed CLI arguments.
+
+    Args:
+        args: Parsed CLI namespace; reads ``args.principal``,
+            ``args.principal_type``, ``args.entity_id``,
+            ``args.group_type``, ``args.group_id``.
+
+    Returns:
+        A :class:`~cedrus.scope.Principal` configured from the flags.
+    """
     return Principal(
         kind=args.principal,
         type_name=args.principal_type,
@@ -675,7 +942,15 @@ def build_principal(args: Namespace) -> Principal:
 
 
 def build_action(args: Namespace) -> Action:
-    """Build an :class:`Action` from parsed CLI arguments."""
+    """Build an :class:`Action` from parsed CLI arguments.
+
+    Args:
+        args: Parsed CLI namespace; reads ``args.action``,
+            ``args.action_name``, ``args.action_group``.
+
+    Returns:
+        A :class:`~cedrus.scope.Action` configured from the flags.
+    """
     return Action(
         kind=args.action,
         name=args.action_name,
@@ -684,7 +959,16 @@ def build_action(args: Namespace) -> Action:
 
 
 def build_resource(args: Namespace) -> Resource:
-    """Build a :class:`Resource` from parsed CLI arguments."""
+    """Build a :class:`Resource` from parsed CLI arguments.
+
+    Args:
+        args: Parsed CLI namespace; reads ``args.resource``,
+            ``args.resource_type``, ``args.entity_id``,
+            ``args.parent_type``, ``args.parent_id``.
+
+    Returns:
+        A :class:`~cedrus.scope.Resource` configured from the flags.
+    """
     return Resource(
         kind=args.resource,
         type_name=args.resource_type,
@@ -695,35 +979,85 @@ def build_resource(args: Namespace) -> Resource:
 
 
 def humanize(payload: Any) -> str:
-    """Render a structured CLI result for human-friendly output."""
+    """Render a structured CLI result for human-friendly output.
+
+    Polymorphic on the payload shape: each subcommand result type
+    has its own one-line humanizer. The function dispatches via
+    ``HUMANIZERS``; payloads that don't match any specific shape fall
+    through to the JSON dump.
+
+    Args:
+        payload: The structured result dict returned by a subcommand
+            handler (or any other JSON-serializable value).
+
+    Returns:
+        A single-line string for human consumption.
+    """
     if not isinstance(payload, dict):
         return json.dumps(payload, indent=2, default=str)
-    if "compiled" in payload:
-        policy = payload["compiled"]
-        return f"Compiled policy {policy['id']} ({policy['domain']})."
-    if "draft" in payload:
-        draft = payload["draft"]
-        return (
-            f"Draft policy {draft['id']} for requirement {draft['requirement_id']} "
-            f"in domain {draft['domain']}."
-        )
-    if "domain" in payload and "output" in payload:
-        return f"Exported {payload['domain']} to {payload['output']}."
-    if "passed" in payload and "domains" in payload:
-        domains = payload["domains"]
-        failures = [name for name, info in domains.items() if not info["passed"]]
-        if not failures:
-            return f"All {len(domains)} domain(s) passed validation."
-        return f"Failed: {', '.join(failures)}"
-    if "initialized" in payload:
-        return f"Initialized workspace at {payload['initialized']}."
-    if "requirements" in payload:
-        return join_or_none("Requirements", payload["requirements"])
-    if "domains" in payload:
-        return join_or_none("Domains", payload["domains"])
-    if "id" in payload and "domain" in payload:
-        return f"Stored requirement {payload['id']} for domain {payload['domain']}."
+    for predicate, render in HUMANIZERS:
+        if predicate(payload):
+            return render(payload)
     return json.dumps(payload, indent=2, default=str)
+
+
+def has_compiled(payload: dict[str, Any]) -> bool:
+    return "compiled" in payload
+
+
+def has_draft(payload: dict[str, Any]) -> bool:
+    return "draft" in payload
+
+
+def has_domain_export(payload: dict[str, Any]) -> bool:
+    return "domain" in payload and "output" in payload
+
+
+def has_check_report(payload: dict[str, Any]) -> bool:
+    return "passed" in payload and "domains" in payload
+
+
+def has_initialized(payload: dict[str, Any]) -> bool:
+    return "initialized" in payload
+
+
+def has_requirements(payload: dict[str, Any]) -> bool:
+    return "requirements" in payload
+
+
+def has_domains(payload: dict[str, Any]) -> bool:
+    return "domains" in payload
+
+
+def has_stored_requirement(payload: dict[str, Any]) -> bool:
+    return "id" in payload and "domain" in payload
+
+
+def humanize_check_report(payload: dict[str, Any]) -> str:
+    """Render the ``check`` subcommand result."""
+    domains = payload["domains"]
+    failures = [name for name, info in domains.items() if not info["passed"]]
+    if not failures:
+        return f"All {len(domains)} domain(s) passed validation."
+    return f"Failed: {', '.join(failures)}"
+
+
+#: Polymorphic dispatch table: ``(predicate, render)`` pairs in
+#: priority order. The first predicate that returns ``True`` wins;
+#: payloads that match no predicate fall through to the JSON dump.
+HUMANIZERS: list[tuple[Any, Any]] = [
+    (has_compiled, lambda p: f"Compiled policy {p['compiled']['id']} ({p['compiled']['domain']})."),
+    (has_draft, lambda p: (
+        f"Draft policy {p['draft']['id']} for requirement "
+        f"{p['draft']['requirement_id']} in domain {p['draft']['domain']}."
+    )),
+    (has_domain_export, lambda p: f"Exported {p['domain']} to {p['output']}."),
+    (has_check_report, humanize_check_report),
+    (has_initialized, lambda p: f"Initialized workspace at {p['initialized']}."),
+    (has_requirements, lambda p: join_or_none("Requirements", p["requirements"])),
+    (has_domains, lambda p: join_or_none("Domains", p["domains"])),
+    (has_stored_requirement, lambda p: f"Stored requirement {p['id']} for domain {p['domain']}."),
+]
 
 
 def join_or_none(label: str, items: list[str]) -> str:
