@@ -297,7 +297,7 @@ class Llm:
         """Call LiteLLM with the structured prompt and parse the response.
 
         Orchestrates the four pipeline stages: prompt construction
-        (:meth:`__modify` on a fresh :class:`Prompt`), the LiteLLM
+        (:meth:`modify` on a fresh :class:`Prompt`), the LiteLLM
         call (with error wrapping), response payload extraction
         (:meth:`extract`), and typed proposal construction
         (:meth:`build` for the intent plus :class:`Notes` and
@@ -318,7 +318,7 @@ class Llm:
                 returned an unknown ``effect``, or any required scope
                 field failed validation.
         """
-        prompt = self.__modify(Prompt(system=SYSTEM_PROMPT), context)
+        prompt = self.modify(Prompt(system=SYSTEM_PROMPT), context)
         options: dict[str, Any] = {
             "model": self.model,
             "messages": [
@@ -365,7 +365,7 @@ class Llm:
             usage=self.usage(response),
         )
 
-    def __modify(self, prompt: Prompt, context: Context) -> Prompt:
+    def modify(self, prompt: Prompt, context: Context) -> Prompt:
         """Populate ``prompt`` with the data sections derived from ``context``.
 
         Takes a :class:`Prompt` (typically ``Prompt(system=SYSTEM_PROMPT)``)
