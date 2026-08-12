@@ -5,40 +5,47 @@ strict payload validation. The JSON shape is enforced at every stage so
 any deviation from the documented contract raises
 :class:`Generate`.
 
-Prompting contract
-------------------
+Contract:
+    Prompting contract - the system prompt asks the model for an
+    ``intent`` object whose shape exactly matches
+    :class:`~cedrus.compile.Intent`. The model is told to:
 
-The system prompt asks the model for an ``intent`` object whose shape
-exactly matches :class:`~cedrus.compile.Intent`. The
-model is told to:
+    * use only entity types, actions, and attributes present in the
+      supplied Cedar schema;
+    * return ``"permit"`` or ``"forbid"`` for ``effect``;
+    * surface unknowns in ``unresolved`` instead of fabricating values.
 
-* use only entity types, actions, and attributes present in the
-  supplied Cedar schema;
-* return ``"permit"`` or ``"forbid"`` for ``effect``;
-* surface unknowns in ``unresolved`` instead of fabricating values.
+Note:
+    Prompt injection hygiene - every piece of user-controlled content
+    that is interpolated into the prompt is wrapped in fenced
+    ``<<<...>>>`` delimiters and explicitly described as **data only**
+    in the system prompt. The delimiters and the preamble are designed
+    so that a hostile or accidentally misformatted requirement text,
+    schema JSON, or existing-policy summary cannot impersonate system
+    instructions.
 
-Prompt injection hygiene
-------------------------
+    The generator parses the response strictly: missing fields, wrong
+    types, or invalid scope kinds all raise :class:`Generate`. The
+    downstream compiler is deterministic and cannot repair missing
+    data, so strict parsing is required to avoid silent corruption.
 
-Every piece of user-controlled content that is interpolated into
-the prompt is wrapped in fenced ``<<<...>>>`` delimiters and
-explicitly described as **data only** in the system prompt. The
-delimiters and the preamble are designed so that a hostile or
-accidentally misformatted requirement text, schema JSON, or
-existing-policy summary cannot impersonate system instructions.
+Note:
+    Error handling - :class:`openai.APIError` (the openai base class
+    for every litellm-raised failure) and the stdlib
+    :class:`TimeoutError` are caught and rewrapped as
+    :class:`Generate`. The original exception is preserved as the
+    cause so callers can inspect the upstream status code or message.
 
-The generator parses the response strictly: missing fields, wrong
-types, or invalid scope kinds all raise :class:`Generate`. The
-downstream compiler is deterministic and cannot repair missing data,
-so strict parsing is required to avoid silent corruption.
+Attributes:
+    Llm: Generator backed by LiteLLM.
+    SYSTEM_PROMPT: System prompt sent to the model with the structured
+        output contract and the security preamble.
 
-Error handling
---------------
-
-:class:`openai.APIError` (the openai base class for every litellm-raised
-failure) and the stdlib :class:`TimeoutError` are caught and rewrapped
-as :class:`Generate`. The original exception is preserved as the
-cause so callers can inspect the upstream status code or message.
+See Also:
+    :mod:`cedrus.generate.base`: :class:`Generator` Protocol that
+        :class:`Llm` implements.
+    :mod:`cedrus.generate.offline`: Deterministic offline generator
+        for tests and air-gapped environments.
 """
 
 from __future__ import annotations
@@ -51,12 +58,12 @@ from typing import Any
 import litellm
 from openai import APIError
 
-from ..compile import Intent
-from ..data import Notes, Unresolved, Usage
-from ..error import Generate, ScopeFault
-from ..need import slugify
-from ..scope import Action, Clause, Principal, Resource
-from .base import Context, Proposal, Result
+from cedrus.compile import Intent
+from cedrus.data import Notes, Unresolved, Usage
+from cedrus.error import Generate, ScopeFault
+from cedrus.generate.base import Context, Proposal, Result
+from cedrus.need import slugify
+from cedrus.scope import Action, Clause, Principal, Resource
 
 SYSTEM_PROMPT = """You are an authorization engineer producing a typed Cedar policy proposal.
 
@@ -131,7 +138,23 @@ class Llm:
             raise Generate("Llm retries cannot be negative")
 
     def generate(self, context: Context) -> Result:
-        """Call LiteLLM with the structured prompt and parse the response."""
+        """Call LiteLLM with the structured prompt and parse the response.
+
+        Args:
+            context: Input bundle for this generation call (requirement,
+                schema, scopes, existing intents).
+
+        Returns:
+            A :class:`Result` carrying the parsed :class:`Proposal`,
+            the resolved model identifier, request-id, and token usage.
+
+        Raises:
+            Generate: If LiteLLM raises :class:`openai.APIError` or
+                :class:`TimeoutError`, the response is missing or
+                non-text, the JSON payload is malformed, the model
+                returned an unknown ``effect``, or any required scope
+                field failed validation.
+        """
         options: dict[str, Any] = {
             "model": self.model,
             "messages": [
@@ -186,6 +209,13 @@ class Llm:
         ``<<<...>>>`` markers so the model can distinguish data from
         instructions. The system prompt explicitly forbids following
         any instructions inside the markers.
+
+        Args:
+            context: Input bundle providing the schema, requirement,
+                scopes and existing intents.
+
+        Returns:
+            The user-message string ready to be sent to LiteLLM.
         """
         schema_dump = json.dumps(context.schema.source, sort_keys=True, separators=(",", ":"))
         existing_dump = (
@@ -213,7 +243,15 @@ class Llm:
         )
 
     def format_existing(self, intent: Intent) -> str:
-        """Render an existing intent as a one-line summary."""
+        """Render an existing intent as a one-line summary.
+
+        Args:
+            intent: Existing :class:`Intent` to summarize.
+
+        Returns:
+            A single-line ``"- id=... effect=... principal=... action=...
+            resource=..."`` string.
+        """
         return (
             f"- id={intent.id} effect={intent.effect} "
             f"principal={intent.principal.kind} action={intent.action.kind} "
@@ -221,7 +259,15 @@ class Llm:
         )
 
     def format_principal(self, scope: Principal) -> str:
-        """Render a :class:`Principal` as a JSON object."""
+        """Render a :class:`Principal` as a JSON object.
+
+        Args:
+            scope: :class:`Principal` scope to serialize.
+
+        Returns:
+            A JSON string with ``kind``, ``type_name``, ``entity_id``,
+            ``group_type`` and ``group_id`` keys (sorted).
+        """
         return json.dumps(
             {
                 "kind": scope.kind,
@@ -234,14 +280,30 @@ class Llm:
         )
 
     def format_action(self, scope: Action) -> str:
-        """Render an :class:`Action` as a JSON object."""
+        """Render an :class:`Action` as a JSON object.
+
+        Args:
+            scope: :class:`Action` scope to serialize.
+
+        Returns:
+            A JSON string with ``kind``, ``name`` and ``group`` keys
+            (sorted).
+        """
         return json.dumps(
             {"kind": scope.kind, "name": scope.name, "group": scope.group},
             sort_keys=True,
         )
 
     def format_resource(self, scope: Resource) -> str:
-        """Render a :class:`Resource` as a JSON object."""
+        """Render a :class:`Resource` as a JSON object.
+
+        Args:
+            scope: :class:`Resource` scope to serialize.
+
+        Returns:
+            A JSON string with ``kind``, ``type_name``, ``entity_id``,
+            ``parent_type`` and ``parent_id`` keys (sorted).
+        """
         return json.dumps(
             {
                 "kind": scope.kind,
@@ -254,7 +316,18 @@ class Llm:
         )
 
     def extract_content(self, response: Any) -> str:
-        """Extract the message content from a LiteLLM response."""
+        """Extract the message content from a LiteLLM response.
+
+        Args:
+            response: Object returned by :func:`litellm.completion`.
+
+        Returns:
+            The model's text content.
+
+        Raises:
+            Generate: When the response has no choices/message or the
+                content is not a string.
+        """
         try:
             content = response.choices[0].message.content
         except (AttributeError, IndexError, TypeError) as error:
@@ -264,7 +337,19 @@ class Llm:
         return content
 
     def parse_payload(self, content: str) -> dict[str, Any]:
-        """Parse the model's JSON content into a structured payload."""
+        """Parse the model's JSON content into a structured payload.
+
+        Args:
+            content: Raw text content returned by the model.
+
+        Returns:
+            A dict containing at minimum the ``intent`` key (itself a
+            dict).
+
+        Raises:
+            Generate: When the content is not valid JSON or the JSON
+                shape does not match the documented contract.
+        """
         try:
             payload = json.loads(content)
         except json.JSONDecodeError as error:
@@ -277,7 +362,20 @@ class Llm:
         return payload
 
     def build_intent(self, intent_data: dict[str, Any], context: Context) -> Intent:
-        """Translate the parsed payload into a typed :class:`Intent`."""
+        """Translate the parsed payload into a typed :class:`Intent`.
+
+        Args:
+            intent_data: ``intent`` sub-dict of the parsed payload.
+            context: Input bundle used to derive the intent identifier
+                and fill in missing scope fields with the user's hints.
+
+        Returns:
+            A fully typed :class:`Intent`.
+
+        Raises:
+            Generate: When ``effect`` is not ``"permit"`` or
+                ``"forbid"``.
+        """
         effect = intent_data.get("effect")
         if effect not in {"permit", "forbid"}:
             raise Generate(f"intent has invalid effect {effect!r}")
@@ -300,7 +398,16 @@ class Llm:
         )
 
     def extract_usage(self, response: Any) -> dict[str, int]:
-        """Extract integer usage counts from a LiteLLM response."""
+        """Extract integer usage counts from a LiteLLM response.
+
+        Args:
+            response: Object returned by :func:`litellm.completion`.
+
+        Returns:
+            A dict of integer token counts keyed by their original
+            field name (e.g. ``prompt_tokens``); empty when the
+            response does not expose usage.
+        """
         usage = getattr(response, "usage", None)
         if usage is not None and hasattr(usage, "model_dump"):
             usage = usage.model_dump()
@@ -316,7 +423,15 @@ class Llm:
 
 
     def extract_usage_as_usage(self, response: Any) -> Usage:
-        """Wrap :meth:`extract_usage` in a typed :class:`Usage`."""
+        """Wrap :meth:`extract_usage` in a typed :class:`Usage`.
+
+        Args:
+            response: Object returned by :func:`litellm.completion`.
+
+        Returns:
+            A :class:`Usage` with ``prompt``, ``completion`` and
+            ``total`` populated; zeros when the response omits usage.
+        """
         usage = self.extract_usage(response)
         return Usage(
             prompt=int(usage.get("prompt_tokens", 0) or 0),
@@ -328,8 +443,12 @@ class Llm:
 def build_principal(data: dict[str, Any]) -> Principal | None:
     """Build a :class:`Principal` from a parsed JSON object.
 
-    Returns ``None`` when the JSON object is missing required fields or the
-    fields cannot construct a valid scope.
+    Args:
+        data: ``principal`` sub-dict of the parsed payload.
+
+    Returns:
+        A new :class:`Principal`, or ``None`` when ``kind`` is missing
+        or the scope fields fail :class:`~cedrus.scope.Scope` validation.
     """
     kind = data.get("kind")
     if not isinstance(kind, str):
@@ -349,8 +468,12 @@ def build_principal(data: dict[str, Any]) -> Principal | None:
 def build_action(data: dict[str, Any]) -> Action | None:
     """Build an :class:`Action` from a parsed JSON object.
 
-    Returns ``None`` when the JSON object is missing required fields or the
-    fields cannot construct a valid scope.
+    Args:
+        data: ``action`` sub-dict of the parsed payload.
+
+    Returns:
+        A new :class:`Action`, or ``None`` when ``kind`` is missing
+        or the scope fields fail :class:`~cedrus.scope.Scope` validation.
     """
     kind = data.get("kind")
     if not isinstance(kind, str):
@@ -368,8 +491,12 @@ def build_action(data: dict[str, Any]) -> Action | None:
 def build_resource(data: dict[str, Any]) -> Resource | None:
     """Build a :class:`Resource` from a parsed JSON object.
 
-    Returns ``None`` when the JSON object is missing required fields or the
-    fields cannot construct a valid scope.
+    Args:
+        data: ``resource`` sub-dict of the parsed payload.
+
+    Returns:
+        A new :class:`Resource`, or ``None`` when ``kind`` is missing
+        or the scope fields fail :class:`~cedrus.scope.Scope` validation.
     """
     kind = data.get("kind")
     if not isinstance(kind, str):
@@ -387,7 +514,16 @@ def build_resource(data: dict[str, Any]) -> Resource | None:
 
 
 def build_clauses(values: Any) -> tuple[Clause, ...]:
-    """Build a tuple of :class:`Clause` from a JSON-friendly value."""
+    """Build a tuple of :class:`Clause` from a JSON-friendly value.
+
+    Args:
+        values: ``when``/``unless`` array from the payload, or a
+            single string (which is normalized to a one-element list).
+
+    Returns:
+        A tuple of :class:`Clause` objects; empty when ``values`` is
+        not a list of non-blank strings.
+    """
     if isinstance(values, str):
         values = [values]
     if not isinstance(values, list):
@@ -400,7 +536,15 @@ def build_clauses(values: Any) -> tuple[Clause, ...]:
 
 
 def optional_string(value: Any) -> str | None:
-    """Return ``None`` for missing or blank string values."""
+    """Return ``None`` for missing or blank string values.
+
+    Args:
+        value: Candidate string value (any type accepted).
+
+    Returns:
+        The stripped string, or ``None`` if ``value`` is ``None`` or
+        becomes empty after stripping.
+    """
     if value is None:
         return None
     text = str(value).strip()
