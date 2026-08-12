@@ -52,7 +52,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from ..compiler import PolicyIntent
 from ..deployment import DeploymentRecord
@@ -174,6 +174,17 @@ class Repository(Protocol):
     def latest_report(self, policy_id: str, kind: str) -> StoredReport: ...
 
     def record_deployment(self, deployment: DeploymentRecord) -> None: ...
+
+    def transaction(self) -> Any:
+        """Return a context manager that runs the body inside one transaction.
+
+        Used by the workspace's :meth:`Workspace.apply` to record both
+        the validation and the test reports alongside the policy
+        upsert in a single atomic write. For the SQLite backend this
+        wraps the connection's transaction context manager; for the
+        in-memory backend it is a no-op.
+        """
+        ...
     def list_deployments(
         self, domain: str | None = None
     ) -> Sequence[DeploymentRecord]: ...

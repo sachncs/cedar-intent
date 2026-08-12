@@ -183,7 +183,10 @@ class Workspace:
 
         Creates ``<domain>/requirements/`` and ``<domain>/policies/``.
         If ``<domain>/schema.json`` is missing, seeds an empty schema
-        with the domain name as the only namespace.
+        with the domain name as the only namespace. The seed write
+        is atomic: a sibling temp file is created, fsynced, and
+        renamed into place, so a crash mid-write can never leave a
+        truncated ``schema.json`` on disk.
 
         Args:
             domain: Domain identifier to initialize.
@@ -193,12 +196,31 @@ class Workspace:
         """
         self.requirements_directory(domain).mkdir(parents=True, exist_ok=True)
         self.policies_directory(domain).mkdir(parents=True, exist_ok=True)
-        if not self.schema_path(domain).exists():
-            self.schema_path(domain).write_text(
-                json.dumps({domain: {"entityTypes": {}, "actions": {}}}, indent=2),
-                encoding="utf-8",
+        schema_path = self.schema_path(domain)
+        if not schema_path.exists():
+            import os
+            import tempfile
+
+            payload = json.dumps(
+                {domain: {"entityTypes": {}, "actions": {}}}, indent=2
             )
-        return self.schema_path(domain)
+            parent = schema_path.parent
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=f".{schema_path.name}.", dir=str(parent), suffix=".tmp"
+            )
+            try:
+                os.write(fd, payload.encode("utf-8"))
+                os.fsync(fd)
+                os.close(fd)
+                os.replace(tmp_name, schema_path)
+            except OSError:
+                os.close(fd)
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise
+        return schema_path
 
     def load_schema(self, domain: str) -> CedarSchema:
         """Load and validate the Cedar schema for ``domain``.
@@ -300,6 +322,12 @@ class Workspace:
         is also upserted as a :class:`CompiledPolicy` so it shows up in
         subsequent verification, test, and deployment runs.
 
+        Duplicate file stems (for example ``Foo.cedar`` and
+        ``Foo.cedar.bak`` both producing stem ``Foo``) raise
+        :class:`WorkspaceError` so the operator is forced to
+        disambiguate before the import proceeds; the prior behaviour
+        silently merged the duplicates via upsert and lost data.
+
         Args:
             domain: Domain identifier.
 
@@ -307,12 +335,23 @@ class Workspace:
             The list of imported :class:`ExistingPolicy` objects, in
             alphabetical order by file name. Empty when the policies
             directory does not exist.
+
+        Raises:
+            WorkspaceError: When two ``*.cedar`` files share the same
+                stem.
         """
         existing: list[ExistingPolicy] = []
         directory = self.policies_directory(domain)
         if not directory.exists():
             return existing
+        stems_seen: set[str] = set()
         for path in sorted(directory.glob("*.cedar")):
+            if path.stem in stems_seen:
+                raise WorkspaceError(
+                    f"duplicate policy file stem {path.stem!r} in {directory}: "
+                    f"rename one of the files before importing"
+                )
+            stems_seen.add(path.stem)
             cedar = path.read_text(encoding="utf-8").strip()
             requirement = Requirement(
                 id=path.stem,
@@ -640,6 +679,14 @@ class Workspace:
     ) -> CompiledPolicy:
         """Compile, validate, and persist ``draft`` as a :class:`CompiledPolicy`.
 
+        The validation report, scenario test report, and compiled
+        policy upsert all happen inside a single repository
+        transaction. If scenarios fail the raise happens before the
+        transaction commits, so the validation report, test report,
+        and policy upsert are all rolled back together. A failed
+        apply therefore never leaves the workspace in a half-applied
+        state.
+
         Args:
             draft: Draft to apply.
             schema: Cedar schema to validate against.
@@ -662,16 +709,10 @@ class Workspace:
                 f"draft {draft.id} has unresolved items: {', '.join(draft.unresolved)}"
             )
         report = validate_cedar([draft.cedar], schema)
-        self.repository.record_report(
-            build_stored_report(draft.id, "validation", report)
-        )
         if scenarios:
             scenario_list: list[Scenario] = list(scenarios)
             test_report = draft.test(
                 schema, scenario_list, entities=resolve_test_entities(entities)
-            )
-            self.repository.record_report(
-                build_stored_report(draft.id, "test", test_report)
             )
             if not test_report.passed:
                 failures = [
@@ -681,14 +722,22 @@ class Workspace:
                     f"draft {draft.id} failed scenarios: "
                     + ", ".join(failure.scenario.name for failure in failures)
                 )
-        compiled = CompiledPolicy(
-            id=draft.id,
-            requirement=draft.requirement,
-            cedar=report.formatted[0] if report.formatted else draft.cedar,
-            intent=draft.intent,
-            created_at=datetime.now(UTC),
-        )
-        self.upsert_compiled(compiled)
+        with self.repository.transaction():
+            self.repository.record_report(
+                build_stored_report(draft.id, "validation", report)
+            )
+            if scenarios and test_report is not None:
+                self.repository.record_report(
+                    build_stored_report(draft.id, "test", test_report)
+                )
+            compiled = CompiledPolicy(
+                id=draft.id,
+                requirement=draft.requirement,
+                cedar=report.formatted[0] if report.formatted else draft.cedar,
+                intent=draft.intent,
+                created_at=datetime.now(UTC),
+            )
+            self.upsert_compiled(compiled)
         return compiled
 
     def apply_for_requirement(

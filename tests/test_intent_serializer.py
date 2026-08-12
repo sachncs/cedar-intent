@@ -19,19 +19,17 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
-
 from cedar_intent import PolicyIntent, Workspace
 from cedar_intent.compiler import PolicyIntent as CompilerPolicyIntent  # noqa: F401
+from cedar_intent.scope_json import (
+    intent_from_dict,
+    intent_to_dict,
+)
 from cedar_intent.scopes import (
     ActionScope,
     ConditionClause,
     PrincipalScope,
     ResourceScope,
-)
-from cedar_intent.scope_json import (
-    intent_from_dict,
-    intent_to_dict,
 )
 
 
@@ -141,11 +139,10 @@ def test_workspace_stored_draft_round_trip(tmp_path: Path) -> None:
     reads with the canonical format.
     """
     from cedar_intent import Requirement
-    from cedar_intent.policies import DraftPolicy
     from cedar_intent.generator import DraftProposal, GenerationResult
+    from cedar_intent.policies import DraftPolicy
     from cedar_intent.workspace import build_stored_draft
 
-    workspace = Workspace.create(tmp_path / "acme")
     requirement = Requirement(
         id="HR-042",
         text="Body",

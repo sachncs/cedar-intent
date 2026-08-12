@@ -592,6 +592,22 @@ class SqliteRepository:
                 ),
             )
 
+    def transaction(self) -> Any:
+        """Return a context manager that wraps the body in one SQL transaction.
+
+        Every mutating call inside the block runs under the same
+        connection transaction; if any statement raises, the
+        transaction rolls back and none of the writes are persisted.
+        """
+        import contextlib
+
+        @contextlib.contextmanager
+        def _cm() -> Any:
+            with self.connection:
+                yield None
+
+        return _cm()
+
     def list_deployments(
         self, domain: str | None = None
     ) -> Sequence[DeploymentRecord]:

@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from ..deployment import DeploymentRecord
 from ..errors import StorageError
@@ -259,6 +260,21 @@ class InMemoryRepository:
     def record_deployment(self, deployment: DeploymentRecord) -> None:
         """Append ``deployment`` to the deployment history."""
         self.deployments.append(deployment)
+
+    def transaction(self) -> Any:
+        """Return a no-op transaction context.
+
+        The in-memory repository is single-threaded so transactions
+        provide no additional isolation; the contract exists so
+        callers can write backend-agnostic code.
+        """
+        import contextlib
+
+        @contextlib.contextmanager
+        def _cm() -> Any:
+            yield None
+
+        return _cm()
 
     def list_deployments(
         self, domain: str | None = None
