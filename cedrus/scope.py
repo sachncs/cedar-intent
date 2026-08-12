@@ -373,7 +373,7 @@ class Action(Scope):
             id=row["id"],
             kind=row["kind"],
             name=row["name"],
-            group=row["group"],
+            group=row["action_group"],
             namespace=row.get("namespace"),
         )
 
@@ -387,7 +387,7 @@ class Action(Scope):
             "id": self.id,
             "kind": self.kind,
             "name": self.name,
-            "group": self.group,
+            "action_group": self.group,
             "namespace": self.namespace,
         }
 

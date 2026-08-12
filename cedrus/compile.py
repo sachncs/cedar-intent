@@ -35,6 +35,7 @@ from typing import Any, Literal
 from cedrus.error import Compile
 from cedrus.need import slugify
 from cedrus.scope import Action, Clause, Principal, Resource, Scope
+from cedrus.utils import id as generate_id
 
 Effect = Literal["permit", "forbid"]
 
@@ -156,6 +157,8 @@ class Intent:
         Returns:
             The reconstructed :class:`Intent`.
         """
+        if not isinstance(data, Mapping):
+            raise Compile("intent payload must be a JSON object")
         principal_data = data.get("principal")
         action_data = data.get("action")
         resource_data = data.get("resource")
@@ -176,16 +179,8 @@ class Intent:
             if isinstance(resource_data, dict)
             else Resource()
         )
-        when_clauses = (
-            tuple(Clause.from_dict(dict(item)) for item in when_raw)
-            if isinstance(when_raw, list)
-            else ()
-        )
-        unless_clauses = (
-            tuple(Clause.from_dict(dict(item)) for item in unless_raw)
-            if isinstance(unless_raw, list)
-            else ()
-        )
+        when_clauses = _clauses_from_raw(when_raw)
+        unless_clauses = _clauses_from_raw(unless_raw)
         notes_value = data.get("notes", {}) or {}
         notes = notes_value if isinstance(notes_value, dict) else {}
         return cls(
@@ -305,6 +300,8 @@ class Intent:
         else:
             intent_id = str(data.get("id", ""))
             requirement_id = str(data.get("requirement_id", ""))
+        if not intent_id.strip():
+            intent_id = generate_id()
         return cls(
             id=intent_id,
             requirement_id=requirement_id,
@@ -395,6 +392,27 @@ class Intent:
             "when_clause_rows": [c.to_data() for c in self.when_clauses],
             "unless_clause_rows": [c.to_data() for c in self.unless_clauses],
         }
+
+
+def _clauses_from_raw(raw: Any) -> tuple[Clause, ...]:
+    """Build :class:`Clause` tuples from the heterogeneous when/unless payload.
+
+    Accepts:
+    * ``None`` or non-list → empty tuple
+    * a list of strings → each becomes a Clause(body=string)
+    * a list of dicts → each is fed to ``Clause.from_dict``
+    """
+    if raw is None or not isinstance(raw, list):
+        return Clause.normalize(raw)
+    clauses: list[Clause] = []
+    for item in raw:
+        if isinstance(item, str):
+            stripped = item.strip()
+            if stripped:
+                clauses.append(Clause(body=stripped))
+        elif isinstance(item, dict):
+            clauses.append(Clause.from_dict(dict(item)))
+    return tuple(clauses)
 
 
 @dataclass(frozen=True, slots=True)

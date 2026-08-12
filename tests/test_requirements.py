@@ -1,165 +1,252 @@
-"""Tests for the requirements module."""
-
+"""Tests for :mod:`cedrus.need` — Markdown loader and helpers."""
 from __future__ import annotations
 
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from cedrus import Need, load, loads, render
 from cedrus.error import Require
 from cedrus.need import (
+    Need,
     derive_domain,
     parse_front_matter,
+    render_requirement,
     slugify,
 )
 
 
-def test_parse_front_matter_with_metadata() -> None:
-    source = (
-        "---\n"
-        "id: HR-001\n"
-        'title: "Photo access"\n'
-        "---\n\n"
-        "Body text.\n"
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def test_slugify_lowercases_and_replaces_non_alnum() -> None:
+    assert slugify("Hello World!!") == "hello-world"
+
+
+def test_slugify_collapses_consecutive_hyphens() -> None:
+    assert slugify("foo---bar") == "foo-bar"
+
+
+def test_slugify_strips_leading_and_trailing_hyphens() -> None:
+    assert slugify("--foo--") == "foo"
+
+
+def test_slugify_handles_already_clean_string() -> None:
+    assert slugify("hr-001") == "hr-001"
+
+
+def test_slugify_empty_string() -> None:
+    assert slugify("") == ""
+
+
+def test_parse_front_matter_returns_dict_and_body() -> None:
+    fm, body = parse_front_matter(
+        "---\nid: HR-001\ndomain: hr\n---\n\nThe body.\n"
     )
-    front_matter, body = parse_front_matter(source)
-    assert front_matter == {"id": "HR-001", "title": "Photo access"}
-    assert body == "Body text."
+    assert fm == {"id": "HR-001", "domain": "hr"}
+    assert body == "The body."
 
 
-def test_parse_front_matter_without_metadata() -> None:
-    front_matter, body = parse_front_matter("# Hello world\n\nBody.\n")
-    assert front_matter == {}
-    assert body == "# Hello world\n\nBody."
+def test_parse_front_matter_strips_quotes_from_value() -> None:
+    fm, _ = parse_front_matter('---\nname: "Alice"\n---\n\nbody\n')
+    assert fm["name"] == "Alice"
 
 
-def test_parse_front_matter_ignores_comments_and_blanks() -> None:
-    source = (
-        "---\n"
-        "# a comment\n"
-        "\n"
-        "id: HR-042\n"
-        "---\n\n"
-        "Body\n"
+def test_parse_front_matter_returns_empty_dict_when_no_marker() -> None:
+    fm, body = parse_front_matter("just body text\n")
+    assert fm == {}
+    assert body == "just body text"
+
+
+def test_parse_front_matter_returns_empty_when_marker_unclosed() -> None:
+    fm, body = parse_front_matter("---\nid: x\nno closing marker\n")
+    assert fm == {}
+
+
+def test_parse_front_matter_skips_comments_and_blanks() -> None:
+    fm, _ = parse_front_matter(
+        "---\n# header comment\n\nid: hr-001\n\n# inline comment\nkey: val\n---\nbody"
     )
-    front_matter, _ = parse_front_matter(source)
-    assert front_matter == {"id": "HR-042"}
+    assert fm["id"] == "hr-001"
+    assert fm["key"] == "val"
 
 
-def test_parse_front_matter_unterminated_returns_body() -> None:
-    front_matter, body = parse_front_matter("---\nid: missing\n\nBody")
-    assert front_matter == {}
-    assert "Body" in body
-
-
-def test_parse_front_matter_malformed_raises(tmp_path: Path) -> None:
-    path = tmp_path / "bad.md"
-    path.write_text("---\nnot_a_valid_line\n---\n\nBody", encoding="utf-8")
+def test_parse_front_matter_raises_on_malformed_line() -> None:
     with pytest.raises(Require):
-        load(path)
+        parse_front_matter("---\nnot-a-valid-line\n---\nbody\n")
 
 
-def test_slugify_handles_punctuation_and_case() -> None:
-    assert slugify("Hello, World!") == "hello-world"
-    assert slugify("  --trim--  ") == "trim"
-    assert slugify("CamelCase") == "camelcase"
+def test_derive_domain_returns_first_dir_under_workspace() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        sub = root / "hr"
+        sub.mkdir()
+        md = sub / "HR-001.md"
+        md.touch()
+        assert derive_domain(md, root) == "hr"
 
 
-def test_derive_domain_uses_first_directory(tmp_path: Path) -> None:
-    root = tmp_path
-    target = root / "hr" / "requirements" / "HR-042.md"
-    target.parent.mkdir(parents=True)
-    target.touch()
-    assert derive_domain(target, root) == "hr"
+def test_derive_domain_returns_default_when_at_root() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        md = root / "HR-001.md"
+        md.touch()
+        assert derive_domain(md, root) == "default"
 
 
-def test_derive_domain_defaults_for_root_level(tmp_path: Path) -> None:
-    target = tmp_path / "orphan.md"
-    target.touch()
-    assert derive_domain(target, tmp_path) == "default"
-
-
-def test_load_from_file(tmp_path: Path) -> None:
-    path = tmp_path / "hr" / "HR-042.md"
-    path.parent.mkdir(parents=True)
-    path.write_text(
-        "---\nid: HR-042\ndomain: hr\n---\n\nBody text.\n", encoding="utf-8"
+def test_render_requirement_round_trip() -> None:
+    need = Need(
+        id="HR-001",
+        text="The body.",
+        domain="hr",
+        source_path=Path("/tmp/HR-001.md"),
+        created_at=datetime.now(UTC),
     )
-    requirement = load(path, workspace_root=tmp_path)
-    assert requirement.id == "HR-042"
-    assert requirement.domain == "hr"
-    assert "Body text." in requirement.text
+    rendered = render_requirement(need)
+    assert "id: HR-001" in rendered
+    assert "domain: hr" in rendered
+    assert "The body." in rendered
 
 
-def test_load_without_domain_uses_path(tmp_path: Path) -> None:
-    path = tmp_path / "hr" / "requirements" / "HR-100.md"
-    path.parent.mkdir(parents=True)
-    path.write_text("Body", encoding="utf-8")
-    requirement = load(path, workspace_root=tmp_path)
-    assert requirement.domain == "hr"
-    assert requirement.id == "HR-100"
+# ---------------------------------------------------------------------------
+# Need data modelling
+# ---------------------------------------------------------------------------
 
 
-def test_load_missing_raises(tmp_path: Path) -> None:
+def test_need_rejects_empty_id() -> None:
     with pytest.raises(Require):
-        load(tmp_path / "nope.md")
+        Need(id="", text="x", domain="hr", source_path=Path("/tmp/x"), created_at=datetime.now(UTC))
 
 
-def test_load_empty_body_raises(tmp_path: Path) -> None:
-    path = tmp_path / "bad.md"
-    path.write_text("---\nid: X\ndomain: hr\n---\n\n   \n", encoding="utf-8")
+def test_need_rejects_whitespace_id() -> None:
     with pytest.raises(Require):
-        load(path)
+        Need(id="   ", text="x", domain="hr", source_path=Path("/tmp/x"), created_at=datetime.now(UTC))
 
 
-def test_loads_returns_sorted_list(tmp_path: Path) -> None:
-    directory = tmp_path
-    for identifier in ("HR-003", "HR-001", "HR-002"):
-        path = directory / f"{identifier}.md"
-        path.write_text(
-            f"---\nid: {identifier}\ndomain: hr\n---\n\nBody {identifier}\n",
-            encoding="utf-8",
+def test_need_rejects_empty_text() -> None:
+    with pytest.raises(Require):
+        Need(id="x", text="", domain="hr", source_path=Path("/tmp/x"), created_at=datetime.now(UTC))
+
+
+def test_need_rejects_empty_domain() -> None:
+    with pytest.raises(Require):
+        Need(id="x", text="y", domain="", source_path=Path("/tmp/x"), created_at=datetime.now(UTC))
+
+
+def test_need_parse_round_trips_via_to_data() -> None:
+    need = Need(
+        id="HR-001",
+        text="Body",
+        domain="hr",
+        source_path=Path("/tmp/HR-001.md"),
+        created_at=datetime.now(UTC),
+    )
+    rebuilt = Need.parse(need.to_data())
+    assert rebuilt.id == need.id
+    assert rebuilt.text == need.text
+    assert rebuilt.domain == need.domain
+    assert str(rebuilt.source_path) == str(need.source_path)
+
+
+# ---------------------------------------------------------------------------
+# Need.from_markdown / from_directory
+# ---------------------------------------------------------------------------
+
+
+def test_from_markdown_uses_id_from_front_matter() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        md = root / "hr" / "HR-001.md"
+        md.parent.mkdir(parents=True)
+        md.write_text(
+            "---\nid: HR-001\ndomain: hr\n---\n\nBody.\n", encoding="utf-8"
         )
-    requirements = loads(directory)
-    assert [req.id for req in requirements] == ["HR-001", "HR-002", "HR-003"]
+        need = Need.from_markdown(md, workspace_root=root)
+        assert need.id == "HR-001"
+        assert need.domain == "hr"
 
 
-def test_loads_missing_directory_raises(tmp_path: Path) -> None:
-    with pytest.raises(Require):
-        loads(tmp_path / "missing")
+def test_from_markdown_falls_back_to_filename_stem_when_no_id() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        md = root / "hr" / "HR-042.md"
+        md.parent.mkdir(parents=True)
+        md.write_text("---\ndomain: hr\n---\n\nBody.\n", encoding="utf-8")
+        need = Need.from_markdown(md, workspace_root=root)
+        assert need.id == "HR-042"
 
 
-def test_requirement_validation_enforces_non_empty_fields() -> None:
-    with pytest.raises(Require):
-        Need(
-            id="",
-            text="body",
-            domain="hr",
-            source_path=Path("/tmp/x"),
-            created_at=datetime.now(UTC),
+def test_from_markdown_derives_domain_from_path_when_missing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        md = root / "hr" / "HR-001.md"
+        md.parent.mkdir(parents=True)
+        md.write_text("---\nid: HR-001\n---\n\nBody.\n", encoding="utf-8")
+        need = Need.from_markdown(md, workspace_root=root)
+        assert need.domain == "hr"
+
+
+def test_from_markdown_raises_for_missing_file() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        with pytest.raises(Require):
+            Need.from_markdown(root / "missing.md", workspace_root=root)
+
+
+def test_from_markdown_raises_for_empty_body() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        md = root / "hr" / "HR-001.md"
+        md.parent.mkdir(parents=True)
+        md.write_text("---\nid: HR-001\ndomain: hr\n---\n", encoding="utf-8")
+        with pytest.raises(Require):
+            Need.from_markdown(md, workspace_root=root)
+
+
+def test_from_markdown_uses_default_domain_at_root() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        md = root / "HR-001.md"
+        md.write_text("---\nid: HR-001\n---\n\nBody.\n", encoding="utf-8")
+        need = Need.from_markdown(md, workspace_root=root)
+        assert need.domain == "default"
+
+
+def test_from_directory_loads_every_md_in_sorted_order() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        d = root / "hr" / "requirements"
+        d.mkdir(parents=True)
+        (d / "HR-002.md").write_text(
+            "---\nid: HR-002\ndomain: hr\n---\n\nB.\n", encoding="utf-8"
         )
-    with pytest.raises(Require):
-        Need(
-            id="X",
-            text="",
-            domain="hr",
-            source_path=Path("/tmp/x"),
-            created_at=datetime.now(UTC),
+        (d / "HR-001.md").write_text(
+            "---\nid: HR-001\ndomain: hr\n---\n\nA.\n", encoding="utf-8"
         )
-    with pytest.raises(Require):
-        Need(
-            id="X",
-            text="body",
-            domain="",
-            source_path=Path("/tmp/x"),
-            created_at=datetime.now(UTC),
-        )
+        needs = Need.from_directory(d, workspace_root=root)
+        assert [n.id for n in needs] == ["HR-001", "HR-002"]
 
 
-def test_render_round_trip(requirement: Need) -> None:
-    rendered = render(requirement)
-    assert f"id: {requirement.id}" in rendered
-    assert f"domain: {requirement.domain}" in rendered
-    assert requirement.text in rendered
+def test_from_directory_skips_non_md_files() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        d = root / "hr" / "requirements"
+        d.mkdir(parents=True)
+        (d / "HR-001.md").write_text(
+            "---\nid: HR-001\ndomain: hr\n---\n\nA.\n", encoding="utf-8"
+        )
+        (d / "ignore.txt").write_text("ignored", encoding="utf-8")
+        needs = Need.from_directory(d, workspace_root=root)
+        assert [n.id for n in needs] == ["HR-001"]
+
+
+def test_from_directory_raises_for_missing_directory() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        with pytest.raises(Require):
+            Need.from_directory(Path(tmp) / "nope")
+
+
+__all__ = []
