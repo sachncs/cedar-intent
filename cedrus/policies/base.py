@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from cedrus.case import Case, Runner, Suite
-from cedrus.compile import Intent, Source, compile_intent
+from cedrus.compile import Intent, Source
 from cedrus.error import Fault
 from cedrus.need import Need
 from cedrus.schema import Schema
@@ -117,6 +117,11 @@ class Kind(ABC):
     def compile(self, schema: Schema) -> Source:
         """Compile this policy to Cedar source text using its intent.
 
+        Polymorphic route: materializes the typed :class:`Intent` via
+        :meth:`to_intent`, then defers to :meth:`Intent.compile` on
+        the intent itself. The compiler is the single source of Cedar
+        syntax; this method is just the policy-side convenience wrapper.
+
         Args:
             schema: Cedar schema. Accepted for interface symmetry with
                 :class:`Compiled`; the compiler itself does not
@@ -129,7 +134,7 @@ class Kind(ABC):
             Fault: If :meth:`to_intent` cannot materialize an intent
                 for this policy.
         """
-        return compile_intent(self.to_intent())
+        return self.to_intent().compile()
 
     def validate(self, schema: Schema) -> Vreport:
         """Validate the Cedar source for this policy against ``schema``.
