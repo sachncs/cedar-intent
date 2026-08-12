@@ -75,6 +75,7 @@ Host: policy-service.example.com
 Content-Type: application/json
 X-Cedar-Bundle-Hash: 9c2a…f0
 X-Cedar-Domain: hr
+Idempotency-Key: 7c4e…
 
 {"domain": "hr", "cedar": "...", "bundle_hash": "9c2a…f0", ...}
 ```
@@ -93,8 +94,40 @@ cedar-intent deploy push \
     --header "X-Environment: production"
 ```
 
+> **WARNING — header validation.** Every header name and value is
+> validated. Names may not be empty, contain CR/LF, or be one of
+> the reserved names (`Host`, `Authorization`, `Cookie`,
+> `Content-Length`, `Transfer-Encoding`). Values may not contain
+> CR/LF and are capped at 8192 bytes. Names are capped at 256 bytes.
+
+> **WARNING — redirect handling.** HTTP redirects are **disabled**
+> by default. A `3xx` response is treated as a deployment failure.
+> Pass `--follow-redirects` to the deployment client (via the Python
+> API) to opt in. The SSRF guard is re-applied on every hop when
+> redirects are enabled, but operators should prefer a single direct
+> endpoint.
+
+> **WARNING — body capture.** The HTTP response body is never
+> embedded in error messages or persisted verbatim in the deployment
+> record. Only a SHA-256 of the body is retained. If you need to
+> inspect the body, capture it on the server side instead.
+
+> **WARNING — bundle integrity.** The SHA-256 hash in the manifest
+> provides **corruption detection only**. An attacker who can replace
+> both `bundle.cedar` and `manifest.json` can recompute the digest
+> trivially. Add a keyed signature (HMAC-SHA-256 with a shared key,
+> or Ed25519 with a published public key) in the deploy metadata when
+> you need tamper evidence.
+
+> **WARNING — DNS rebinding.** The SSRF guard pins every HTTP
+> connection to the IP address resolved at SSRF-check time. A change
+> in authoritative DNS between the guard and the request cannot
+> redirect the deployment into a private network.
+
 The HTTP timeout defaults to 30 seconds and is configurable with
-`--timeout`.
+`--timeout`. The connection is closed after `--timeout` seconds; a
+network error on the remote side raises `DeploymentError` without
+retrying unless `--retries` is non-zero.
 
 ## Deployment history
 
