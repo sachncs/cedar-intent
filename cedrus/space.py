@@ -60,6 +60,7 @@ from cedrus.policies import Compiled, Draft, Existing, Kind
 from cedrus.schema import Schema
 from cedrus.scope import Action, Principal, Resource
 from cedrus.store import Backend, DraftStored, Memory, ReportStored, Repository, Stored
+from cedrus.utils import id as generate_id
 from cedrus.validate import Vreport
 from cedrus.verify import Report, Verifier
 
@@ -513,7 +514,20 @@ class Space:
             model=result.model,
             request_id=result.request_id,
         )
-        new_draft.save(self.repository)
+        new_stored_draft = DraftStored(
+            id=generate_id(),
+            policy_id=new_draft.id,
+            model=result.model,
+            request_id=result.request_id,
+            unresolved=new_draft.unresolved,
+            cedar=qualified_intent.compile().cedar,
+            created_at=datetime.now(UTC),
+            intent=qualified_intent,
+            principal=qualified_intent.principal,
+            action=qualified_intent.action,
+            resource=qualified_intent.resource,
+        )
+        new_stored_draft.save(self.repository)
         return new_draft, result
 
     def verify_domain(self, domain: str, schema: Schema) -> Report:
@@ -765,27 +779,14 @@ class Space:
                 "run 'cedrus policy generate' first"
             ) from error
         intent = self.intent_from_draft(stored_draft, placeholder.id, requirement_id)
-        principal_payload = self.loads_optional_json(
-            stored_draft.principal_scope_json
-        )
-        action_payload = self.loads_optional_json(stored_draft.action_scope_json)
-        resource_payload = self.loads_optional_json(
-            stored_draft.resource_scope_json
-        )
         draft = Draft(
             id=stored_draft.policy_id,
             requirement=requirement,
             cedar=stored_draft.cedar,
             unresolved=stored_draft.unresolved,
-            principal=Principal.from_dict(principal_payload)
-            if principal_payload
-            else placeholder.principal,
-            action=Action.from_dict(action_payload)
-            if action_payload
-            else placeholder.action,
-            resource=Resource.from_dict(resource_payload)
-            if resource_payload
-            else placeholder.resource,
+            principal=stored_draft.principal,
+            action=stored_draft.action,
+            resource=stored_draft.resource,
             intent=intent,
             status="proposed",
         )
@@ -985,7 +986,7 @@ class Space:
             kind=intent.action.kind,
             name=intent.action.name,
             group=intent.action.group,
-            namespace=self.find_action_namespace(intent.action, schema),
+            namespace=Space.find_action_namespace(intent.action, schema),
         )
         return Intent(
             id=intent.id,
@@ -1106,14 +1107,12 @@ class Space:
         """
         if draft.intent is None:
             return None
-        data = Space.loads_optional_json(draft.intent.to_dict())
-        if data is None:
-            return None
+        payload = draft.intent.to_dict()
         try:
-            intent = Intent.from_dict(data)
+            intent = Intent.from_dict(payload)
         except (KeyError, TypeError, ValueError) as error:
             raise Space(
-                f"stored draft {draft.id!r} has corrupt intent JSON ({error}); "
+                f"stored draft {draft.id!r} has corrupt intent ({error}); "
                 "re-run `cedrus policy generate` for the requirement"
             ) from error
         if intent is None:

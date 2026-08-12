@@ -399,7 +399,10 @@ def run_command(args: Namespace) -> tuple[Any, int]:
         handler = HANDLERS.get(args.command)
         if handler is None:
             raise Config(f"unknown command: {args.command}")
-        return handler(workspace, args)
+        result = handler(workspace, args)
+        if isinstance(result, tuple) and len(result) == 2:
+            return result
+        return result, 0
     finally:
         workspace.close()
 
@@ -862,7 +865,7 @@ def build_generator(args: Namespace) -> Any:
         A ready-to-use :class:`~cedrus.generate.Offline` or
         :class:`~cedrus.generate.Llm` instance.
     """
-    model = args.model or os.getenv(MODEL_ENV_VAR)
+    model = getattr(args, "model", None) or os.getenv(MODEL_ENV_VAR)
     online = os.getenv(ONLINE_ENV_VAR, "").lower() in {"1", "true", "yes"}
     if getattr(args, "offline", False):
         return Offline()
