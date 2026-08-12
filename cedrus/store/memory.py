@@ -3,13 +3,20 @@
 Suitable for tests and ephemeral sessions. State is stored in plain
 dicts and lists and is lost when the object is garbage collected.
 
-Thread safety
--------------
+Thread safety:
+    The in-memory repository is safe for concurrent use from multiple
+    threads within a single process because Python's GIL serializes
+    attribute access on dicts and lists. Cross-process sharing is not
+    supported; tests should construct one instance per test.
 
-The in-memory repository is safe for concurrent use from multiple
-threads within a single process because Python's GIL serializes
-attribute access on dicts and lists. Cross-process sharing is not
-supported; tests should construct one instance per test.
+Attributes:
+    Memory: Dictionary-backed repository for tests and short-lived
+        sessions.
+
+See Also:
+    :mod:`cedrus.store.base`: :class:`Repository` Protocol this module
+        implements.
+    :mod:`cedrus.store.sqlite`: On-disk SQLite implementation.
 """
 
 from __future__ import annotations
@@ -19,10 +26,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from ..deploy import Record
-from ..error import Store
-from ..need import Need
-from .base import DraftStored, ReportStored, Stored
+from cedrus.compile import Intent
+from cedrus.deploy import Record
+from cedrus.error import Store
+from cedrus.need import Need
+from cedrus.scope import Action, Principal, Resource
+from cedrus.store.base import DraftStored, ReportStored, Stored
 
 
 @dataclass
@@ -156,29 +165,46 @@ class Memory:
         del self.policies[policy_id]
 
     def record_draft(self, draft: DraftStored) -> None:
-        """Append ``draft`` to the draft history."""
+        """Append ``draft`` to the draft history.
+
+        Args:
+            draft: Draft row to record.
+        """
         self.drafts.append(draft)
 
-    def update_draft_json(
-        self, draft_id: str, json_columns: Mapping[str, str | None]
+    def update_draft_scopes(
+        self,
+        draft_id: str,
+        *,
+        intent: Intent | None = None,
+        principal: Principal | None = None,
+        action: Action | None = None,
+        resource: Resource | None = None,
     ) -> None:
-        """Update one or more of ``intent_json`` and the three scope JSON columns.
+        """Update one or more typed-scope fields on a stored draft.
 
-        Mirrors :meth:`Sqlite.update_draft_json` so the
-        migration code path works against both backends.
+        Mirrors the SQLite-side migration helper so the same call
+        signature works against both backends. Each typed-object
+        keyword is optional; passing ``None`` (the default) leaves
+        that field untouched on the matching draft.
+
+        Args:
+            draft_id: Identifier of the draft to update.
+            intent: Replacement :class:`Intent`, or ``None`` to leave
+                the existing value in place.
+            principal: Replacement :class:`Principal`, or ``None`` to
+                leave the existing value in place.
+            action: Replacement :class:`Action`, or ``None`` to leave
+                the existing value in place.
+            resource: Replacement :class:`Resource`, or ``None`` to
+                leave the existing value in place.
+
+        Raises:
+            Store: If no draft exists with that id.
         """
-        allowed = {
-            "intent_json",
-            "principal_scope_json",
-            "action_scope_json",
-            "resource_scope_json",
-        }
-        unknown = set(json_columns) - allowed
-        if unknown:
-            raise Store(f"unknown draft json columns: {sorted(unknown)}")
         for index, draft in enumerate(self.drafts):
             if draft.id == draft_id:
-                updated = DraftStored(
+                self.drafts[index] = DraftStored(
                     id=draft.id,
                     policy_id=draft.policy_id,
                     model=draft.model,
@@ -186,18 +212,13 @@ class Memory:
                     unresolved=draft.unresolved,
                     cedar=draft.cedar,
                     created_at=draft.created_at,
-                    intent_json=json_columns.get("intent_json", draft.intent_json),
-                    principal_scope_json=json_columns.get(
-                        "principal_scope_json", draft.principal_scope_json
+                    intent=intent if intent is not None else draft.intent,
+                    principal=(
+                        principal if principal is not None else draft.principal
                     ),
-                    action_scope_json=json_columns.get(
-                        "action_scope_json", draft.action_scope_json
-                    ),
-                    resource_scope_json=json_columns.get(
-                        "resource_scope_json", draft.resource_scope_json
-                    ),
+                    action=action if action is not None else draft.action,
+                    resource=resource if resource is not None else draft.resource,
                 )
-                self.drafts[index] = updated
                 return
         raise Store(f"no draft with id {draft_id!r}")
 
@@ -219,21 +240,28 @@ class Memory:
         return matching[-1]
 
     def list_drafts(self, policy_id: str | None = None) -> Sequence[DraftStored]:
-        """Return all drafts, optionally filtered by ``policy_id``."""
+        """Return all drafts, optionally filtered by ``policy_id``.
+
+        Args:
+            policy_id: When provided, only drafts whose ``policy_id``
+                matches are returned.
+
+        Returns:
+            A sequence of :class:`DraftStored` in chronological order.
+        """
         if policy_id is None:
             return list(self.drafts)
         return [draft for draft in self.drafts if draft.policy_id == policy_id]
 
     def record_report(self, report: ReportStored) -> None:
-        """Append ``report`` to the report history, stamping ``created_at`` when missing."""
-        stamped = ReportStored(
-            policy_id=report.policy_id,
-            kind=report.kind,
-            passed=report.passed,
-            payload=dict(report.payload),
-            created_at=report.created_at or datetime.now(UTC),
-        )
-        self.reports.append(stamped)
+        """Append ``report`` to the report history.
+
+        Args:
+            report: Report row to record. ``created_at`` is required;
+                callers should stamp it explicitly when constructing
+                the row.
+        """
+        self.reports.append(report)
 
     def latest_report(self, policy_id: str, kind: str) -> ReportStored:
         """Return the most recent report for ``policy_id`` of ``kind``.
@@ -258,7 +286,11 @@ class Memory:
         return matching[-1]
 
     def record_deployment(self, deployment: Record) -> None:
-        """Append ``deployment`` to the deployment history."""
+        """Append ``deployment`` to the deployment history.
+
+        Args:
+            deployment: Deployment record to store.
+        """
         self.deployments.append(deployment)
 
     def transaction(self) -> Any:
@@ -267,6 +299,9 @@ class Memory:
         The in-memory repository is single-threaded so transactions
         provide no additional isolation; the contract exists so
         callers can write backend-agnostic code.
+
+        Returns:
+            A context manager that yields ``None``.
         """
         import contextlib
 
@@ -279,7 +314,15 @@ class Memory:
     def list_deployments(
         self, domain: str | None = None
     ) -> Sequence[Record]:
-        """Return all deployments, optionally filtered by ``domain``."""
+        """Return all deployments, optionally filtered by ``domain``.
+
+        Args:
+            domain: When provided, only deployments whose ``domain``
+                matches are returned.
+
+        Returns:
+            A sequence of :class:`Record` in insertion order.
+        """
         if domain is None:
             return list(self.deployments)
         return [

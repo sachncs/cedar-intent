@@ -172,8 +172,14 @@ class Repository(Protocol):
     def remove_policy(self, policy_id: str) -> None: ...
 
     def record_draft(self, draft: DraftStored) -> None: ...
-    def update_draft_json(
-        self, draft_id: str, json_columns: Mapping[str, str | None]
+    def update_draft_scopes(
+        self,
+        draft_id: str,
+        *,
+        intent: Intent | None = None,
+        principal: Principal | None = None,
+        action: Action | None = None,
+        resource: Resource | None = None,
     ) -> None: ...
     def latest_draft(self, policy_id: str) -> DraftStored: ...
     def list_drafts(self, policy_id: str | None = None) -> Sequence[DraftStored]: ...
