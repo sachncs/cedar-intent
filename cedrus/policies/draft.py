@@ -4,25 +4,35 @@ A :class:`Draft` is the in-memory representation of a policy under
 authoring. It carries the principal, action, and resource scopes the
 caller supplied plus the optional typed intent the generator produced.
 
-Lifecycle
----------
+Lifecycle:
+    1. :meth:`Draft.from_requirement` creates an empty draft from a
+       :class:`~cedrus.need.Need` and caller scopes.
+    2. :meth:`Draft.generate` calls a generator and stores the
+       resulting :class:`~cedrus.generate.Proposal` on the draft.
+    3. :meth:`Draft.compile` renders the draft (or a freshly built
+       :class:`~cedrus.compile.Intent` if no intent was set) to Cedar
+       source.
+    4. :meth:`Draft.as_compiled` returns a copy of the draft with the
+       compiled Cedar source populated.
 
-1. :meth:`Draft.from_requirement` creates an empty draft from a
-   :class:`~cedrus.need.Need` and caller scopes.
-2. :meth:`Draft.generate` calls a generator and stores the
-   resulting :class:`~cedrus.generate.Proposal` on the
-   draft.
-3. :meth:`Draft.compile` renders the draft (or a freshly built
-   :class:`~cedrus.compile.Intent` if no intent was set)
-   to Cedar source.
-4. :meth:`Draft.as_compiled` returns a copy of the draft with the
-   compiled Cedar source populated.
+Thread safety:
+    ``Draft`` is ``frozen=True, slots=True`` and therefore immutable
+    and safe to share across threads.
 
-Thread safety
--------------
+Attributes:
+    Draft: A draft policy carrying explicit scopes and an optional
+        typed intent.
+    DraftStatus: Lifecycle status string for a draft.
 
-``Draft`` is ``frozen=True, slots=True`` and therefore immutable
-and safe to share across threads.
+See Also:
+    :mod:`cedrus.policies.base`: :class:`Kind` abstract base that
+        :class:`Draft` extends.
+    :mod:`cedrus.policies.compiled`: The :class:`Compiled` form this
+        draft becomes after a successful apply.
+    :mod:`cedrus.policies.existing`: The :class:`Existing` form for
+        policies imported from raw Cedar source.
+    :mod:`cedrus.generate`: :class:`Generator` Protocol used by
+        :meth:`Draft.generate`.
 """
 
 from __future__ import annotations
@@ -32,14 +42,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from ..compile import Intent, Source, compile_intent
-from ..data import Notes
-from ..error import Fault
-from ..generate import Context, Generator, Proposal, Result
-from ..need import Need
-from ..schema import Schema
-from ..scope import Action, Principal, Resource
-from .base import Kind
+from cedrus.compile import Intent, Source
+from cedrus.data import Notes
+from cedrus.error import Fault
+from cedrus.generate import Context, Generator, Proposal, Result
+from cedrus.need import Need
+from cedrus.schema import Schema
+from cedrus.scope import Action, Principal, Resource
+from cedrus.policies.base import Kind
 
 DraftStatus = str  # "proposed" | "accepted" | "rejected"
 
@@ -48,13 +58,19 @@ DraftStatus = str  # "proposed" | "accepted" | "rejected"
 class Draft(Kind):
     """A draft policy with explicit principal, action, and resource scopes.
 
+    Overrides :meth:`to_intent` to return the stored typed intent and
+    :meth:`to_dict` to expose the scope kinds, status and unresolved
+    items. Inherits :meth:`validate`, :meth:`test` and the base
+    :meth:`to_dict` shape from :class:`Kind`.
+
     Attributes:
         principal: Principal scope applied to the draft.
         action: Action scope applied to the draft.
         resource: Resource scope applied to the draft.
         intent: Optional typed intent produced by a generator.
         unresolved: Items the generator could not safely resolve.
-        status: Lifecycle status (``"proposed"``, ``"accepted"``, ``"rejected"``).
+        status: Lifecycle status (``"proposed"``, ``"accepted"``,
+            ``"rejected"``).
         notes: Free-form metadata recorded for downstream consumers.
         model: Model identifier that produced the draft (if any).
         request_id: Provider-supplied request identifier (if any).
@@ -71,14 +87,21 @@ class Draft(Kind):
     request_id: str | None = None
 
     def kind(self) -> str:
-        """Return the policy kind discriminator (``"draft"``)."""
+        """Return the policy kind discriminator.
+
+        Returns:
+            Always ``"draft"``.
+        """
         return "draft"
 
     def to_intent(self) -> Intent:
         """Return the typed intent for this draft.
 
+        Returns:
+            The stored :class:`Intent`.
+
         Raises:
-            Policy: If the draft has no compiled intent yet.
+            Fault: If the draft has no compiled intent yet.
         """
         if self.intent is None:
             raise Fault(f"draft {self.id} has no compiled intent yet")
@@ -119,16 +142,17 @@ class Draft(Kind):
     ) -> Proposal:
         """Call ``generator`` with this draft's scopes and existing context.
 
-        The existing policies are converted to :class:`Intent` so
-        the generator sees a uniform, typed view. Policies whose
+        The existing policies are converted to :class:`Intent` so the
+        generator sees a uniform, typed view. Policies whose
         ``to_intent`` raises :class:`Fault` (typically unparsed
-        :class:`Existing`) are silently skipped; they would only
-        confuse the generator anyway.
+        :class:`~cedrus.policies.existing.Existing`) are silently
+        skipped; they would only confuse the generator anyway.
 
         Args:
             schema: Cedar schema the draft must conform to.
             generator: Generator used to produce the proposal.
-            existing: Existing policies the generator should be aware of.
+            existing: Existing policies the generator should be aware
+                of.
 
         Returns:
             A :class:`Proposal` produced by the generator.
@@ -151,8 +175,7 @@ class Draft(Kind):
             resource=self.resource,
             existing=tuple(existing_intents),
         )
-        result = generator.generate(context)
-        return self.apply_result(result)
+        return self.apply_result(generator.generate(context))
 
     def apply_result(self, result: Result) -> Proposal:
         """Merge a :class:`Result` into a :class:`Proposal`.
@@ -179,8 +202,9 @@ class Draft(Kind):
 
         If the draft already has an intent, the compiler renders that
         intent directly. Otherwise a minimal ``permit(..., any, any)``
-        intent is constructed from the current scopes so the user sees
-        what the draft would produce.
+        intent is constructed from the current scopes so the user
+        sees what the draft would produce. Polymorphic route: defer
+        to :meth:`Intent.compile` on the intent object.
 
         Args:
             schema: Optional schema kept for interface compatibility
@@ -190,12 +214,16 @@ class Draft(Kind):
                 resolution.
 
         Returns:
-            A :class:`Source` containing the rendered Cedar
-            text and metadata.
+            A :class:`Source` containing the rendered Cedar text and
+            metadata.
+
+        Raises:
+            Fault: If the stored intent fails to compile (propagated
+                from :meth:`Intent.compile`).
         """
         if self.intent is not None:
-            return compile_intent(self.intent)
-        intent = Intent(
+            return self.intent.compile()
+        return Intent(
             id=self.id,
             requirement_id=self.requirement.id,
             effect="permit",
@@ -203,8 +231,7 @@ class Draft(Kind):
             action=self.action,
             resource=self.resource,
             notes={"generator": "manual"},
-        )
-        return compile_intent(intent)
+        ).compile()
 
     def as_compiled(self, schema: Schema | None = None) -> Draft:
         """Return a copy of this draft with cedar populated from the compiler.
@@ -217,12 +244,11 @@ class Draft(Kind):
             and ``created_at`` bumped to the current time.
         """
         source = self.compile(schema)
-        updated_at = datetime.now(UTC)
         return Draft(
             id=self.id,
             requirement=self.requirement,
             cedar=source.cedar,
-            created_at=updated_at,
+            created_at=datetime.now(UTC),
             principal=self.principal,
             action=self.action,
             resource=self.resource,
@@ -239,6 +265,10 @@ class Draft(Kind):
 
         Extends :meth:`Kind.to_dict` with the scope kinds, lifecycle
         status, and unresolved items.
+
+        Returns:
+            The base policy dict plus ``principal``, ``action``,
+            ``resource``, ``status`` and ``unresolved`` keys.
         """
         data = dict(Kind.to_dict(self))
         data.update(
