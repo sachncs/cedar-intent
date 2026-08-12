@@ -62,7 +62,7 @@ from cedrus.compile import Compile, Intent
 from cedrus.data import Notes, Unresolved, Usage
 from cedrus.error import Generate
 from cedrus.generate.base import Context, Proposal, Result
-from cedrus.scope import Action, Principal, Resource, Scope
+from cedrus.scope import Action, Clause, Principal, Resource, Scope
 
 SYSTEM_PROMPT = """You are an authorization engineer producing a typed Cedar policy proposal.
 
