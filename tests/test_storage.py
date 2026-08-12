@@ -8,21 +8,21 @@ from pathlib import Path
 import pytest
 
 from cedrus import (
-    DeploymentRecord,
-    InMemoryRepository,
+    Memory,
+    Record,
     Repository,
-    SqliteRepository,
-    StorageError,
+    Sqlite,
+    Store,
 )
-from cedrus.compiler import PolicyIntent
+from cedrus.compiler import Intent
 from cedrus.deployment import DEPLOYMENT_KIND_LOCAL
-from cedrus.requirements import Requirement
-from cedrus.scopes import ActionScope, PrincipalScope, ResourceScope
-from cedrus.storage import StoredDraft, StoredPolicy, StoredReport
+from cedrus.requirements import Need
+from cedrus.scopes import Action, Principal, Resource
+from cedrus.storage import DraftStored, ReportStored, Stored
 
 
-def make_requirement(identifier: str, domain: str = "hr") -> Requirement:
-    return Requirement(
+def make_requirement(identifier: str, domain: str = "hr") -> Need:
+    return Need(
         id=identifier,
         text=f"Body for {identifier}",
         domain=domain,
@@ -31,20 +31,20 @@ def make_requirement(identifier: str, domain: str = "hr") -> Requirement:
     )
 
 
-def make_intent(identifier: str) -> PolicyIntent:
-    return PolicyIntent(
+def make_intent(identifier: str) -> Intent:
+    return Intent(
         id=identifier,
         requirement_id=identifier,
         effect="permit",
-        principal=PrincipalScope(kind="any"),
-        action=ActionScope(kind="any"),
-        resource=ResourceScope(kind="any"),
+        principal=Principal(kind="any"),
+        action=Action(kind="any"),
+        resource=Resource(kind="any"),
     )
 
 
-def make_policy(identifier: str, domain: str = "hr") -> StoredPolicy:
+def make_policy(identifier: str, domain: str = "hr") -> Stored:
     intent = make_intent(identifier)
-    return StoredPolicy(
+    return Stored(
         id=identifier,
         domain=domain,
         requirement_id=identifier,
@@ -58,25 +58,25 @@ def make_policy(identifier: str, domain: str = "hr") -> StoredPolicy:
 
 
 def test_in_memory_repository_satisfies_protocol() -> None:
-    repo: Repository = InMemoryRepository()
+    repo: Repository = Memory()
     assert isinstance(repo, Repository)
 
 
 def test_in_memory_add_and_get_requirement() -> None:
-    repo = InMemoryRepository()
+    repo = Memory()
     requirement = make_requirement("HR-001")
     repo.add_requirement(requirement)
     assert repo.get_requirement("HR-001").text == "Body for HR-001"
 
 
 def test_in_memory_get_missing_requirement_raises() -> None:
-    repo = InMemoryRepository()
-    with pytest.raises(StorageError):
+    repo = Memory()
+    with pytest.raises(Store):
         repo.get_requirement("missing")
 
 
 def test_in_memory_list_requirements_filtered_by_domain() -> None:
-    repo = InMemoryRepository()
+    repo = Memory()
     repo.add_requirement(make_requirement("HR-001", domain="hr"))
     repo.add_requirement(make_requirement("FIN-001", domain="finance"))
     assert {r.id for r in repo.list_requirements()} == {"HR-001", "FIN-001"}
@@ -84,17 +84,17 @@ def test_in_memory_list_requirements_filtered_by_domain() -> None:
 
 
 def test_in_memory_remove_requirement() -> None:
-    repo = InMemoryRepository()
+    repo = Memory()
     repo.add_requirement(make_requirement("HR-001"))
     repo.remove_requirement("HR-001")
-    with pytest.raises(StorageError):
+    with pytest.raises(Store):
         repo.get_requirement("HR-001")
-    with pytest.raises(StorageError):
+    with pytest.raises(Store):
         repo.remove_requirement("HR-001")
 
 
 def test_in_memory_upsert_and_get_policy() -> None:
-    repo = InMemoryRepository()
+    repo = Memory()
     repo.add_requirement(make_requirement("HR-001"))
     policy = make_policy("HR-001")
     repo.upsert_policy(policy)
@@ -104,13 +104,13 @@ def test_in_memory_upsert_and_get_policy() -> None:
 
 
 def test_in_memory_get_missing_policy_raises() -> None:
-    repo = InMemoryRepository()
-    with pytest.raises(StorageError):
+    repo = Memory()
+    with pytest.raises(Store):
         repo.get_policy("missing")
 
 
 def test_in_memory_list_policies_by_domain() -> None:
-    repo = InMemoryRepository()
+    repo = Memory()
     repo.add_requirement(make_requirement("HR-001", domain="hr"))
     repo.add_requirement(make_requirement("FIN-001", domain="finance"))
     repo.upsert_policy(make_policy("HR-001", domain="hr"))
@@ -119,18 +119,18 @@ def test_in_memory_list_policies_by_domain() -> None:
 
 
 def test_in_memory_remove_policy() -> None:
-    repo = InMemoryRepository()
+    repo = Memory()
     repo.add_requirement(make_requirement("HR-001"))
     repo.upsert_policy(make_policy("HR-001"))
     repo.remove_policy("HR-001")
-    with pytest.raises(StorageError):
+    with pytest.raises(Store):
         repo.get_policy("HR-001")
 
 
 def test_in_memory_record_and_latest_draft() -> None:
-    repo = InMemoryRepository()
+    repo = Memory()
     repo.record_draft(
-        StoredDraft(
+        DraftStored(
             id="d1",
             policy_id="HR-001",
             model="offline",
@@ -146,15 +146,15 @@ def test_in_memory_record_and_latest_draft() -> None:
 
 
 def test_in_memory_latest_draft_missing_raises() -> None:
-    repo = InMemoryRepository()
-    with pytest.raises(StorageError):
+    repo = Memory()
+    with pytest.raises(Store):
         repo.latest_draft("missing")
 
 
 def test_in_memory_list_drafts_filter() -> None:
-    repo = InMemoryRepository()
+    repo = Memory()
     repo.record_draft(
-        StoredDraft(
+        DraftStored(
             id="d1",
             policy_id="HR-001",
             model="m",
@@ -165,7 +165,7 @@ def test_in_memory_list_drafts_filter() -> None:
         )
     )
     repo.record_draft(
-        StoredDraft(
+        DraftStored(
             id="d2",
             policy_id="HR-002",
             model="m",
@@ -180,12 +180,12 @@ def test_in_memory_list_drafts_filter() -> None:
 
 
 def test_in_memory_record_and_latest_report() -> None:
-    repo = InMemoryRepository()
+    repo = Memory()
     repo.record_report(
-        StoredReport(policy_id="HR-001", kind="validation", passed=True, payload={"k": 1})
+        ReportStored(policy_id="HR-001", kind="validation", passed=True, payload={"k": 1})
     )
     repo.record_report(
-        StoredReport(policy_id="HR-001", kind="validation", passed=False, payload={})
+        ReportStored(policy_id="HR-001", kind="validation", passed=False, payload={})
     )
     latest = repo.latest_report("HR-001", "validation")
     assert latest.passed is False
@@ -194,19 +194,19 @@ def test_in_memory_record_and_latest_report() -> None:
 
 
 def test_in_memory_latest_report_missing_raises() -> None:
-    repo = InMemoryRepository()
-    with pytest.raises(StorageError):
+    repo = Memory()
+    with pytest.raises(Store):
         repo.latest_report("missing", "validation")
 
 
 def test_sqlite_repository_round_trip(tmp_path: Path) -> None:
     db_path = tmp_path / "store.db"
-    repo = SqliteRepository(db_path)
+    repo = Sqlite(db_path)
     try:
         repo.add_requirement(make_requirement("HR-001"))
         repo.upsert_policy(make_policy("HR-001"))
         repo.record_draft(
-            StoredDraft(
+            DraftStored(
                 id="d1",
                 policy_id="HR-001",
                 model="offline",
@@ -217,7 +217,7 @@ def test_sqlite_repository_round_trip(tmp_path: Path) -> None:
             )
         )
         repo.record_report(
-            StoredReport(policy_id="HR-001", kind="validation", passed=True, payload={"k": "v"})
+            ReportStored(policy_id="HR-001", kind="validation", passed=True, payload={"k": "v"})
         )
         assert repo.get_requirement("HR-001").id == "HR-001"
         assert repo.get_policy("HR-001").cedar.startswith("permit")
@@ -230,19 +230,19 @@ def test_sqlite_repository_round_trip(tmp_path: Path) -> None:
 
 def test_sqlite_repository_handles_missing_records(tmp_path: Path) -> None:
     db_path = tmp_path / "store.db"
-    repo = SqliteRepository(db_path)
+    repo = Sqlite(db_path)
     try:
-        with pytest.raises(StorageError):
+        with pytest.raises(Store):
             repo.get_requirement("missing")
-        with pytest.raises(StorageError):
+        with pytest.raises(Store):
             repo.get_policy("missing")
-        with pytest.raises(StorageError):
+        with pytest.raises(Store):
             repo.latest_draft("missing")
-        with pytest.raises(StorageError):
+        with pytest.raises(Store):
             repo.latest_report("missing", "validation")
-        with pytest.raises(StorageError):
+        with pytest.raises(Store):
             repo.remove_requirement("missing")
-        with pytest.raises(StorageError):
+        with pytest.raises(Store):
             repo.remove_policy("missing")
     finally:
         repo.close()
@@ -250,13 +250,13 @@ def test_sqlite_repository_handles_missing_records(tmp_path: Path) -> None:
 
 def test_sqlite_repository_persists_across_instances(tmp_path: Path) -> None:
     db_path = tmp_path / "store.db"
-    first = SqliteRepository(db_path)
+    first = Sqlite(db_path)
     try:
         first.add_requirement(make_requirement("HR-001"))
         first.upsert_policy(make_policy("HR-001"))
     finally:
         first.close()
-    second = SqliteRepository(db_path)
+    second = Sqlite(db_path)
     try:
         assert second.get_requirement("HR-001").id == "HR-001"
         assert second.get_policy("HR-001").cedar.startswith("permit")
@@ -266,7 +266,7 @@ def test_sqlite_repository_persists_across_instances(tmp_path: Path) -> None:
 
 def test_sqlite_repository_listing_filters(tmp_path: Path) -> None:
     db_path = tmp_path / "store.db"
-    repo = SqliteRepository(db_path)
+    repo = Sqlite(db_path)
     try:
         repo.add_requirement(make_requirement("HR-001", domain="hr"))
         repo.add_requirement(make_requirement("FIN-001", domain="finance"))
@@ -280,12 +280,12 @@ def test_sqlite_repository_listing_filters(tmp_path: Path) -> None:
 
 def test_sqlite_repository_drafts_survive_policy_removal(tmp_path: Path) -> None:
     db_path = tmp_path / "store.db"
-    repo = SqliteRepository(db_path)
+    repo = Sqlite(db_path)
     try:
         repo.add_requirement(make_requirement("HR-001"))
         repo.upsert_policy(make_policy("HR-001"))
         repo.record_draft(
-            StoredDraft(
+            DraftStored(
                 id="d1",
                 policy_id="HR-001",
                 model="offline",
@@ -305,7 +305,7 @@ def test_sqlite_repository_drafts_survive_policy_removal(tmp_path: Path) -> None
 
 def test_sqlite_repository_upsert_replaces(tmp_path: Path) -> None:
     db_path = tmp_path / "store.db"
-    repo = SqliteRepository(db_path)
+    repo = Sqlite(db_path)
     try:
         repo.add_requirement(make_requirement("HR-001"))
         first = make_policy("HR-001")
@@ -318,8 +318,8 @@ def test_sqlite_repository_upsert_replaces(tmp_path: Path) -> None:
 
 
 def test_in_memory_repository_records_deployments() -> None:
-    repo = InMemoryRepository()
-    record = DeploymentRecord(
+    repo = Memory()
+    record = Record(
         id="d1",
         domain="hr",
         target="/tmp/hr",
@@ -336,9 +336,9 @@ def test_in_memory_repository_records_deployments() -> None:
 
 def test_sqlite_repository_records_deployments(tmp_path: Path) -> None:
     db_path = tmp_path / "store.db"
-    repo = SqliteRepository(db_path)
+    repo = Sqlite(db_path)
     try:
-        record = DeploymentRecord(
+        record = Record(
             id="d1",
             domain="hr",
             target="/tmp/hr",

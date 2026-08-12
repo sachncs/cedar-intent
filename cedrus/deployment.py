@@ -1,8 +1,8 @@
 """Deployment automation for compiled Cedar policies.
 
-A :class:`BundleExporter` produces a self-contained deployment artifact
+A :class:`Bundler` produces a self-contained deployment artifact
 (a Cedar source bundle plus a manifest with a SHA-256 integrity hash).
-A :class:`DeploymentClient` pushes the bundle to either a local directory
+A :class:`Client` pushes the bundle to either a local directory
 or a remote HTTP endpoint and records the deployment in the workspace.
 
 Bundle format
@@ -17,7 +17,7 @@ Every deployment produces a two-file artifact:
   and any user-supplied metadata.
 
 The bundle hash in the manifest is recomputed on read; a mismatch
-or a missing manifest hash raises :class:`DeploymentError`. The hash
+or a missing manifest hash raises :class:`Deploy`. The hash
 provides **corruption detection** after transport; it is not an
 authenticated signature. To obtain tamper evidence, add a keyed
 signature (HMAC-SHA-256 with a shared key, or Ed25519 with a known
@@ -37,7 +37,7 @@ boundary replacement.
 Network behavior
 ----------------
 
-``DeploymentClient.deploy_http`` uses :mod:`httpx` with a custom
+``Client.deploy_http`` uses :mod:`httpx` with a custom
 transport that pins the connection to the IP address resolved at
 SSRF-check time. This closes the DNS-rebinding window in which an
 attacker controlling authoritative DNS returns a public address at
@@ -54,7 +54,7 @@ deployment client from leaking whatever the target server returns
 (stack traces, echoed credentials, internal hostnames) into stderr
 or the SQLite store.
 
-The default :class:`SSRFGuard` rejects loopback, link-local, and
+The default :class:`Guard` rejects loopback, link-local, and
 private-network targets so untrusted callers cannot use the
 deployment client as an SSRF proxy. Operators who genuinely need to
 deploy into a private network can pass
@@ -79,8 +79,8 @@ from typing import Any
 
 import httpx
 
-from .errors import DeploymentError
-from .policies import CompiledPolicy, Policy
+from .error import Deploy
+from .policies import Compiled, Kind
 
 DEPLOYMENT_KIND_LOCAL = "local"
 DEPLOYMENT_KIND_HTTP = "http"
@@ -105,7 +105,7 @@ _RESERVED_HEADERS = frozenset(
 
 
 @dataclass(frozen=True, slots=True)
-class DeploymentManifest:
+class Manifest:
     """Self-contained deployment artifact.
 
     Attributes:
@@ -157,7 +157,7 @@ class DeploymentManifest:
 
 
 @dataclass(frozen=True, slots=True)
-class DeploymentRecord:
+class Record:
     """Persisted record of a successful deployment.
 
     Attributes:
@@ -183,8 +183,8 @@ class DeploymentRecord:
     response: Mapping[str, str] = field(default_factory=dict)
 
 
-class BundleExporter:
-    """Build, write, and read :class:`DeploymentManifest` objects.
+class Bundler:
+    """Build, write, and read :class:`Manifest` objects.
 
     All methods are stateless and can be used as static methods, but are
     exposed as instance methods to keep a consistent call style.
@@ -193,10 +193,10 @@ class BundleExporter:
     def build(
         self,
         domain: str,
-        policies: Sequence[Policy],
+        policies: Sequence[Kind],
         *,
         metadata: Mapping[str, str] | None = None,
-    ) -> DeploymentManifest:
+    ) -> Manifest:
         """Build a manifest from compiled policies.
 
         Args:
@@ -206,23 +206,23 @@ class BundleExporter:
             metadata: Optional deployment metadata.
 
         Returns:
-            The constructed :class:`DeploymentManifest`.
+            The constructed :class:`Manifest`.
 
         Raises:
-            DeploymentError: If no compiled policies are available.
+            Deploy: If no compiled policies are available.
         """
         compiled = [
             policy
             for policy in policies
-            if isinstance(policy, CompiledPolicy) and policy.cedar.strip()
+            if isinstance(policy, Compiled) and policy.cedar.strip()
         ]
         if not compiled:
-            raise DeploymentError(
+            raise Deploy(
                 f"no compiled policies to deploy for domain {domain!r}"
             )
         cedar_text = "\n\n".join(policy.cedar for policy in compiled)
         bundle_hash = hashlib.sha256(cedar_text.encode("utf-8")).hexdigest()
-        return DeploymentManifest(
+        return Manifest(
             domain=domain,
             cedar=cedar_text,
             bundle_hash=bundle_hash,
@@ -231,7 +231,7 @@ class BundleExporter:
             metadata=dict(metadata or {}),
         )
 
-    def write_directory(self, manifest: DeploymentManifest, directory: Path) -> Path:
+    def write_directory(self, manifest: Manifest, directory: Path) -> Path:
         """Write ``manifest`` to ``directory`` atomically.
 
         Creates ``bundle.cedar`` and ``manifest.json`` in a sibling
@@ -254,13 +254,13 @@ class BundleExporter:
             The directory the manifest was written to.
 
         Raises:
-            DeploymentError: If writing the temporary files or the
+            Deploy: If writing the temporary files or the
                 rename fails, or the directory is a symlink or a
                 symlink exists inside the staging directory.
         """
         directory = directory.resolve(strict=False)
         if directory.is_symlink():
-            raise DeploymentError(
+            raise Deploy(
                 f"refusing to write deployment bundle through symlink: {directory}"
             )
         directory.parent.mkdir(parents=True, exist_ok=True)
@@ -286,60 +286,60 @@ class BundleExporter:
                 os_replace(src, dst)
             os_fsync_directory(directory)
         except OSError as error:
-            raise DeploymentError(
+            raise Deploy(
                 f"failed to write deployment bundle to {directory}: {error}"
             ) from error
         finally:
             _rm_tmp(staging)
         return directory
 
-    def read_directory(self, directory: Path) -> DeploymentManifest:
+    def read_directory(self, directory: Path) -> Manifest:
         """Read a previously written manifest back from ``directory``.
 
         Recomputes the bundle hash from ``bundle.cedar`` and compares
         it against the manifest's recorded hash. A mismatch or a
-        missing manifest hash raises :class:`DeploymentError`.
+        missing manifest hash raises :class:`Deploy`.
 
         Args:
             directory: Directory containing ``bundle.cedar`` and
                 ``manifest.json``.
 
         Returns:
-            The reconstructed :class:`DeploymentManifest`.
+            The reconstructed :class:`Manifest`.
 
         Raises:
-            DeploymentError: If the directory is missing files, the
+            Deploy: If the directory is missing files, the
                 manifest has no bundle hash, or the bundle hash does
                 not match the recorded value.
         """
         if not directory.exists() or not directory.is_dir():
-            raise DeploymentError(f"deployment directory not found: {directory}")
+            raise Deploy(f"deployment directory not found: {directory}")
         bundle_path = directory / "bundle.cedar"
         manifest_path = directory / "manifest.json"
         if not bundle_path.exists() or not manifest_path.exists():
-            raise DeploymentError(
+            raise Deploy(
                 f"deployment directory is missing bundle or manifest: {directory}"
             )
         try:
             data = json.loads(manifest_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as error:
-            raise DeploymentError(
+            raise Deploy(
                 f"deployment manifest is not valid JSON: {error}"
             ) from error
         cedar_text = bundle_path.read_text(encoding="utf-8")
         expected_hash = data.get("bundle_hash")
         if not expected_hash:
-            raise DeploymentError(
+            raise Deploy(
                 "deployment manifest is missing bundle_hash; refusing to trust "
                 "an unverifiable bundle"
             )
         actual_hash = hashlib.sha256(cedar_text.encode("utf-8")).hexdigest()
         if expected_hash != actual_hash:
-            raise DeploymentError(
+            raise Deploy(
                 "deployment bundle hash mismatch: expected "
                 f"{expected_hash}, got {actual_hash}"
             )
-        return DeploymentManifest(
+        return Manifest(
             domain=data["domain"],
             cedar=cedar_text,
             bundle_hash=actual_hash,
@@ -349,16 +349,16 @@ class BundleExporter:
         )
 
 
-class SSRFGuard:
+class Guard:
     """Reject requests to loopback, link-local, or private network targets.
 
-    The deployment client constructs an :class:`SSRFGuard` by default so
+    The deployment client constructs an :class:`Guard` by default so
     untrusted callers cannot use the client as an SSRF proxy. The
     guard resolves the target hostname through DNS and rejects any
     address that falls inside a reserved range.
 
     The guard is also responsible for **pinning** the resolved address.
-    Callers should connect to the returned :class:`PinnedAddress`
+    Callers should connect to the returned :class:`Pin`
     rather than re-resolving the hostname, which closes the
     DNS-rebinding window in which an attacker returns a public
     address at guard time and a private address at request time.
@@ -403,31 +403,31 @@ class SSRFGuard:
         self.allow_loopback = allow_loopback
         self.resolver = resolver
 
-    def check(self, url: str) -> PinnedAddress:
+    def check(self, url: str) -> Pin:
         """Validate ``url`` and return the pinned connection target.
 
         Args:
             url: Full HTTP(S) URL to validate.
 
         Returns:
-            A :class:`PinnedAddress` describing the host, port, scheme,
+            A :class:`Pin` describing the host, port, scheme,
             and the IP that the connection must use. Callers must
             connect to ``pinned.ip`` with the explicit ``Host:``
             header set from ``pinned.host`` so that TLS SNI and
             virtual-host routing still use the original hostname.
 
         Raises:
-            DeploymentError: When the host resolves to a blocked network
+            Deploy: When the host resolves to a blocked network
                 range, the URL is malformed, or DNS resolution fails.
         """
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme not in {"http", "https"}:
-            raise DeploymentError(
+            raise Deploy(
                 f"deployment URL has unsupported scheme: {parsed.scheme!r}"
             )
         host = parsed.hostname
         if not host:
-            raise DeploymentError(f"deployment URL is missing a host: {url}")
+            raise Deploy(f"deployment URL is missing a host: {url}")
         port = parsed.port
         if port is None:
             port = 443 if parsed.scheme == "https" else 80
@@ -438,15 +438,15 @@ class SSRFGuard:
                 else socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
             )
         except (socket.gaierror, UnicodeError) as error:
-            raise DeploymentError(
+            raise Deploy(
                 f"could not resolve deployment host {host}: {error}"
             ) from error
         if not infos:
-            raise DeploymentError(
+            raise Deploy(
                 f"deployment host {host} did not resolve to any address"
             )
         seen_families: set[int] = set()
-        last_rejection: DeploymentError | None = None
+        last_rejection: Deploy | None = None
         for info in infos:
             family = info[0]
             sock_address = info[4]
@@ -462,7 +462,7 @@ class SSRFGuard:
                 continue
             rejection = self._check_address(parsed_address, host)
             if rejection is None:
-                return PinnedAddress(
+                return Pin(
                     host=host,
                     port=port,
                     scheme=parsed.scheme,
@@ -472,26 +472,26 @@ class SSRFGuard:
             last_rejection = rejection
         if last_rejection is not None:
             raise last_rejection
-        raise DeploymentError(
+        raise Deploy(
             f"deployment host {host} did not resolve to any usable address"
         )
 
     def _check_address(
         self, parsed_address: ipaddress.IPv4Address | ipaddress.IPv6Address, host: str
-    ) -> DeploymentError | None:
+    ) -> Deploy | None:
         """Return a rejection error for blocked addresses or ``None``."""
         for network in self.BLOCKED_NETWORKS:
             if parsed_address in network:
                 if network.is_loopback or network.is_link_local:
                     if self.allow_loopback:
                         return None
-                    return DeploymentError(
+                    return Deploy(
                         f"deployment URL targets loopback or link-local "
                         f"address {parsed_address} ({network})"
                     )
                 if self.allow_private_targets:
                     return None
-                return DeploymentError(
+                return Deploy(
                     f"deployment URL targets private-network address "
                     f"{parsed_address} ({network}); pass "
                     "allow_private_targets=True to override"
@@ -500,7 +500,7 @@ class SSRFGuard:
 
 
 @dataclass(frozen=True, slots=True)
-class PinnedAddress:
+class Pin:
     """A DNS-resolved address to which an HTTP connection must be pinned.
 
     The transport created by :func:`_pinned_transport` will connect to
@@ -516,7 +516,7 @@ class PinnedAddress:
     family: int
 
 
-class _PinnedTransport(httpx.BaseTransport):
+class Transport(httpx.BaseTransport):
     """An :mod:`httpx` transport that pins each connection to a resolved IP.
 
     The transport refuses to reconnect to the original hostname; if the
@@ -531,7 +531,7 @@ class _PinnedTransport(httpx.BaseTransport):
     :data:`HTTP_RESPONSE_READ_LIMIT`.
     """
 
-    def __init__(self, pinned: PinnedAddress) -> None:
+    def __init__(self, pinned: Pin) -> None:
         self.pinned = pinned
         self._closed = False
 
@@ -540,10 +540,10 @@ class _PinnedTransport(httpx.BaseTransport):
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         if self._closed:
-            raise DeploymentError("pinned transport has been closed")
+            raise Deploy("pinned transport has been closed")
         url = request.url
         if url.host != self.pinned.host or url.port != self.pinned.port:
-            raise DeploymentError(
+            raise Deploy(
                 f"deployment transport mismatch: request url {url!s} disagrees "
                 f"with pinned {self.pinned.host}:{self.pinned.port}"
             )
@@ -553,7 +553,7 @@ class _PinnedTransport(httpx.BaseTransport):
                 (self.pinned.ip, self.pinned.port), timeout=timeout
             )
         except OSError as error:
-            raise DeploymentError(
+            raise Deploy(
                 f"deployment connection to pinned "
                 f"{self.pinned.ip}:{self.pinned.port} failed: {error}"
             ) from error
@@ -565,7 +565,7 @@ class _PinnedTransport(httpx.BaseTransport):
                         sock, server_hostname=self.pinned.host
                     )
                 except OSError as error:
-                    raise DeploymentError(
+                    raise Deploy(
                         f"deployment TLS handshake to "
                         f"{self.pinned.host} failed: {error}"
                     ) from error
@@ -590,13 +590,13 @@ def _read_timeout(request: httpx.Request) -> float:
         try:
             return float(connect)
         except (TypeError, ValueError) as error:
-            raise DeploymentError(
+            raise Deploy(
                 f"invalid httpx timeout extension: {timeout!r}"
             ) from error
     try:
         return float(timeout)
     except (TypeError, ValueError) as error:
-        raise DeploymentError(
+        raise Deploy(
             f"invalid httpx timeout extension: {timeout!r}"
         ) from error
 
@@ -634,7 +634,7 @@ def _round_trip_http(
         try:
             chunk = sock.recv(4096)
         except TimeoutError as error:
-            raise DeploymentError(
+            raise Deploy(
                 f"deployment response timed out after {timeout}s"
             ) from error
         if not chunk:
@@ -651,7 +651,7 @@ def _round_trip_http(
 def _parse_raw_response(raw: bytes) -> httpx.Response:
     """Parse a raw HTTP/1.1 response into an :class:`httpx.Response`."""
     if b"\r\n\r\n" not in raw:
-        raise DeploymentError(
+        raise Deploy(
             "deployment response was truncated before headers completed"
         )
     head_bytes, _, body_bytes = raw.partition(b"\r\n\r\n")
@@ -660,7 +660,7 @@ def _parse_raw_response(raw: bytes) -> httpx.Response:
     status_line = lines[0]
     parts = status_line.split(" ", 2)
     if len(parts) < 2 or not parts[1].isdigit():
-        raise DeploymentError(
+        raise Deploy(
             f"could not parse HTTP status line: {status_line!r}"
         )
     status_code = int(parts[1])
@@ -677,8 +677,8 @@ def _parse_raw_response(raw: bytes) -> httpx.Response:
     )
 
 
-class DeploymentClient:
-    """Push a :class:`DeploymentManifest` to a local directory or HTTP endpoint."""
+class Client:
+    """Push a :class:`Manifest` to a local directory or HTTP endpoint."""
 
     def __init__(
         self,
@@ -686,7 +686,7 @@ class DeploymentClient:
         timeout: float = 30,
         allow_private_targets: bool = False,
         allow_loopback: bool = False,
-        ssrf_guard: SSRFGuard | None = None,
+        ssrf_guard: Guard | None = None,
         max_retries: int = 0,
         retry_backoff: float = 0.5,
         follow_redirects: bool = False,
@@ -715,38 +715,38 @@ class DeploymentClient:
                 safe default.
 
         Raises:
-            DeploymentError: If ``timeout`` is not strictly positive or
+            Deploy: If ``timeout`` is not strictly positive or
                 ``max_retries`` is negative.
         """
         if timeout <= 0 or not _is_finite(timeout):
-            raise DeploymentError("deployment timeout must be positive and finite")
+            raise Deploy("deployment timeout must be positive and finite")
         if max_retries < 0:
-            raise DeploymentError("deployment max_retries must be non-negative")
+            raise Deploy("deployment max_retries must be non-negative")
         if retry_backoff < 0 or not _is_finite(retry_backoff):
-            raise DeploymentError("deployment retry_backoff must be non-negative")
+            raise Deploy("deployment retry_backoff must be non-negative")
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_backoff = retry_backoff
         self.follow_redirects = follow_redirects
-        self.ssrf_guard = ssrf_guard or SSRFGuard(
+        self.ssrf_guard = ssrf_guard or Guard(
             allow_private_targets=allow_private_targets,
             allow_loopback=allow_loopback,
         )
 
     def deploy(
         self,
-        manifest: DeploymentManifest,
+        manifest: Manifest,
         target: str,
         *,
         record_id: str | None = None,
         headers: Mapping[str, str] | None = None,
         idempotency_key: str | None = None,
-    ) -> DeploymentRecord:
+    ) -> Record:
         """Push ``manifest`` to ``target`` (local path or http(s) URL).
 
         Dispatches to :meth:`deploy_local` when ``target`` is a path
         and to :meth:`deploy_http` when it has an ``http://`` or
-        ``https://`` scheme. The caller receives a :class:`DeploymentRecord`
+        ``https://`` scheme. The caller receives a :class:`Record`
         describing the outcome.
 
         Args:
@@ -766,11 +766,11 @@ class DeploymentClient:
             The deployment record describing the outcome.
 
         Raises:
-            DeploymentError: If the target is invalid, the HTTP
+            Deploy: If the target is invalid, the HTTP
                 endpoint returns non-2xx, or the request fails.
         """
         if not target.strip():
-            raise DeploymentError("deployment target must be non-empty")
+            raise Deploy("deployment target must be non-empty")
         parsed = urllib.parse.urlparse(target)
         if parsed.scheme in {"http", "https"}:
             return self.deploy_http(
@@ -784,11 +784,11 @@ class DeploymentClient:
 
     def deploy_local(
         self,
-        manifest: DeploymentManifest,
+        manifest: Manifest,
         directory: Path,
         *,
         record_id: str | None = None,
-    ) -> DeploymentRecord:
+    ) -> Record:
         """Write ``manifest`` to ``directory`` atomically and return the record.
 
         Args:
@@ -800,8 +800,8 @@ class DeploymentClient:
             The deployment record describing the local write.
         """
         directory.parent.mkdir(parents=True, exist_ok=True)
-        BundleExporter().write_directory(manifest, directory)
-        return DeploymentRecord(
+        Bundler().write_directory(manifest, directory)
+        return Record(
             id=record_id or generate_record_id(),
             domain=manifest.domain,
             target=str(directory.resolve()),
@@ -813,13 +813,13 @@ class DeploymentClient:
 
     def deploy_http(
         self,
-        manifest: DeploymentManifest,
+        manifest: Manifest,
         url: str,
         *,
         record_id: str | None = None,
         headers: Mapping[str, str] | None = None,
         idempotency_key: str | None = None,
-    ) -> DeploymentRecord:
+    ) -> Record:
         """POST ``manifest`` to ``url`` and return the deployment record.
 
         The connection is **pinned** to the IP address resolved at
@@ -828,7 +828,7 @@ class DeploymentClient:
         The response body is read in bounded chunks and never
         embedded in error messages or persisted verbatim; only a
         SHA-256 of the body is retained. 2xx responses are treated as
-        success; 4xx and 5xx raise :class:`DeploymentError`.
+        success; 4xx and 5xx raise :class:`Deploy`.
 
         Args:
             manifest: Bundle to push.
@@ -843,7 +843,7 @@ class DeploymentClient:
             The deployment record describing the HTTP push.
 
         Raises:
-            DeploymentError: When the URL fails the SSRF guard, the
+            Deploy: When the URL fails the SSRF guard, the
                 endpoint returns non-2xx, the request times out, or the
                 network fails.
         """
@@ -868,11 +868,11 @@ class DeploymentClient:
         )
         attempt = 0
         backoff = self.retry_backoff
-        last_error: DeploymentError | None = None
+        last_error: Deploy | None = None
         while attempt <= self.max_retries:
             try:
                 with httpx.Client(
-                    transport=_PinnedTransport(pinned),
+                    transport=Transport(pinned),
                     timeout=self.timeout,
                     follow_redirects=self.follow_redirects,
                 ) as client:
@@ -880,7 +880,7 @@ class DeploymentClient:
                     body = _read_bounded_body(response)
                     response_sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
                     if 200 <= response.status_code < 300:
-                        return DeploymentRecord(
+                        return Record(
                             id=record_id or generate_record_id(),
                             domain=manifest.domain,
                             target=url,
@@ -900,12 +900,12 @@ class DeploymentClient:
                         _sleep(backoff)
                         backoff = min(backoff * 2, 8.0)
                         continue
-                    raise DeploymentError(
+                    raise Deploy(
                         f"deployment to {url} rejected with status "
                         f"{response.status_code} (body sha256={response_sha[:16]}…)"
                     )
             except httpx.HTTPError as error:
-                last_error = DeploymentError(
+                last_error = Deploy(
                     f"deployment request failed: {error}"
                 )
                 if attempt >= self.max_retries:
@@ -916,39 +916,39 @@ class DeploymentClient:
                 continue
         if last_error is not None:
             raise last_error
-        raise DeploymentError("deployment exhausted retries without a result")
+        raise Deploy("deployment exhausted retries without a result")
 
 
 def validate_headers(headers: Mapping[str, str] | None) -> None:
     """Reject empty, reserved, or carriage-return-bearing HTTP headers.
 
     Raises:
-        DeploymentError: When a header name is empty, reserved, or
+        Deploy: When a header name is empty, reserved, or
             contains CR/LF, or when a header value contains CR/LF.
     """
     if not headers:
         return
     for name, value in headers.items():
         if not name or not name.strip():
-            raise DeploymentError("deployment header name must be non-empty")
+            raise Deploy("deployment header name must be non-empty")
         if "\r" in name or "\n" in name:
-            raise DeploymentError(
+            raise Deploy(
                 f"deployment header name contains CR/LF: {name!r}"
             )
         if "\r" in value or "\n" in value:
-            raise DeploymentError(
+            raise Deploy(
                 f"deployment header value for {name!r} contains CR/LF"
             )
         if name.lower() in _RESERVED_HEADERS:
-            raise DeploymentError(
+            raise Deploy(
                 f"deployment header name {name!r} is reserved and cannot be set"
             )
         if len(name) > 256:
-            raise DeploymentError(
+            raise Deploy(
                 f"deployment header name {name!r} exceeds 256 characters"
             )
         if len(value) > 8192:
-            raise DeploymentError(
+            raise Deploy(
                 f"deployment header value for {name!r} exceeds 8192 characters"
             )
 
@@ -1027,17 +1027,17 @@ def generate_record_id() -> str:
 
 
 __all__ = [
-    "BundleExporter",
+    "Bundler",
     "DEPLOYMENT_KIND_HTTP",
     "DEPLOYMENT_KIND_LOCAL",
-    "DeploymentClient",
-    "DeploymentError",
-    "DeploymentManifest",
-    "DeploymentRecord",
+    "Client",
+    "Deploy",
+    "Manifest",
+    "Record",
     "HTTP_RESPONSE_BODY_LIMIT",
     "HTTP_RESPONSE_READ_LIMIT",
-    "PinnedAddress",
-    "SSRFGuard",
+    "Pin",
+    "Guard",
     "generate_record_id",
     "validate_headers",
 ]

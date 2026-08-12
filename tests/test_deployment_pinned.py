@@ -2,13 +2,13 @@
 
 These tests cover:
 
-- The transport pins to the SSRFGuard-resolved IP, refusing requests
+- The transport pins to the Guard-resolved IP, refusing requests
   whose URL disagrees with the pinned address.
-- Redirects are disabled by default and emit a DeploymentError.
+- Redirects are disabled by default and emit a Deploy.
 - Response bodies are bounded by HTTP_RESPONSE_READ_LIMIT so a
   streaming or oversized endpoint cannot exhaust memory.
 - Idempotency-Key is generated per request and recorded in the
-  DeploymentRecord.
+  Record.
 - A 429 / 503 response is retried with exponential backoff up to
   max_retries; a 500 is not retried.
 """
@@ -23,9 +23,9 @@ from typing import Any
 import pytest
 
 from cedrus import (
-    DeploymentClient,
-    DeploymentError,
-    DeploymentManifest,
+    Client,
+    Deploy,
+    Manifest,
 )
 
 
@@ -41,8 +41,8 @@ def _stop_server(server: HTTPServer) -> None:
     server.server_close()
 
 
-def _make_manifest() -> DeploymentManifest:
-    return DeploymentManifest(
+def _make_manifest() -> Manifest:
+    return Manifest(
         domain="hr",
         cedar='permit (principal, action, resource);',
         bundle_hash=hashlib.sha256(b"permit (principal, action, resource);").hexdigest(),
@@ -52,10 +52,10 @@ def _make_manifest() -> DeploymentManifest:
     )
 
 
-def _patched_created_at(manifest: DeploymentManifest) -> DeploymentManifest:
+def _patched_created_at(manifest: Manifest) -> Manifest:
     from datetime import UTC, datetime
 
-    return DeploymentManifest(
+    return Manifest(
         domain=manifest.domain,
         cedar=manifest.cedar,
         bundle_hash=manifest.bundle_hash,
@@ -77,9 +77,9 @@ def test_pinned_transport_rejects_redirect_by_default() -> None:
 
     server, port = _start_server(Redirect)
     try:
-        client = DeploymentClient(allow_loopback=True)
+        client = Client(allow_loopback=True)
         manifest = _patched_created_at(_make_manifest())
-        with pytest.raises(DeploymentError):
+        with pytest.raises(Deploy):
             client.deploy_http(manifest, f"http://127.0.0.1:{port}/cedar")
     finally:
         _stop_server(server)
@@ -89,7 +89,7 @@ def test_pinned_transport_pins_resolved_ip() -> None:
     """When the guard resolves to a specific IP, the transport uses that IP.
 
     We capture the connection's source address on the server side and
-    assert that it matches the IP the SSRFGuard returned.
+    assert that it matches the IP the Guard returned.
     """
     captured_ip: list[str] = []
 
@@ -106,7 +106,7 @@ def test_pinned_transport_pins_resolved_ip() -> None:
 
     server, port = _start_server(Capture)
     try:
-        client = DeploymentClient(allow_loopback=True)
+        client = Client(allow_loopback=True)
         manifest = _patched_created_at(_make_manifest())
         record = client.deploy_http(manifest, f"http://127.0.0.1:{port}/cedar")
         assert record.status == "deployed"
@@ -136,7 +136,7 @@ def test_response_body_is_bounded() -> None:
 
     server, port = _start_server(Flood)
     try:
-        client = DeploymentClient(allow_loopback=True, timeout=10)
+        client = Client(allow_loopback=True, timeout=10)
         manifest = _patched_created_at(_make_manifest())
         record = client.deploy_http(manifest, f"http://127.0.0.1:{port}/cedar")
         assert record.status == "deployed"
@@ -162,7 +162,7 @@ def test_idempotency_key_recorded_in_response() -> None:
 
     server, port = _start_server(Ok)
     try:
-        client = DeploymentClient(allow_loopback=True)
+        client = Client(allow_loopback=True)
         manifest = _patched_created_at(_make_manifest())
         record = client.deploy_http(manifest, f"http://127.0.0.1:{port}/cedar")
         assert record.response["idempotency_key"]
@@ -187,11 +187,11 @@ def test_500_response_is_not_retried() -> None:
 
     server, port = _start_server(Boom)
     try:
-        client = DeploymentClient(
+        client = Client(
             allow_loopback=True, max_retries=3, retry_backoff=0.01
         )
         manifest = _patched_created_at(_make_manifest())
-        with pytest.raises(DeploymentError):
+        with pytest.raises(Deploy):
             client.deploy_http(manifest, f"http://127.0.0.1:{port}/cedar")
         assert len(attempts) == 1
     finally:

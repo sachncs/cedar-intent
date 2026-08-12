@@ -1,19 +1,19 @@
 """Generator implementations and Protocol."""
 
 from .base import (
-    DraftProposal,
-    GenerationContext,
-    GenerationResult,
+    Context,
     Generator,
+    Proposal,
+    Result,
 )
-from .litellm import LiteLLMGenerator
-from .offline import OfflineGenerator
+from .litellm import Llm
+from .offline import Offline
 
 __all__ = [
-    "DraftProposal",
-    "GenerationContext",
-    "GenerationResult",
+    "Proposal",
+    "Context",
+    "Result",
     "Generator",
-    "LiteLLMGenerator",
-    "OfflineGenerator",
+    "Llm",
+    "Offline",
 ]

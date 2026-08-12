@@ -285,9 +285,9 @@ def test_parse_headers_handles_multiple_entries() -> None:
 
 
 def test_parse_headers_rejects_invalid_entries() -> None:
-    from cedrus import ConfigError
+    from cedrus import Config
 
-    with pytest.raises(ConfigError):
+    with pytest.raises(Config):
         parse_headers(["not a header"])
 
 

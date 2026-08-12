@@ -9,7 +9,7 @@ are.
 
 ## Reports
 
-A verification run produces a `VerificationReport`:
+A verification run produces a `Report`:
 
 ```python
 {
@@ -76,7 +76,7 @@ A missing action suggests either a forgotten requirement or an
 unmodeled schema entry. Resolve it by either adding a policy that
 references the action or by removing the action from the schema.
 
-### Requirement coverage
+### Need coverage
 
 Every loaded requirement should have at least one compiled policy
 that references it. The check is by identifier: the requirement's

@@ -34,20 +34,20 @@ integrity after transport.
 
 ## Integrity verification
 
-Every `DeploymentClient` deployment records a `DeploymentRecord` with
+Every `Client` deployment records a `Record` with
 the `bundle_hash`. After a deployment, you can re-read the on-disk
 bundle and confirm the hash matches:
 
 ```python
 from pathlib import Path
-from cedrus import BundleExporter
+from cedrus import Bundler
 
-exporter = BundleExporter()
+exporter = Bundler()
 manifest = exporter.read_directory(Path("/opt/policies/hr"))
 print(manifest.bundle_hash == "<expected hash>")
 ```
 
-If the hash does not match, the read fails with `DeploymentError` and
+If the hash does not match, the read fails with `Deploy` and
 a clear message identifying the expected and actual digests.
 
 ## Local deployment
@@ -82,7 +82,7 @@ Idempotency-Key: 7c4e…
 
 The service should respond with `2xx` for accepted deployments and a
 non-2xx for rejected ones. cedrus treats `2xx` as success and
-any other status as a `DeploymentError`.
+any other status as a `Deploy`.
 
 Custom headers can be added per deployment:
 
@@ -126,7 +126,7 @@ cedrus deploy push \
 
 The HTTP timeout defaults to 30 seconds and is configurable with
 `--timeout`. The connection is closed after `--timeout` seconds; a
-network error on the remote side raises `DeploymentError` without
+network error on the remote side raises `Deploy` without
 retrying unless `--retries` is non-zero.
 
 ## Deployment history
@@ -161,10 +161,10 @@ deployed bundle and redeploy an earlier bundle from your backup.
 
 | Failure                                  | Behavior                                        |
 | ---------------------------------------- | ----------------------------------------------- |
-| Local directory unwritable               | `DeploymentError` raised before any write.     |
-| HTTP endpoint returns non-2xx            | `DeploymentError` raised; response body captured. |
-| HTTP timeout                             | `DeploymentError` raised; underlying `TimeoutError` chained. |
+| Local directory unwritable               | `Deploy` raised before any write.     |
+| HTTP endpoint returns non-2xx            | `Deploy` raised; response body captured. |
+| HTTP timeout                             | `Deploy` raised; underlying `TimeoutError` chained. |
 | Cedar schema mismatch (downstream)       | Surfaced by the consuming service; cedrus does not catch this. |
 
-Always inspect the captured response body in `DeploymentRecord.response`
+Always inspect the captured response body in `Record.response`
 when investigating HTTP deployment failures.

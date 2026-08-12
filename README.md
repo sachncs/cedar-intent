@@ -25,7 +25,7 @@ scripts. `cedrus` makes that loop auditable:
 
 - Requirements live as Markdown with stable identifiers, in a Git-tracked
   workspace.
-- A typed intermediate representation (`PolicyIntent`) is the only
+- A typed intermediate representation (`Intent`) is the only
   contract between the LLM and the compiler.
 - The deterministic compiler emits Cedar source, which is then validated
   against the schema with `cedarpy` and exercised against authorization
@@ -138,7 +138,7 @@ cedrus policy generate HR-042 \
     --offline
 ```
 
-This calls the deterministic `OfflineGenerator` (no LLM needed) and
+This calls the deterministic `Offline` (no LLM needed) and
 produces a Cedar draft scoped to your chosen principal, action, and
 resource.
 
@@ -209,30 +209,30 @@ Compiled Cedar policies live as plain `.cedar` files inside
 ## Architecture
 
 ```text
-                    Requirement
+                    Need
                          │
                          ▼
-                  DraftPolicy (scope-typed)
+                  Draft (scope-typed)
                          │
               Policy.generate(schema, generator)
                          │
                          ▼
-                 DraftProposal (intent + unresolved)
+                 Proposal (intent + unresolved)
                          │
                 Policy.compile() → Cedar source
                          │
-        CedarSchema.validate() → ValidationReport
+        Schema.validate() → Vreport
                          │
-                 Scenario.test() → TestReport
+                 Case.test() → Suite
                          │
-           Workspace.verify_domain() → VerificationReport
+           Workspace.verify_domain() → Report
                          │
-            BundleExporter.build() → DeploymentManifest
+            Bundler.build() → Manifest
                          │
-       DeploymentClient.deploy() → DeploymentRecord
+       Client.deploy() → Record
 ```
 
-The LLM never writes Cedar directly. It produces a typed `PolicyIntent`
+The LLM never writes Cedar directly. It produces a typed `Intent`
 that the deterministic compiler renders. Cedar validation, scenario
 testing, and static verification gate every deployment.
 

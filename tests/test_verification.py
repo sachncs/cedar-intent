@@ -6,20 +6,20 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from cedrus import (
-    ActionScope,
-    PolicyIntent,
-    PrincipalScope,
-    Requirement,
-    ResourceScope,
-    VerificationFinding,
-    VerificationReport,
+    Action,
+    Finding,
+    Intent,
+    Need,
+    Principal,
+    Report,
+    Resource,
     extract_entity_types,
     verify_policies,
 )
 
 
-def make_requirement(identifier: str) -> Requirement:
-    return Requirement(
+def make_requirement(identifier: str) -> Need:
+    return Need(
         id=identifier,
         text=f"Body for {identifier}",
         domain="hr",
@@ -31,12 +31,12 @@ def make_requirement(identifier: str) -> Requirement:
 def make_policy(
     identifier: str,
     effect: str = "permit",
-    principal: PrincipalScope | None = None,
-    action: ActionScope | None = None,
-    resource: ResourceScope | None = None,
+    principal: Principal | None = None,
+    action: Action | None = None,
+    resource: Resource | None = None,
     cedar: str = "permit (principal, action, resource);",
-) -> PolicyIntent:
-    """Build a :class:`PolicyIntent` with optional scope overrides.
+) -> Intent:
+    """Build a :class:`Intent` with optional scope overrides.
 
     The Cedar source is regenerated from the scopes so verification
     that analyzes Cedar sees the same shape callers provide.
@@ -91,13 +91,13 @@ def make_policy(
                     f'in {resource.parent_type}::"{resource.parent_id}"'
                 )
         cedar = f"{effect} ({principal_text}, {action_text}, {resource_text});"
-    return PolicyIntent(
+    return Intent(
         id=identifier,
         requirement_id=identifier,
         effect=effect,  # type: ignore[arg-type]
-        principal=principal or PrincipalScope(),
-        action=action or ActionScope(),
-        resource=resource or ResourceScope(),
+        principal=principal or Principal(),
+        action=action or Action(),
+        resource=resource or Resource(),
         notes={"cedar_text": cedar},
     )
 
@@ -106,9 +106,9 @@ def test_verify_policies_passes_when_clean() -> None:
     policies = [
         make_policy(
             "HR-001",
-            principal=PrincipalScope(kind="is_type", type_name="Foo::User"),
-            action=ActionScope(kind="named", name="view"),
-            resource=ResourceScope(kind="is_type", type_name="Foo::Photo"),
+            principal=Principal(kind="is_type", type_name="Foo::User"),
+            action=Action(kind="named", name="view"),
+            resource=Resource(kind="is_type", type_name="Foo::Photo"),
         )
     ]
     report = verify_policies(
@@ -119,7 +119,7 @@ def test_verify_policies_passes_when_clean() -> None:
         entity_type_names=["Foo::User", "Foo::Photo"],
         actions_by_namespace={"Foo": {"view": (), "delete": (), "edit": ()}},
     )
-    assert isinstance(report, VerificationReport)
+    assert isinstance(report, Report)
     assert report.passed
     assert report.requirements_covered == ("HR-001",)
     assert report.requirements_uncovered == ()
@@ -131,7 +131,7 @@ def test_verify_policies_reports_missing_requirement() -> None:
     policies = [
         make_policy(
             "HR-001",
-            action=ActionScope(kind="named", name="view"),
+            action=Action(kind="named", name="view"),
         )
     ]
     report = verify_policies(
@@ -150,7 +150,7 @@ def test_verify_policies_reports_missing_action() -> None:
     policies = [
         make_policy(
             "HR-001",
-            action=ActionScope(kind="named", name="view"),
+            action=Action(kind="named", name="view"),
         )
     ]
     report = verify_policies(
@@ -170,9 +170,9 @@ def test_verify_policies_reports_missing_entity_type() -> None:
     policies = [
         make_policy(
             "HR-001",
-            principal=PrincipalScope(kind="is_type", type_name="Foo::User"),
-            action=ActionScope(kind="named", name="view"),
-            resource=ResourceScope(kind="is_type", type_name="Foo::Photo"),
+            principal=Principal(kind="is_type", type_name="Foo::User"),
+            action=Action(kind="named", name="view"),
+            resource=Resource(kind="is_type", type_name="Foo::Photo"),
         )
     ]
     report = verify_policies(
@@ -191,16 +191,16 @@ def test_verify_policies_detects_shadowing() -> None:
     forbid = make_policy(
         "HR-002",
         effect="forbid",
-        principal=PrincipalScope(kind="any"),
-        action=ActionScope(kind="named", name="view"),
-        resource=ResourceScope(kind="any"),
+        principal=Principal(kind="any"),
+        action=Action(kind="named", name="view"),
+        resource=Resource(kind="any"),
     )
     permit = make_policy(
         "HR-001",
         effect="permit",
-        principal=PrincipalScope(kind="any"),
-        action=ActionScope(kind="named", name="view"),
-        resource=ResourceScope(kind="any"),
+        principal=Principal(kind="any"),
+        action=Action(kind="named", name="view"),
+        resource=Resource(kind="any"),
     )
     report = verify_policies(
         domain="hr",
@@ -211,7 +211,7 @@ def test_verify_policies_detects_shadowing() -> None:
     )
     assert not report.passed
     shadow = next(finding for finding in report.findings if finding.kind == "shadowing")
-    assert isinstance(shadow, VerificationFinding)
+    assert isinstance(shadow, Finding)
     assert shadow.policy_id == "HR-001"
     assert shadow.related_policy_id == "HR-002"
 
@@ -221,18 +221,18 @@ def test_verify_policies_does_not_shadow_any_with_specific_forbid() -> None:
     forbid = make_policy(
         "HR-002",
         effect="forbid",
-        principal=PrincipalScope(
+        principal=Principal(
             kind="specific", type_name="Foo::User", entity_id="alice"
         ),
-        action=ActionScope(kind="named", name="view"),
-        resource=ResourceScope(kind="is_type", type_name="Foo::Photo"),
+        action=Action(kind="named", name="view"),
+        resource=Resource(kind="is_type", type_name="Foo::Photo"),
     )
     permit = make_policy(
         "HR-001",
         effect="permit",
-        principal=PrincipalScope(kind="any"),
-        action=ActionScope(kind="named", name="view"),
-        resource=ResourceScope(kind="is_type", type_name="Foo::Photo"),
+        principal=Principal(kind="any"),
+        action=Action(kind="named", name="view"),
+        resource=Resource(kind="is_type", type_name="Foo::Photo"),
     )
     report = verify_policies(
         domain="hr",
@@ -251,11 +251,11 @@ def test_verify_policies_does_not_shadow_any_with_specific_forbid() -> None:
 def test_verify_policies_detects_redundancy() -> None:
     permit_a = make_policy(
         "HR-001",
-        action=ActionScope(kind="named", name="view"),
+        action=Action(kind="named", name="view"),
     )
     permit_b = make_policy(
         "HR-002",
-        action=ActionScope(kind="named", name="view"),
+        action=Action(kind="named", name="view"),
     )
     report = verify_policies(
         domain="hr",
@@ -296,15 +296,15 @@ def test_verify_policies_does_not_flag_different_conditions_as_redundant() -> No
 def test_verify_policies_distinguishes_distinct_scopes() -> None:
     permit_a = make_policy(
         "HR-001",
-        principal=PrincipalScope(kind="any"),
-        action=ActionScope(kind="named", name="view"),
-        resource=ResourceScope(kind="is_type", type_name="Foo::Photo"),
+        principal=Principal(kind="any"),
+        action=Action(kind="named", name="view"),
+        resource=Resource(kind="is_type", type_name="Foo::Photo"),
     )
     permit_b = make_policy(
         "HR-002",
-        principal=PrincipalScope(kind="is_type", type_name="Foo::User"),
-        action=ActionScope(kind="named", name="view"),
-        resource=ResourceScope(kind="is_type", type_name="Foo::Photo"),
+        principal=Principal(kind="is_type", type_name="Foo::User"),
+        action=Action(kind="named", name="view"),
+        resource=Resource(kind="is_type", type_name="Foo::Photo"),
     )
     report = verify_policies(
         domain="hr",
@@ -383,11 +383,11 @@ def test_extract_entity_types_collects_references() -> None:
     policies = [
         make_policy(
             "HR-001",
-            principal=PrincipalScope(
+            principal=Principal(
                 kind="in_group", group_type="Foo::Group", group_id="admins"
             ),
-            action=ActionScope(kind="named", name="view"),
-            resource=ResourceScope(
+            action=Action(kind="named", name="view"),
+            resource=Resource(
                 kind="in_parent",
                 type_name="Foo::Photo",
                 parent_type="Foo::Album",
@@ -400,8 +400,8 @@ def test_extract_entity_types_collects_references() -> None:
 
 
 def test_scope_signature_distinguishes_principal_kinds() -> None:
-    any_scope = PrincipalScope(kind="any")
-    type_scope = PrincipalScope(kind="is_type", type_name="User")
+    any_scope = Principal(kind="any")
+    type_scope = Principal(kind="is_type", type_name="User")
     assert any_scope.kind != type_scope.kind
 
 
@@ -409,15 +409,15 @@ def test_verify_policies_records_finding_severity_warning() -> None:
     forbid = make_policy(
         "HR-002",
         effect="forbid",
-        principal=PrincipalScope(kind="any"),
-        action=ActionScope(kind="named", name="view"),
-        resource=ResourceScope(kind="any"),
+        principal=Principal(kind="any"),
+        action=Action(kind="named", name="view"),
+        resource=Resource(kind="any"),
     )
     permit = make_policy(
         "HR-001",
-        principal=PrincipalScope(kind="any"),
-        action=ActionScope(kind="named", name="view"),
-        resource=ResourceScope(kind="any"),
+        principal=Principal(kind="any"),
+        action=Action(kind="named", name="view"),
+        resource=Resource(kind="any"),
     )
     report = verify_policies(
         domain="hr",

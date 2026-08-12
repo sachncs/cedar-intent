@@ -69,14 +69,14 @@ Cedar policies. Its threat model covers:
   An attacker pasting CRLF into a header value would have been able
   to inject additional HTTP headers or smuggle a request; this is
   now blocked at parse time.
-- **Symlink replacement** — `BundleExporter.write_directory` refuses
+- **Symlink replacement** — `Bundler.write_directory` refuses
   to write through a symlinked target directory. An attacker who
   controls a directory in the deployment path can no longer redirect
   the bundle write to a privileged location.
 - **Global-permit fallback** — earlier versions synthesized a
   permissive `permit(any/any/any)` when stored draft intent JSON was
   missing or corrupt. As of 0.6.0, `intent_from_draft` returns `None`
-  or raises `WorkspaceError` instead, so a corrupt stored row can
+  or raises `Space` instead, so a corrupt stored row can
   no longer ship as a wide-open policy.
 - **Verifier silent degradation** — the pre-0.6.0 verifier used a
   regex parser that returned `permit(any/any/any)` when it could not

@@ -14,7 +14,7 @@ work to a workspace method, and returns a JSON-serializable dict for
 humanize/JSON output.
 
 The CLI is the documented entry-point handler for every
-:class:`~cedrus.errors.CedarIntentError` raised below; the
+:class:`~cedrus.error.Error` raised below; the
 top-level :func:`main` translates any of those into a single-line
 ``cedrus: error: ...`` message on stderr and an exit code of 1.
 
@@ -23,8 +23,8 @@ Online and offline modes
 
 Generator selection is controlled by three pieces, in this order:
 
-1. ``--offline`` forces :class:`~cedrus.generator.OfflineGenerator`.
-2. ``--model <provider/name>`` forces :class:`~cedrus.generator.LiteLLMGenerator`.
+1. ``--offline`` forces :class:`~cedrus.generator.Offline`.
+2. ``--model <provider/name>`` forces :class:`~cedrus.generator.Llm`.
 3. Otherwise the environment variables ``CEDAR_INTENT_ONLINE`` and
    ``CEDAR_INTENT_MODEL`` decide. ``CEDAR_INTENT_ONLINE=1`` enables the
    LiteLLM generator when ``CEDAR_INTENT_MODEL`` is set; otherwise the
@@ -42,10 +42,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from . import CedarIntentError, LiteLLMGenerator, OfflineGenerator, Workspace
-from .errors import ConfigError
-from .scenarios import Scenario
-from .scopes import ActionScope, PrincipalScope, ResourceScope
+from . import Error, Llm, Offline, Workspace
+from .error import Config
+from .scenarios import Case
+from .scopes import Action, Principal, Resource
 
 ONLINE_ENV_VAR = "CEDAR_INTENT_ONLINE"
 MODEL_ENV_VAR = "CEDAR_INTENT_MODEL"
@@ -135,7 +135,7 @@ def add_domain_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
 
 def add_requirement_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the ``requirement`` subcommand tree."""
-    parser = sub.add_parser("requirement", help="Requirement operations.")
+    parser = sub.add_parser("requirement", help="Need operations.")
     sub_reqs = parser.add_subparsers(dest="requirement_command", required=True)
     add_parser = sub_reqs.add_parser("add", help="Add a requirement file.")
     add_parser.add_argument("path", type=Path, help="Path to a Markdown requirement file.")
@@ -187,19 +187,19 @@ def add_policy_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
     draft_parser = sub_pol.add_parser(
         "draft", help="Build a draft policy from a requirement."
     )
-    draft_parser.add_argument("requirement_id", help="Requirement identifier.")
+    draft_parser.add_argument("requirement_id", help="Need identifier.")
     draft_parser.add_argument("--domain", required=True, help="Domain name.")
     add_scope_arguments(draft_parser)
 
     generate_parser = sub_pol.add_parser(
         "generate", help="Generate Cedar source for a draft via the configured generator."
     )
-    generate_parser.add_argument("requirement_id", help="Requirement identifier.")
+    generate_parser.add_argument("requirement_id", help="Need identifier.")
     generate_parser.add_argument("--domain", required=True)
     add_scope_arguments(generate_parser)
     generate_parser.add_argument("--model", help="LiteLLM model identifier.")
     generate_parser.add_argument(
-        "--offline", action="store_true", help="Use OfflineGenerator."
+        "--offline", action="store_true", help="Use Offline."
     )
     generate_parser.add_argument("--timeout", type=_positive_finite_float, default=60)
     generate_parser.add_argument("--retries", type=_non_negative_int, default=2)
@@ -208,7 +208,7 @@ def add_policy_parser(sub: _SubParsersAction[argparse.ArgumentParser]) -> None:
     apply_parser = sub_pol.add_parser(
         "apply", help="Validate and persist a previously generated draft."
     )
-    apply_parser.add_argument("requirement_id", help="Requirement identifier.")
+    apply_parser.add_argument("requirement_id", help="Need identifier.")
     apply_parser.add_argument("--domain", required=True)
     add_scope_arguments(apply_parser)
     apply_parser.add_argument(
@@ -317,7 +317,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     Returns:
         Process exit code: ``0`` on success, ``1`` when any
-        :class:`~cedrus.errors.CedarIntentError` is raised,
+        :class:`~cedrus.error.Error` is raised,
         ``2`` for argparse usage errors or unexpected exceptions.
     """
     parser = build_parser()
@@ -330,7 +330,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return int(exit_event.code) if exit_event.code is not None else 2
     try:
         result, exit_code = run_command(args)
-    except CedarIntentError as error:
+    except Error as error:
         return _report_error(args, error)
     except Exception as error:
         return _report_unexpected_error(args, error)
@@ -342,7 +342,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return exit_code
 
 
-def _report_error(args: Namespace, error: CedarIntentError) -> int:
+def _report_error(args: Namespace, error: Error) -> int:
     """Emit a structured error envelope and return the exit code."""
     message = str(error)
     if getattr(args, "json", False):
@@ -400,7 +400,7 @@ def run_command(args: Namespace) -> tuple[Any, int]:
         exit code.
 
     Raises:
-        CedarIntentError: For any workspace, storage, generator, or
+        Error: For any workspace, storage, generator, or
             validation failure. The CLI's :func:`main` translates these
             into a uniform error message and exit code ``1``.
     """
@@ -408,7 +408,7 @@ def run_command(args: Namespace) -> tuple[Any, int]:
     if args.command == "init":
         return command_init(args.path), 0
     if not workspace_path.exists():
-        raise ConfigError(f"workspace directory does not exist: {workspace_path}")
+        raise Config(f"workspace directory does not exist: {workspace_path}")
     allow_legacy = args.command == "migrate"
     workspace = Workspace.open(workspace_path, allow_legacy=allow_legacy)
     try:
@@ -430,14 +430,14 @@ def run_command(args: Namespace) -> tuple[Any, int]:
             return command_deploy(workspace, args)
     finally:
         workspace.close()
-    raise ConfigError(f"unknown command: {args.command}")
+    raise Config(f"unknown command: {args.command}")
 
 
 def command_init(path: str) -> dict[str, Any]:
     """Initialize a new workspace and report the absolute path."""
     text = path.strip()
     if not text or text in {".", "/"}:
-        raise ConfigError("init --path must be a non-empty directory path")
+        raise Config("init --path must be a non-empty directory path")
     target = Path(text)
     workspace = Workspace.create(target)
     workspace.close()
@@ -459,7 +459,7 @@ def command_domain(workspace: Workspace, args: Namespace) -> Any:
             }
         )
         return {"domains": domains}
-    raise ConfigError(f"unknown domain command: {args.domain_command}")
+    raise Config(f"unknown domain command: {args.domain_command}")
 
 
 def command_requirement(workspace: Workspace, args: Namespace) -> Any:
@@ -467,7 +467,7 @@ def command_requirement(workspace: Workspace, args: Namespace) -> Any:
     if args.requirement_command == "add":
         validate_identifier(args.domain, "domain name")
         if not args.path.exists():
-            raise ConfigError(f"requirement file not found: {args.path}")
+            raise Config(f"requirement file not found: {args.path}")
         target = workspace.requirements_directory(args.domain) / args.path.name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(args.path.read_text(encoding="utf-8"), encoding="utf-8")
@@ -476,7 +476,7 @@ def command_requirement(workspace: Workspace, args: Namespace) -> Any:
     if args.requirement_command == "list":
         items = workspace.list_requirements(args.domain)
         return {"requirements": [item.id for item in items]}
-    raise ConfigError(f"unknown requirement command: {args.requirement_command}")
+    raise Config(f"unknown requirement command: {args.requirement_command}")
 
 
 def command_policy(workspace: Workspace, args: Namespace) -> Any:
@@ -516,14 +516,14 @@ def command_policy(workspace: Workspace, args: Namespace) -> Any:
             build_action(args),
             build_resource(args),
         )
-        scenarios: list[Scenario] = []
+        scenarios: list[Case] = []
         if not getattr(args, "no_scenarios", False):
             scenarios = workspace.load_scenarios(args.domain)
         compiled = workspace.apply_for_requirement(
             args.requirement_id, schema, scopes=scopes, scenarios=scenarios
         )
         return {"compiled": compiled.to_dict()}
-    raise ConfigError(f"unknown policy command: {args.policy_command}")
+    raise Config(f"unknown policy command: {args.policy_command}")
 
 
 def command_export(workspace: Workspace, args: Namespace) -> Any:
@@ -555,7 +555,7 @@ def command_check(workspace: Workspace, args: Namespace) -> Any:
             workspace.import_existing_policies(domain)
             workspace.validate_policies(domain, schema)
             results[domain] = {"passed": True}
-        except CedarIntentError as error:
+        except Error as error:
             results[domain] = {"passed": False, "error": str(error)}
     overall = all(result["passed"] for result in results.values())
     return {"passed": overall, "domains": results}
@@ -624,34 +624,34 @@ def command_deploy(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
     if args.deploy_command == "history":
         records = workspace.list_deployments(getattr(args, "domain", None))
         return {"deployments": [deployment_to_dict(record) for record in records]}, 0
-    raise ConfigError(f"unknown deploy command: {args.deploy_command}")
+    raise Config(f"unknown deploy command: {args.deploy_command}")
 
 
 def parse_headers(raw: list[str]) -> dict[str, str]:
     """Parse ``["Name: Value", ...]`` into a header dictionary.
 
     Raises:
-        ConfigError: When a header is missing a colon, has an empty
+        Config: When a header is missing a colon, has an empty
             name, contains CR/LF in either name or value, or has a
             name longer than 256 characters / value longer than 8192.
     """
     parsed: dict[str, str] = {}
     for entry in raw:
         if ":" not in entry:
-            raise ConfigError(f"invalid header (expected 'Name: Value'): {entry!r}")
+            raise Config(f"invalid header (expected 'Name: Value'): {entry!r}")
         name, _, value = entry.partition(":")
         name = name.strip()
         value = value.strip()
         if not name:
-            raise ConfigError("header name must be non-empty")
+            raise Config("header name must be non-empty")
         if "\r" in name or "\n" in name or "\r" in value or "\n" in value:
-            raise ConfigError(
+            raise Config(
                 f"header contains CR/LF (CVE-style injection): {entry!r}"
             )
         if len(name) > 256:
-            raise ConfigError(f"header name {name!r} exceeds 256 characters")
+            raise Config(f"header name {name!r} exceeds 256 characters")
         if len(value) > 8192:
-            raise ConfigError(f"header value for {name!r} exceeds 8192 characters")
+            raise Config(f"header value for {name!r} exceeds 8192 characters")
         parsed[name] = value
     return parsed
 
@@ -672,16 +672,16 @@ def validate_identifier(name: str, kind: str) -> str:
         The validated identifier (unchanged).
 
     Raises:
-        ConfigError: When ``name`` is empty, too long, or contains
+        Config: When ``name`` is empty, too long, or contains
             characters outside ``[A-Za-z0-9._-]``.
     """
     if not name or not name.strip():
-        raise ConfigError(f"{kind} must be non-empty")
+        raise Config(f"{kind} must be non-empty")
     if len(name) > 64:
-        raise ConfigError(f"{kind} must be at most 64 characters")
+        raise Config(f"{kind} must be at most 64 characters")
     for ch in name:
         if not (ch.isalnum() or ch in "._-"):
-            raise ConfigError(
+            raise Config(
                 f"{kind} {name!r} contains illegal character {ch!r}; "
                 "use only letters, digits, '.', '_', and '-'"
             )
@@ -689,7 +689,7 @@ def validate_identifier(name: str, kind: str) -> str:
 
 
 def deployment_to_dict(record: Any) -> dict[str, Any]:
-    """Serialize a :class:`DeploymentRecord` for CLI output."""
+    """Serialize a :class:`Record` for CLI output."""
     return {
         "id": record.id,
         "domain": record.domain,
@@ -707,10 +707,10 @@ def build_generator(args: Namespace) -> Any:
     model = args.model or os.getenv(MODEL_ENV_VAR)
     online = os.getenv(ONLINE_ENV_VAR, "").lower() in {"1", "true", "yes"}
     if getattr(args, "offline", False):
-        return OfflineGenerator()
+        return Offline()
     if not online or not model:
-        return OfflineGenerator()
-    return LiteLLMGenerator(
+        return Offline()
+    return Llm(
         model=model,
         timeout=getattr(args, "timeout", 60),
         retries=getattr(args, "retries", 2),
@@ -718,9 +718,9 @@ def build_generator(args: Namespace) -> Any:
     )
 
 
-def build_principal(args: Namespace) -> PrincipalScope:
-    """Build a :class:`PrincipalScope` from parsed CLI arguments."""
-    return PrincipalScope(
+def build_principal(args: Namespace) -> Principal:
+    """Build a :class:`Principal` from parsed CLI arguments."""
+    return Principal(
         kind=args.principal,
         type_name=args.principal_type,
         entity_id=args.entity_id,
@@ -729,18 +729,18 @@ def build_principal(args: Namespace) -> PrincipalScope:
     )
 
 
-def build_action(args: Namespace) -> ActionScope:
-    """Build an :class:`ActionScope` from parsed CLI arguments."""
-    return ActionScope(
+def build_action(args: Namespace) -> Action:
+    """Build an :class:`Action` from parsed CLI arguments."""
+    return Action(
         kind=args.action,
         name=args.action_name,
         group=args.action_group,
     )
 
 
-def build_resource(args: Namespace) -> ResourceScope:
-    """Build a :class:`ResourceScope` from parsed CLI arguments."""
-    return ResourceScope(
+def build_resource(args: Namespace) -> Resource:
+    """Build a :class:`Resource` from parsed CLI arguments."""
+    return Resource(
         kind=args.resource,
         type_name=args.resource_type,
         entity_id=args.entity_id,

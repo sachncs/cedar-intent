@@ -4,7 +4,7 @@ Scopes are explicit objects so the LLM proposal and the deterministic
 compiler agree on the exact shape of an authorization request. Each
 slot of a Cedar policy (``principal``, ``action``, ``resource``) is
 backed by a corresponding scope class, and ``when``/``unless`` clauses
-are carried as :class:`ConditionClause` instances.
+are carried as :class:`Clause` instances.
 
 Why a class hierarchy and not a string union
 --------------------------------------------
@@ -23,13 +23,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from .errors import ScopeError
+from .error import ScopeFault
 
 Expression = str | bool | int | float | dict[str, Any] | list[Any]
 
 
 @dataclass(frozen=True, slots=True)
-class PrincipalScope:
+class Principal:
     """Scope applied to the ``principal`` slot of a Cedar policy.
 
     Attributes:
@@ -51,17 +51,17 @@ class PrincipalScope:
         if self.kind == "any":
             return
         if self.kind in {"type", "is_type"} and not self.type_name:
-            raise ScopeError(f"{self.kind!r} principal requires type_name")
+            raise ScopeFault(f"{self.kind!r} principal requires type_name")
         if self.kind == "specific":
             if not self.type_name or not self.entity_id:
-                raise ScopeError("'specific' principal requires type_name and entity_id")
+                raise ScopeFault("'specific' principal requires type_name and entity_id")
         if self.kind == "in_group":
             if not self.group_type or not self.group_id:
-                raise ScopeError("'in_group' principal requires group_type and group_id")
+                raise ScopeFault("'in_group' principal requires group_type and group_id")
 
 
 @dataclass(frozen=True, slots=True)
-class ActionScope:
+class Action:
     """Scope applied to the ``action`` slot of a Cedar policy.
 
     Attributes:
@@ -80,13 +80,13 @@ class ActionScope:
         if self.kind == "any":
             return
         if self.kind == "named" and not self.name:
-            raise ScopeError("'named' action requires name")
+            raise ScopeFault("'named' action requires name")
         if self.kind == "in_group" and not self.group:
-            raise ScopeError("'in_group' action requires group")
+            raise ScopeFault("'in_group' action requires group")
 
 
 @dataclass(frozen=True, slots=True)
-class ResourceScope:
+class Resource:
     """Scope applied to the ``resource`` slot of a Cedar policy.
 
     Attributes:
@@ -107,19 +107,19 @@ class ResourceScope:
         if self.kind == "any":
             return
         if self.kind in {"type", "is_type"} and not self.type_name:
-            raise ScopeError(f"{self.kind!r} resource requires type_name")
+            raise ScopeFault(f"{self.kind!r} resource requires type_name")
         if self.kind == "specific":
             if not self.type_name or not self.entity_id:
-                raise ScopeError("'specific' resource requires type_name and entity_id")
+                raise ScopeFault("'specific' resource requires type_name and entity_id")
         if self.kind == "in_parent":
             if not self.type_name or not self.parent_type or not self.parent_id:
-                raise ScopeError(
+                raise ScopeFault(
                     "'in_parent' resource requires type_name, parent_type, and parent_id"
                 )
 
 
 @dataclass(frozen=True, slots=True)
-class ConditionClause:
+class Clause:
     """A single ``when`` or ``unless`` clause carried by a draft.
 
     Attributes:
@@ -132,13 +132,13 @@ class ConditionClause:
 
     def __post_init__(self) -> None:
         if not self.body or not self.body.strip():
-            raise ScopeError("condition clause body must be non-empty")
+            raise ScopeFault("condition clause body must be non-empty")
 
 
 __all__ = [
-    "ActionScope",
-    "ConditionClause",
+    "Action",
+    "Clause",
     "Expression",
-    "PrincipalScope",
-    "ResourceScope",
+    "Principal",
+    "Resource",
 ]

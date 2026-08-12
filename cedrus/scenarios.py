@@ -1,9 +1,9 @@
 """Authorization scenarios for testing compiled policies.
 
-A :class:`Scenario` represents a single Cedar authorization request
+A :class:`Case` represents a single Cedar authorization request
 (principal, action, resource, context) plus the expected decision
 (``"Allow"`` or ``"Deny"``). Scenarios are executed through
-:func:`run_scenarios`, which returns a structured :class:`TestReport`
+:func:`run_scenarios`, which returns a structured :class:`Suite`
 with per-scenario outcomes.
 
 Why scenarios as a separate concept
@@ -29,14 +29,14 @@ from typing import Any, Literal
 
 from cedarpy import PolicySet, is_authorized
 
-from .errors import ValidationError
-from .schema import CedarSchema
+from .error import Validate
+from .schema import Schema
 
 Decision = Literal["Allow", "Deny"]
 
 
 @dataclass(frozen=True, slots=True)
-class Scenario:
+class Case:
     """A single Cedar authorization scenario.
 
     Attributes:
@@ -63,10 +63,10 @@ class Scenario:
 
 
 @dataclass(frozen=True, slots=True)
-class ScenarioResult:
+class Outcome:
     """Outcome of running a single scenario."""
 
-    scenario: Scenario
+    scenario: Case
     actual: Decision
     passed: bool
     diagnostics: Mapping[str, Any]
@@ -83,11 +83,11 @@ class ScenarioResult:
 
 
 @dataclass(frozen=True, slots=True)
-class TestReport:
+class Suite:
     """Aggregate outcome of a scenario run."""
 
     passed: bool
-    results: tuple[ScenarioResult, ...]
+    results: tuple[Outcome, ...]
 
     def to_dict(self) -> Mapping[str, object]:
         """Return a JSON-friendly representation of the test report."""
@@ -97,8 +97,8 @@ class TestReport:
         }
 
 
-def load_scenarios(mapping: Sequence[Mapping[str, Any]]) -> list[Scenario]:
-    """Build :class:`Scenario` objects from a JSON-friendly mapping.
+def load_scenarios(mapping: Sequence[Mapping[str, Any]]) -> list[Case]:
+    """Build :class:`Case` objects from a JSON-friendly mapping.
 
     Args:
         mapping: Sequence of dictionaries with ``principal``, ``action``,
@@ -107,7 +107,7 @@ def load_scenarios(mapping: Sequence[Mapping[str, Any]]) -> list[Scenario]:
     Returns:
         The list of parsed scenarios.
     """
-    scenarios: list[Scenario] = []
+    scenarios: list[Case] = []
     for index, item in enumerate(mapping):
         if not isinstance(item, Mapping):
             raise ValueError(f"scenario entry {index} is not an object")
@@ -117,7 +117,7 @@ def load_scenarios(mapping: Sequence[Mapping[str, Any]]) -> list[Scenario]:
                 f"scenario {index} expected must be Allow or Deny, got {expected!r}"
             )
         scenarios.append(
-            Scenario(
+            Case(
                 name=str(item.get("name") or f"scenario-{index}"),
                 principal=str(item["principal"]),
                 action=str(item["action"]),
@@ -132,9 +132,9 @@ def load_scenarios(mapping: Sequence[Mapping[str, Any]]) -> list[Scenario]:
 def run_scenarios(
     policies: Sequence[str],
     entities: Sequence[Mapping[str, Any]],
-    scenarios: Sequence[Scenario],
-    schema: CedarSchema | None = None,
-) -> TestReport:
+    scenarios: Sequence[Case],
+    schema: Schema | None = None,
+) -> Suite:
     """Execute a set of scenarios against compiled policies.
 
     Args:
@@ -144,19 +144,19 @@ def run_scenarios(
         schema: Optional schema; an empty schema is used when omitted.
 
     Returns:
-        A :class:`TestReport` containing the outcome of each scenario.
+        A :class:`Suite` containing the outcome of each scenario.
     """
     effective_schema = schema
     if effective_schema is None:
         try:
-            effective_schema = CedarSchema.from_mapping(
+            effective_schema = Schema.from_mapping(
                 {"": {"entityTypes": {}, "actions": {}}}
             )
-        except ValidationError as error:  # pragma: no cover - defensive
+        except Validate as error:  # pragma: no cover - defensive
             raise RuntimeError("default schema failed") from error
     policy_set = PolicySet.from_str("\n\n".join(policies))
     entity_list: list[dict[str, Any]] = [dict(entity) for entity in entities]
-    results: list[ScenarioResult] = []
+    results: list[Outcome] = []
     for scenario in scenarios:
         request: dict[str, Any] = {
             "principal": scenario.principal,
@@ -174,21 +174,21 @@ def run_scenarios(
         if reasons is not None:
             diagnostics["reasons"] = list(reasons)
         results.append(
-            ScenarioResult(
+            Outcome(
                 scenario=scenario,
                 actual=actual_decision,
                 passed=actual == scenario.expected,
                 diagnostics=diagnostics,
             )
         )
-    return TestReport(passed=all(result.passed for result in results), results=tuple(results))
+    return Suite(passed=all(result.passed for result in results), results=tuple(results))
 
 
 __all__ = [
     "Decision",
-    "Scenario",
-    "ScenarioResult",
-    "TestReport",
+    "Case",
+    "Outcome",
+    "Suite",
     "load_scenarios",
     "run_scenarios",
 ]

@@ -5,7 +5,7 @@ action_scope_json, no draft intent/scope JSON) and exercise:
 
 - detect_legacy_rows counts the legacy rows
 - migrate_legacy_rows populates the new columns
-- SqliteRepository.__post_init__ refuses to open a legacy database
+- Sqlite.__post_init__ refuses to open a legacy database
 - cedrus migrate CLI exits with the right code in each mode
 """
 
@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from cedrus import Workspace
-from cedrus.errors import StorageError
+from cedrus.error import Store
 from cedrus.migrations import detect_legacy_rows, migrate_legacy_rows
 
 
@@ -87,7 +87,7 @@ def test_detect_legacy_rows_returns_positive(legacy_workspace: Workspace) -> Non
 def test_sqlite_repository_refuses_to_open_legacy_db(
     tmp_path: Path,
 ) -> None:
-    """Opening a legacy database raises StorageError."""
+    """Opening a legacy database raises Store."""
     workspace_root = tmp_path / "acme"
     workspace_root.mkdir()
     Workspace.create(workspace_root)
@@ -117,7 +117,7 @@ def test_sqlite_repository_refuses_to_open_legacy_db(
         )
         connection.execute("DELETE FROM meta")
         connection.commit()
-    with pytest.raises(StorageError):
+    with pytest.raises(Store):
         Workspace.open(workspace_root)
 
 

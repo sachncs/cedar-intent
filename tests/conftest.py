@@ -10,11 +10,11 @@ from pathlib import Path
 import pytest
 
 from cedrus import (
-    DraftPolicy,
-    ExistingPolicy,
-    Requirement,
+    Draft,
+    Existing,
+    Need,
 )
-from cedrus.schema import CedarSchema
+from cedrus.schema import Schema
 
 PHOTOFLASH_SCHEMA = {
     "PhotoFlash": {
@@ -59,13 +59,13 @@ PHOTOFLASH_SCHEMA = {
 
 
 @pytest.fixture
-def schema() -> CedarSchema:
-    return CedarSchema.from_mapping(PHOTOFLASH_SCHEMA)
+def schema() -> Schema:
+    return Schema.from_mapping(PHOTOFLASH_SCHEMA)
 
 
 @pytest.fixture
-def requirement() -> Requirement:
-    return Requirement(
+def requirement() -> Need:
+    return Need(
         id="HR-042",
         text="Only the album owner can view private photos.",
         domain="hr",
@@ -125,15 +125,15 @@ def in_memory_workspace() -> Iterator:
 
 
 @pytest.fixture
-def draft_policy(requirement: Requirement) -> DraftPolicy:
-    return DraftPolicy.from_requirement(requirement)
+def draft_policy(requirement: Need) -> Draft:
+    return Draft.from_requirement(requirement)
 
 
 @pytest.fixture
-def existing_policy(requirement: Requirement) -> ExistingPolicy:
+def existing_policy(requirement: Need) -> Existing:
     cedar = (
         'permit (principal == PhotoFlash::User::"alice", '
         'action == PhotoFlash::Action::"viewPhoto", '
         'resource == PhotoFlash::Photo::"p1");'
     )
-    return ExistingPolicy.from_requirement(requirement, cedar=cedar)
+    return Existing.from_requirement(requirement, cedar=cedar)

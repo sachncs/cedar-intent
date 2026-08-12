@@ -1,7 +1,7 @@
 """Generator Protocol and shared data classes.
 
 A :class:`Generator` turns an authorization intent request into a
-:class:`DraftProposal`. The Protocol is intentionally minimal: any
+:class:`Proposal`. The Protocol is intentionally minimal: any
 object that implements ``generate`` qualifies, which keeps the rest of
 cedrus independent of LiteLLM.
 
@@ -10,18 +10,18 @@ Contract
 
 Every generator must:
 
-1. Receive a :class:`GenerationContext` that bundles the requirement,
+1. Receive a :class:`Context` that bundles the requirement,
    the schema, the user-supplied principal/action/resource scopes,
    and the existing policy intents the generator should be aware of.
-2. Return a :class:`GenerationResult` carrying:
-   - a :class:`DraftProposal` whose ``intent`` is a typed
-     :class:`~cedrus.compiler.PolicyIntent`,
+2. Return a :class:`Result` carrying:
+   - a :class:`Proposal` whose ``intent`` is a typed
+     :class:`~cedrus.compiler.Intent`,
    - the model identifier that produced the proposal (so the workspace
      can record provenance),
    - optional request-id and token-usage metadata.
 
 Items the generator cannot resolve safely must be reported in
-``DraftProposal.unresolved`` rather than guessed. The deterministic
+``Proposal.unresolved`` rather than guessed. The deterministic
 compiler downstream has no LLM and cannot fill gaps; the prompt is
 designed to surface unknowns as ``unresolved`` instead of fabricating
 entity types or actions.
@@ -33,14 +33,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from ..compiler import PolicyIntent
-from ..requirements import Requirement
-from ..schema import CedarSchema
-from ..scopes import ActionScope, PrincipalScope, ResourceScope
+from ..compiler import Intent
+from ..requirements import Need
+from ..schema import Schema
+from ..scopes import Action, Principal, Resource
 
 
 @dataclass(frozen=True, slots=True)
-class GenerationContext:
+class Context:
     """Inputs supplied to a generator.
 
     Attributes:
@@ -52,16 +52,16 @@ class GenerationContext:
         existing: Existing policy intents the generator should be aware of.
     """
 
-    requirement: Requirement
-    schema: CedarSchema
-    principal: PrincipalScope
-    action: ActionScope
-    resource: ResourceScope
-    existing: tuple[PolicyIntent, ...] = field(default_factory=tuple)
+    requirement: Need
+    schema: Schema
+    principal: Principal
+    action: Action
+    resource: Resource
+    existing: tuple[Intent, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)
-class DraftProposal:
+class Proposal:
     """One generator proposal for a single requirement.
 
     Attributes:
@@ -70,7 +70,7 @@ class DraftProposal:
         notes: Free-form generator-supplied metadata.
     """
 
-    intent: PolicyIntent
+    intent: Intent
     unresolved: tuple[str, ...] = field(default_factory=tuple)
     notes: Mapping[str, str] = field(default_factory=dict)
 
@@ -91,7 +91,7 @@ class DraftProposal:
 
 
 @dataclass(frozen=True, slots=True)
-class GenerationResult:
+class Result:
     """Final output of a generator call with provenance.
 
     Attributes:
@@ -102,7 +102,7 @@ class GenerationResult:
         usage: Optional token-usage metadata for online generators.
     """
 
-    proposal: DraftProposal
+    proposal: Proposal
     model: str
     request_id: str | None
     usage: Mapping[str, int]
@@ -119,7 +119,7 @@ class Generator(Protocol):
     name: str
     model: str
 
-    def generate(self, context: GenerationContext) -> GenerationResult: ...
+    def generate(self, context: Context) -> Result: ...
 
 
 def merge_unresolved(*sources: Sequence[str]) -> tuple[str, ...]:
@@ -142,9 +142,9 @@ def merge_unresolved(*sources: Sequence[str]) -> tuple[str, ...]:
 
 
 __all__ = [
-    "DraftProposal",
-    "GenerationContext",
-    "GenerationResult",
+    "Proposal",
+    "Context",
+    "Result",
     "Generator",
     "merge_unresolved",
 ]

@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from cedrus import Requirement, load_requirement, load_requirements, render_requirement
-from cedrus.errors import RequirementError
+from cedrus import Need, load_requirement, load_requirements, render_requirement
+from cedrus.error import Require
 from cedrus.requirements import (
     derive_domain,
     parse_front_matter,
@@ -57,7 +57,7 @@ def test_parse_front_matter_unterminated_returns_body() -> None:
 def test_parse_front_matter_malformed_raises(tmp_path: Path) -> None:
     path = tmp_path / "bad.md"
     path.write_text("---\nnot_a_valid_line\n---\n\nBody", encoding="utf-8")
-    with pytest.raises(RequirementError):
+    with pytest.raises(Require):
         load_requirement(path)
 
 
@@ -103,14 +103,14 @@ def test_load_requirement_without_domain_uses_path(tmp_path: Path) -> None:
 
 
 def test_load_requirement_missing_raises(tmp_path: Path) -> None:
-    with pytest.raises(RequirementError):
+    with pytest.raises(Require):
         load_requirement(tmp_path / "nope.md")
 
 
 def test_load_requirement_empty_body_raises(tmp_path: Path) -> None:
     path = tmp_path / "bad.md"
     path.write_text("---\nid: X\ndomain: hr\n---\n\n   \n", encoding="utf-8")
-    with pytest.raises(RequirementError):
+    with pytest.raises(Require):
         load_requirement(path)
 
 
@@ -127,29 +127,29 @@ def test_load_requirements_returns_sorted_list(tmp_path: Path) -> None:
 
 
 def test_load_requirements_missing_directory_raises(tmp_path: Path) -> None:
-    with pytest.raises(RequirementError):
+    with pytest.raises(Require):
         load_requirements(tmp_path / "missing")
 
 
 def test_requirement_validation_enforces_non_empty_fields() -> None:
-    with pytest.raises(RequirementError):
-        Requirement(
+    with pytest.raises(Require):
+        Need(
             id="",
             text="body",
             domain="hr",
             source_path=Path("/tmp/x"),
             created_at=datetime.now(UTC),
         )
-    with pytest.raises(RequirementError):
-        Requirement(
+    with pytest.raises(Require):
+        Need(
             id="X",
             text="",
             domain="hr",
             source_path=Path("/tmp/x"),
             created_at=datetime.now(UTC),
         )
-    with pytest.raises(RequirementError):
-        Requirement(
+    with pytest.raises(Require):
+        Need(
             id="X",
             text="body",
             domain="",
@@ -158,7 +158,7 @@ def test_requirement_validation_enforces_non_empty_fields() -> None:
         )
 
 
-def test_render_requirement_round_trip(requirement: Requirement) -> None:
+def test_render_requirement_round_trip(requirement: Need) -> None:
     rendered = render_requirement(requirement)
     assert f"id: {requirement.id}" in rendered
     assert f"domain: {requirement.domain}" in rendered

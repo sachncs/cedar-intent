@@ -1,6 +1,6 @@
 """Deterministic Cedar compiler.
 
-A :class:`PolicyIntent` is the typed intermediate representation produced
+A :class:`Intent` is the typed intermediate representation produced
 by a generator. The compiler walks the intent and emits Cedar source
 text without any LLM involvement. It is the only code in cedrus
 that constructs Cedar syntax.
@@ -11,7 +11,7 @@ through :func:`json.dumps` for value escaping so any value can be
 embedded in a Cedar string literal without manual quote or backslash
 handling. Scope rendering is one branch per ``kind`` value with no
 shared fallbacks, so a malformed scope raises
-:class:`CompilationError` instead of producing silent garbage.
+:class:`Compile` instead of producing silent garbage.
 """
 
 from __future__ import annotations
@@ -22,14 +22,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
 
-from .errors import CompilationError
-from .scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
+from .error import Compile
+from .scopes import Action, Clause, Principal, Resource
 
 Effect = Literal["permit", "forbid"]
 
 
 @dataclass(frozen=True, slots=True)
-class PolicyIntent:
+class Intent:
     """Typed authorization intent for one policy.
 
     An intent is the contract between a generator (human or LLM) and the
@@ -39,7 +39,7 @@ class PolicyIntent:
 
     Attributes:
         id: Stable intent identifier (for example ``"hr-hr-042"``).
-        requirement_id: Identifier of the originating :class:`Requirement`.
+        requirement_id: Identifier of the originating :class:`Need`.
         effect: Either ``"permit"`` or ``"forbid"``.
         principal: Scope applied to the principal slot.
         action: Scope applied to the action slot.
@@ -52,22 +52,22 @@ class PolicyIntent:
     id: str
     requirement_id: str
     effect: Effect
-    principal: PrincipalScope
-    action: ActionScope
-    resource: ResourceScope
-    when_clauses: tuple[ConditionClause, ...] = field(default_factory=tuple)
-    unless_clauses: tuple[ConditionClause, ...] = field(default_factory=tuple)
+    principal: Principal
+    action: Action
+    resource: Resource
+    when_clauses: tuple[Clause, ...] = field(default_factory=tuple)
+    unless_clauses: tuple[Clause, ...] = field(default_factory=tuple)
     notes: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.effect not in {"permit", "forbid"}:
-            raise CompilationError(f"intent {self.id} has invalid effect {self.effect!r}")
+            raise Compile(f"intent {self.id} has invalid effect {self.effect!r}")
         if not self.id or not self.id.strip():
-            raise CompilationError("policy intent id must be non-empty")
+            raise Compile("policy intent id must be non-empty")
 
 
 @dataclass(frozen=True, slots=True)
-class CompiledSource:
+class Source:
     """Output of the deterministic compiler.
 
     Attributes:
@@ -89,8 +89,8 @@ class CompiledSource:
         }
 
 
-def compile_intent(intent: PolicyIntent) -> CompiledSource:
-    """Compile a single :class:`PolicyIntent` to Cedar source.
+def compile_intent(intent: Intent) -> Source:
+    """Compile a single :class:`Intent` to Cedar source.
 
     The compiler assembles the slot clauses, appends ``when`` and
     ``unless`` blocks when present, and terminates the statement with
@@ -100,7 +100,7 @@ def compile_intent(intent: PolicyIntent) -> CompiledSource:
         intent: The intent to compile.
 
     Returns:
-        A :class:`CompiledSource` containing the rendered Cedar text and
+        A :class:`Source` containing the rendered Cedar text and
         metadata.
     """
     principal_clause = render_principal(intent.principal)
@@ -120,15 +120,15 @@ def compile_intent(intent: PolicyIntent) -> CompiledSource:
         joined = " || ".join(clause.body for clause in intent.unless_clauses)
         parts.append(f"unless {{ {joined} }}")
     parts.append(";")
-    return CompiledSource(
+    return Source(
         intent_id=intent.id,
         cedar="\n".join(parts),
         compiled_at=datetime.now(UTC),
     )
 
 
-def render_principal(scope: PrincipalScope) -> str:
-    """Render a :class:`PrincipalScope` to its Cedar source representation.
+def render_principal(scope: Principal) -> str:
+    """Render a :class:`Principal` to its Cedar source representation.
 
     Args:
         scope: Principal scope to render.
@@ -138,7 +138,7 @@ def render_principal(scope: PrincipalScope) -> str:
         policy statement.
 
     Raises:
-        CompilationError: If ``scope.kind`` is not a recognized kind.
+        Compile: If ``scope.kind`` is not a recognized kind.
     """
     if scope.kind == "any":
         return "principal"
@@ -158,11 +158,11 @@ def render_principal(scope: PrincipalScope) -> str:
         return f"principal == {scope.type_name}::{json.dumps(scope.entity_id)}"
     if scope.kind == "in_group":
         return f"principal in {scope.group_type}::{json.dumps(scope.group_id)}"
-    raise CompilationError(f"unsupported principal scope: {scope.kind}")
+    raise Compile(f"unsupported principal scope: {scope.kind}")
 
 
-def render_action(scope: ActionScope) -> str:
-    """Render an :class:`ActionScope` to its Cedar source representation.
+def render_action(scope: Action) -> str:
+    """Render an :class:`Action` to its Cedar source representation.
 
     Args:
         scope: Action scope to render.
@@ -171,7 +171,7 @@ def render_action(scope: ActionScope) -> str:
         A Cedar source fragment suitable for the action slot.
 
     Raises:
-        CompilationError: If ``scope.kind`` is not a recognized kind.
+        Compile: If ``scope.kind`` is not a recognized kind.
     """
     if scope.kind == "any":
         return "action"
@@ -180,11 +180,11 @@ def render_action(scope: ActionScope) -> str:
         return f"action == {namespace_prefix}Action::{json.dumps(scope.name)}"
     if scope.kind == "in_group":
         return f"action in {namespace_prefix}Action::{json.dumps(scope.group)}"
-    raise CompilationError(f"unsupported action scope: {scope.kind}")
+    raise Compile(f"unsupported action scope: {scope.kind}")
 
 
-def render_resource(scope: ResourceScope) -> str:
-    """Render a :class:`ResourceScope` to its Cedar source representation.
+def render_resource(scope: Resource) -> str:
+    """Render a :class:`Resource` to its Cedar source representation.
 
     Args:
         scope: Resource scope to render.
@@ -193,7 +193,7 @@ def render_resource(scope: ResourceScope) -> str:
         A Cedar source fragment suitable for the resource slot.
 
     Raises:
-        CompilationError: If ``scope.kind`` is not a recognized kind.
+        Compile: If ``scope.kind`` is not a recognized kind.
     """
     if scope.kind == "any":
         return "resource"
@@ -211,13 +211,13 @@ def render_resource(scope: ResourceScope) -> str:
             f"resource is {scope.type_name} "
             f"in {scope.parent_type}::{json.dumps(scope.parent_id)}"
         )
-    raise CompilationError(f"unsupported resource scope: {scope.kind}")
+    raise Compile(f"unsupported resource scope: {scope.kind}")
 
 
 __all__ = [
-    "CompiledSource",
+    "Source",
     "Effect",
-    "PolicyIntent",
+    "Intent",
     "compile_intent",
     "render_action",
     "render_principal",

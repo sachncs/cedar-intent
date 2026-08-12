@@ -27,12 +27,12 @@ from dataclasses import dataclass
 
 from cedarpy import format_policies, validate_policies
 
-from .errors import ValidationError
-from .schema import CedarSchema
+from .error import Validate
+from .schema import Schema
 
 
 @dataclass(frozen=True, slots=True)
-class ValidationReport:
+class Vreport:
     """Outcome of a validation pass.
 
     Attributes:
@@ -54,7 +54,7 @@ class ValidationReport:
         }
 
 
-def validate_cedar(policies: Sequence[str], schema: CedarSchema) -> ValidationReport:
+def validate_cedar(policies: Sequence[str], schema: Schema) -> Vreport:
     """Validate Cedar statements against the schema and return a structured report.
 
     Args:
@@ -62,10 +62,10 @@ def validate_cedar(policies: Sequence[str], schema: CedarSchema) -> ValidationRe
         schema: The Cedar schema to validate against.
 
     Returns:
-        A :class:`ValidationReport` describing the outcome.
+        A :class:`Vreport` describing the outcome.
 
     Raises:
-        ValidationError: If parsing or schema validation fails.
+        Validate: If parsing or schema validation fails.
     """
     policy_text = tuple(policies)
     combined = "\n\n".join(policy_text)
@@ -74,11 +74,11 @@ def validate_cedar(policies: Sequence[str], schema: CedarSchema) -> ValidationRe
     try:
         result = validate_policies(combined, schema.handle)
     except TypeError as error:
-        raise ValidationError((f"policy input is not a string: {error}",), combined) from error
+        raise Validate((f"policy input is not a string: {error}",), combined) from error
     except ValueError as error:
-        raise ValidationError((str(error),), combined) from error
+        raise Validate((str(error),), combined) from error
     if not result.validation_passed:
-        raise ValidationError(tuple(str(error) for error in result.errors), combined)
+        raise Validate(tuple(str(error) for error in result.errors), combined)
     formatted: list[str] = []
     for source in policy_text:
         # ``format_policies`` only raises ValueError on truly unparseable
@@ -88,12 +88,12 @@ def validate_cedar(policies: Sequence[str], schema: CedarSchema) -> ValidationRe
         try:
             formatted.append(format_policies(source).strip())
         except ValueError as error:
-            raise ValidationError((f"format failed: {error}",), source) from error
+            raise Validate((f"format failed: {error}",), source) from error
         except TypeError as error:
-            raise ValidationError(
+            raise Validate(
                 (f"format received non-string input: {error}",), source
             ) from error
-    return ValidationReport(passed=True, errors=(), formatted=tuple(formatted))
+    return Vreport(passed=True, errors=(), formatted=tuple(formatted))
 
 
-__all__ = ["ValidationReport", "validate_cedar"]
+__all__ = ["Vreport", "validate_cedar"]

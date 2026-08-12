@@ -15,18 +15,18 @@ from pathlib import Path
 from typing import Any
 
 from cedrus import (
-    ActionScope,
-    CedarSchema,
-    CompiledPolicy,
-    DraftPolicy,
-    LiteLLMGenerator,
-    OfflineGenerator,
-    PolicyIntent,
-    PrincipalScope,
-    Requirement,
-    ResourceScope,
-    Scenario,
-    VerificationReport,
+    Action,
+    Case,
+    Compiled,
+    Draft,
+    Intent,
+    Llm,
+    Need,
+    Offline,
+    Principal,
+    Report,
+    Resource,
+    Schema,
     Workspace,
     compile_intent,
     run_scenarios,
@@ -67,14 +67,14 @@ def make_workspace() -> Workspace:
     return Workspace.in_memory(Path("/tmp/cedrus-example"))
 
 
-def make_schema() -> CedarSchema:
-    """Build a CedarSchema from the PhotoFlash mapping."""
-    return CedarSchema.from_mapping(PHOTOFLASH_SCHEMA)
+def make_schema() -> Schema:
+    """Build a Schema from the PhotoFlash mapping."""
+    return Schema.from_mapping(PHOTOFLASH_SCHEMA)
 
 
-def make_requirement(identifier: str, body: str) -> Requirement:
-    """Build a Requirement object with the given identifier and body."""
-    return Requirement(
+def make_requirement(identifier: str, body: str) -> Need:
+    """Build a Need object with the given identifier and body."""
+    return Need(
         id=identifier,
         text=body,
         domain="hr",
@@ -83,14 +83,14 @@ def make_requirement(identifier: str, body: str) -> Requirement:
 
 
 def recipe_compile_intent() -> None:
-    """Compile a typed PolicyIntent into Cedar source."""
-    intent = PolicyIntent(
+    """Compile a typed Intent into Cedar source."""
+    intent = Intent(
         id="hr-hr-001",
         requirement_id="HR-001",
         effect="permit",
-        principal=PrincipalScope(kind="is_type", type_name="PhotoFlash::User"),
-        action=ActionScope(kind="named", name="viewPhoto", namespace="PhotoFlash"),
-        resource=ResourceScope(kind="is_type", type_name="PhotoFlash::Photo"),
+        principal=Principal(kind="is_type", type_name="PhotoFlash::User"),
+        action=Action(kind="named", name="viewPhoto", namespace="PhotoFlash"),
+        resource=Resource(kind="is_type", type_name="PhotoFlash::Photo"),
     )
     source = compile_intent(intent)
     print("compile_intent ->", source.cedar.replace("\n", " "))
@@ -107,27 +107,27 @@ def recipe_validate_cedar() -> None:
     print("validate_cedar ->", report.passed, report.formatted)
 
 
-def recipe_offline_generator(workspace: Workspace) -> tuple[DraftPolicy, Any]:
-    """Run the deterministic OfflineGenerator on a draft policy."""
+def recipe_offline_generator(workspace: Workspace) -> tuple[Draft, Any]:
+    """Run the deterministic Offline on a draft policy."""
     schema = make_schema()
-    draft = DraftPolicy(
+    draft = Draft(
         id="hr-hr-042",
         requirement=make_requirement(
             "HR-042",
             "Only admins can view photos when accessed from the office network.",
         ),
-        principal=PrincipalScope(kind="is_type", type_name="PhotoFlash::User"),
-        action=ActionScope(kind="named", name="viewPhoto", namespace="PhotoFlash"),
-        resource=ResourceScope(kind="is_type", type_name="PhotoFlash::Photo"),
+        principal=Principal(kind="is_type", type_name="PhotoFlash::User"),
+        action=Action(kind="named", name="viewPhoto", namespace="PhotoFlash"),
+        resource=Resource(kind="is_type", type_name="PhotoFlash::Photo"),
     )
-    proposal = draft.generate(schema, OfflineGenerator())
+    proposal = draft.generate(schema, Offline())
     print("offline_generator ->", proposal.intent.effect, proposal.unresolved)
     return draft, proposal
 
 
-def recipe_litellm_generator_factory() -> LiteLLMGenerator:
-    """Build a LiteLLMGenerator bound to a specific model."""
-    return LiteLLMGenerator(
+def recipe_litellm_generator_factory() -> Llm:
+    """Build a Llm bound to a specific model."""
+    return Llm(
         model="openai/gpt-4o",
         timeout=30,
         retries=2,
@@ -136,11 +136,11 @@ def recipe_litellm_generator_factory() -> LiteLLMGenerator:
     )
 
 
-def recipe_run_scenarios(workspace: Workspace, compiled: CompiledPolicy) -> None:
+def recipe_run_scenarios(workspace: Workspace, compiled: Compiled) -> None:
     """Run a small scenario suite against the compiled policy."""
     schema = make_schema()
     scenarios = [
-        Scenario(
+        Case(
             name="alice-can-view",
             principal='PhotoFlash::User::"alice"',
             action='PhotoFlash::Action::"viewPhoto"',
@@ -148,7 +148,7 @@ def recipe_run_scenarios(workspace: Workspace, compiled: CompiledPolicy) -> None
             context={},
             expected="Allow",
         ),
-        Scenario(
+        Case(
             name="bob-denied",
             principal='PhotoFlash::User::"bob"',
             action='PhotoFlash::Action::"viewPhoto"',
@@ -161,7 +161,7 @@ def recipe_run_scenarios(workspace: Workspace, compiled: CompiledPolicy) -> None
     print("run_scenarios ->", report.passed, [(r.scenario.name, r.actual) for r in report.results])
 
 
-def recipe_verify_policies(workspace: Workspace) -> VerificationReport:
+def recipe_verify_policies(workspace: Workspace) -> Report:
     """Run static verification on a domain's compiled policies."""
     schema = make_schema()
     policies = workspace.list_compiled_policies("hr")

@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Removed (breaking)
 - `cedrus` import path is gone; use `cedrus`.
-- Multi-word class names (`PolicyIntent`, `BundleExporter`, etc.) are
+- Multi-word class names (`Intent`, `Bundler`, etc.) are
   gone; use `Intent`, `Bundler`, etc.
 - Free functions (`validate_cedar`, `compile_intent`, etc.) are gone;
   use orchestrator classes (`Validator`, `Compiler`, etc.).
@@ -56,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `validate_identifier` and CLI argparse types (`_positive_finite_float`,
   `_non_negative_int`, `_positive_int`) reject path-traversal-shaped
   inputs and negative / infinite numeric flags at parse time.
-- Top-level catch wraps non-`CedarIntentError` exceptions in a
+- Top-level catch wraps non-`Error` exceptions in a
   structured JSON envelope when `--json` is set.
 - Test suite expanded to 283 tests, including an SSRF truth table
   (22 cases), a pinned-transport test set (5 cases), and a
@@ -70,18 +70,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Version is sourced from `cedrus.__version__` at build time
   via `[tool.setuptools.dynamic]`, eliminating drift between the
   package and `pyproject.toml`.
-- `DeploymentClient` uses `httpx` with a custom transport that pins
+- `Client` uses `httpx` with a custom transport that pins
   every HTTP connection to the IP address resolved at SSRF-check
   time. This closes the DNS-rebinding window in which an attacker
   returns a public IP at guard time and a private IP at request time.
 - HTTP response bodies are read in bounded chunks, never persisted
-  verbatim, and never embedded in error messages. `DeploymentRecord.response`
+  verbatim, and never embedded in error messages. `Record.response`
   now carries `body_sha256` (not `body`) plus `idempotency_key` and
   `retry_count`.
 - Redirects are disabled by default; opt in with
   `follow_redirects=True`. The client honours `Retry-After` on 429
   and 503 with exponential backoff up to `max_retries`.
-- `BundleExporter.write_directory` refuses symlinked target
+- `Bundler.write_directory` refuses symlinked target
   directories, refuses non-empty staging directories, and fsyncs
   both data and directory for durability across power loss.
 - `parse_headers` rejects empty names, CR/LF in either name or
@@ -93,19 +93,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   canonical JSON form so reordered expressions produce identical
   signatures. Malformed policies emit a `malformed-policy` finding
   rather than silently degrading to `permit(any/any/any)`.
-- `LiteLLMGenerator` wraps every piece of user-controlled content in
+- `Llm` wraps every piece of user-controlled content in
   fenced `<<<...>>>` delimiters in the user prompt and adds an
   explicit "data only" preamble to the system prompt so hostile
   requirement text or schema JSON cannot impersonate instructions.
-- `find_action_namespace` raises `WorkspaceError` when an action id
+- `find_action_namespace` raises `Space` when an action id
   is declared in multiple namespaces and `action.namespace` was not
   supplied. Previously the first namespace won by dict iteration
   order, producing non-deterministic compile output across reloads.
-- `intent_from_draft` returns `None` or raises `WorkspaceError`
+- `intent_from_draft` returns `None` or raises `Space`
   when stored intent JSON is missing or corrupt. Previously it
   synthesised a permissive `permit(any/any/any)` fallback that
   could ship as a wide-open policy.
-- `SqliteRepository` connects with `check_same_thread=False` and
+- `Sqlite` connects with `check_same_thread=False` and
   guards mutating calls with `threading.RLock`.
 - `column_exists` validates the table argument against an allow-list
   so the f-string PRAGMA interpolation can never accept user input.
@@ -129,9 +129,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   flags shadowed ``forbid`` policies, redundant duplicates, and
   coverage gaps for actions, requirements, and entity types.
   See `docs/verification.md`.
-- Deployment automation. A ``BundleExporter`` builds a
+- Deployment automation. A ``Bundler`` builds a
   SHA-256-signed deployment manifest from compiled policies. A
-  ``DeploymentClient`` pushes the bundle to a local directory or an
+  ``Client`` pushes the bundle to a local directory or an
   HTTP endpoint and records the deployment in the workspace.
 - CLI subcommands for the new features: ``verify``, ``deploy push``,
   ``deploy bundle``, ``deploy history``.
@@ -141,11 +141,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Replaced `<your-org>` placeholders with `sachin/cedrus` across
   `README.md`, `CHANGELOG.md`, and `CONTRIBUTING.md`.
-- Tightened exception handling in ``LiteLLMGenerator.generate`` to
+- Tightened exception handling in ``Llm.generate`` to
   catch only ``openai.APIError`` and ``TimeoutError`` instead of
   broad ``Exception``.
 - Split combined ``TypeError`` / ``ValueError`` catches in
-  ``CedarSchema.__post_init__`` and ``validate_cedar`` so the error
+  ``Schema.__post_init__`` and ``validate_cedar`` so the error
   message reflects the actual failure mode.
 - Inlined the lazy imports inside ``Policy.intent_for_verification``
   for clarity.

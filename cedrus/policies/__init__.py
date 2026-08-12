@@ -1,8 +1,8 @@
 """Policy class hierarchy."""
 
-from .base import Policy
-from .compiled import CompiledPolicy
-from .draft import DraftPolicy
-from .existing import ExistingPolicy
+from .base import Kind
+from .compiled import Compiled
+from .draft import Draft
+from .existing import Existing
 
-__all__ = ["CompiledPolicy", "DraftPolicy", "ExistingPolicy", "Policy"]
+__all__ = ["Compiled", "Draft", "Existing", "Kind"]

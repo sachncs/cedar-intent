@@ -9,13 +9,13 @@ from pathlib import Path
 import pytest
 
 from cedrus import (
-    ActionScope,
-    CompiledPolicy,
-    PolicyIntent,
-    PrincipalScope,
-    Requirement,
-    ResourceScope,
-    VerificationReport,
+    Action,
+    Compiled,
+    Intent,
+    Need,
+    Principal,
+    Report,
+    Resource,
     Workspace,
 )
 
@@ -42,8 +42,8 @@ def make_workspace_with_domain(tmp_path: Path) -> Workspace:
     return Workspace.open(tmp_path)
 
 
-def make_requirement(identifier: str, tmp_path: Path) -> Requirement:
-    return Requirement(
+def make_requirement(identifier: str, tmp_path: Path) -> Need:
+    return Need(
         id=identifier,
         text="Body",
         domain="hr",
@@ -57,26 +57,26 @@ def test_workspace_verify_domain_passes(tmp_path: Path) -> None:
     try:
         requirement = make_requirement("HR-001", tmp_path)
         workspace.repository.add_requirement(requirement)
-        intent = PolicyIntent(
+        intent = Intent(
             id="hr-hr-001",
             requirement_id="HR-001",
             effect="permit",
-            principal=PrincipalScope(kind="is_type", type_name="PhotoFlash::User"),
-            action=ActionScope(kind="named", name="viewPhoto", namespace="PhotoFlash"),
-            resource=ResourceScope(kind="is_type", type_name="PhotoFlash::Photo"),
+            principal=Principal(kind="is_type", type_name="PhotoFlash::User"),
+            action=Action(kind="named", name="viewPhoto", namespace="PhotoFlash"),
+            resource=Resource(kind="is_type", type_name="PhotoFlash::Photo"),
         )
         cedar = (
             "permit (principal is PhotoFlash::User, "
             'action == PhotoFlash::Action::"viewPhoto", '
             "resource is PhotoFlash::Photo);"
         )
-        compiled = CompiledPolicy(
+        compiled = Compiled(
             id="hr-hr-001", requirement=requirement, cedar=cedar, intent=intent
         )
         workspace.upsert_compiled(compiled)
         schema = workspace.load_schema("hr")
         report = workspace.verify_domain("hr", schema)
-        assert isinstance(report, VerificationReport)
+        assert isinstance(report, Report)
         assert report.requirements_uncovered == ()
     finally:
         workspace.close()
@@ -99,13 +99,13 @@ def test_workspace_build_bundle_writes_to_directory(tmp_path: Path) -> None:
     try:
         requirement = make_requirement("HR-001", tmp_path)
         workspace.repository.add_requirement(requirement)
-        intent = PolicyIntent(
+        intent = Intent(
             id="hr-hr-001",
             requirement_id="HR-001",
             effect="permit",
-            principal=PrincipalScope(kind="any"),
-            action=ActionScope(kind="any"),
-            resource=ResourceScope(kind="any"),
+            principal=Principal(kind="any"),
+            action=Action(kind="any"),
+            resource=Resource(kind="any"),
         )
         cedar = (
             "permit (principal is PhotoFlash::User, "
@@ -113,7 +113,7 @@ def test_workspace_build_bundle_writes_to_directory(tmp_path: Path) -> None:
             "resource is PhotoFlash::Photo);"
         )
         workspace.upsert_compiled(
-            CompiledPolicy(
+            Compiled(
                 id="hr-hr-001", requirement=requirement, cedar=cedar, intent=intent
             )
         )
@@ -131,13 +131,13 @@ def test_workspace_deploy_local_persists_record(tmp_path: Path) -> None:
     try:
         requirement = make_requirement("HR-001", tmp_path)
         workspace.repository.add_requirement(requirement)
-        intent = PolicyIntent(
+        intent = Intent(
             id="hr-hr-001",
             requirement_id="HR-001",
             effect="permit",
-            principal=PrincipalScope(kind="any"),
-            action=ActionScope(kind="any"),
-            resource=ResourceScope(kind="any"),
+            principal=Principal(kind="any"),
+            action=Action(kind="any"),
+            resource=Resource(kind="any"),
         )
         cedar = (
             "permit (principal is PhotoFlash::User, "
@@ -145,7 +145,7 @@ def test_workspace_deploy_local_persists_record(tmp_path: Path) -> None:
             "resource is PhotoFlash::Photo);"
         )
         workspace.upsert_compiled(
-            CompiledPolicy(
+            Compiled(
                 id="hr-hr-001", requirement=requirement, cedar=cedar, intent=intent
             )
         )
@@ -162,9 +162,9 @@ def test_workspace_deploy_local_persists_record(tmp_path: Path) -> None:
 def test_workspace_deploy_empty_domain_raises(tmp_path: Path) -> None:
     workspace = make_workspace_with_domain(tmp_path)
     try:
-        from cedrus import WorkspaceError
+        from cedrus import Space
 
-        with pytest.raises(WorkspaceError):
+        with pytest.raises(Space):
             workspace.deploy("hr", str(tmp_path / "out"))
     finally:
         workspace.close()
@@ -175,13 +175,13 @@ def test_workspace_list_deployments_filtered(tmp_path: Path) -> None:
     try:
         requirement = make_requirement("HR-001", tmp_path)
         workspace.repository.add_requirement(requirement)
-        intent = PolicyIntent(
+        intent = Intent(
             id="hr-hr-001",
             requirement_id="HR-001",
             effect="permit",
-            principal=PrincipalScope(kind="any"),
-            action=ActionScope(kind="any"),
-            resource=ResourceScope(kind="any"),
+            principal=Principal(kind="any"),
+            action=Action(kind="any"),
+            resource=Resource(kind="any"),
         )
         cedar = (
             "permit (principal is PhotoFlash::User, "
@@ -189,7 +189,7 @@ def test_workspace_list_deployments_filtered(tmp_path: Path) -> None:
             "resource is PhotoFlash::Photo);"
         )
         workspace.upsert_compiled(
-            CompiledPolicy(
+            Compiled(
                 id="hr-hr-001", requirement=requirement, cedar=cedar, intent=intent
             )
         )

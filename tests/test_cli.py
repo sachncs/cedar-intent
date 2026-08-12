@@ -439,13 +439,13 @@ def test_main_unknown_command(tmp_path: Path) -> None:
 
 
 def test_run_command_unknown_command_raises(tmp_path: Path) -> None:
-    from cedrus import ConfigError
+    from cedrus import Config
 
     args = cli.build_parser().parse_args(
         ["--workspace", str(tmp_path), "init", "--path", str(tmp_path)]
     )
     args.command = "garbage"
-    with pytest.raises(ConfigError):
+    with pytest.raises(Config):
         run_command(args)
 
 

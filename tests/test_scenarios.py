@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 from cedrus import (
-    CedarSchema,
-    Scenario,
+    Case,
+    Schema,
     load_scenarios,
     run_scenarios,
 )
@@ -25,7 +25,7 @@ FORBID_POLICY = (
 
 def test_scenario_rejects_invalid_decision() -> None:
     with pytest.raises(ValueError):
-        Scenario(
+        Case(
             name="bad",
             principal='User::"alice"',
             action='Action::"view"',
@@ -37,7 +37,7 @@ def test_scenario_rejects_invalid_decision() -> None:
 
 def test_scenario_rejects_empty_name() -> None:
     with pytest.raises(ValueError):
-        Scenario(
+        Case(
             name="",
             principal='User::"alice"',
             action='Action::"view"',
@@ -83,9 +83,9 @@ def test_load_scenarios_assigns_default_names() -> None:
     assert scenarios[0].name == "scenario-0"
 
 
-def test_run_scenarios_allow_and_deny(schema: CedarSchema) -> None:
+def test_run_scenarios_allow_and_deny(schema: Schema) -> None:
     scenarios = [
-        Scenario(
+        Case(
             name="alice-can-view",
             principal='PhotoFlash::User::"alice"',
             action='PhotoFlash::Action::"viewPhoto"',
@@ -93,7 +93,7 @@ def test_run_scenarios_allow_and_deny(schema: CedarSchema) -> None:
             context={},
             expected="Allow",
         ),
-        Scenario(
+        Case(
             name="bob-denied-by-forbid",
             principal='PhotoFlash::User::"bob"',
             action='PhotoFlash::Action::"viewPhoto"',
@@ -110,9 +110,9 @@ def test_run_scenarios_allow_and_deny(schema: CedarSchema) -> None:
     }
 
 
-def test_run_scenarios_records_failures(schema: CedarSchema) -> None:
+def test_run_scenarios_records_failures(schema: Schema) -> None:
     scenarios = [
-        Scenario(
+        Case(
             name="wrong-expectation",
             principal='PhotoFlash::User::"alice"',
             action='PhotoFlash::Action::"viewPhoto"',
@@ -128,7 +128,7 @@ def test_run_scenarios_records_failures(schema: CedarSchema) -> None:
 
 def test_run_scenarios_without_schema_uses_default() -> None:
     scenarios = [
-        Scenario(
+        Case(
             name="deny-default",
             principal='User::"alice"',
             action='Action::"view"',

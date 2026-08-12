@@ -8,37 +8,37 @@ bundle, and which responsibilities belong to which class.
 
 ```text
                     +---------------+
-                    |  Requirement  |
+                    |  Need  |
                     +-------+-------+
                             |
                             v
                   +-------------------+
-                  |   DraftPolicy     |  (scope-typed: principal/action/resource)
+                  |   Draft     |  (scope-typed: principal/action/resource)
                   +---------+---------+
                             |
               Policy.generate(schema, generator)
                             |
                             v
                  +---------------------+
-                 |    DraftProposal     |  (typed PolicyIntent + unresolved)
+                 |    Proposal     |  (typed Intent + unresolved)
                  +---------+-----------+
                            |
-                Policy.compile()  -> CompiledSource
+                Policy.compile()  -> Source
                            |
                            v
                 +--------------------+
                 |   Cedar source     |  (deterministic emitter)
                 +---------+----------+
                           |
-            CedarSchema.validate()  -> ValidationReport
+            Schema.validate()  -> Vreport
                           |
-                  Scenario.test()  -> TestReport
+                  Case.test()  -> Suite
                           |
-              Workspace.verify_domain()  -> VerificationReport
+              Workspace.verify_domain()  -> Report
                           |
-              BundleExporter.build()  -> DeploymentManifest
+              Bundler.build()  -> Manifest
                           |
-            DeploymentClient.deploy()  -> DeploymentRecord
+            Client.deploy()  -> Record
 ```
 
 The LLM is intentionally placed at the proposal stage, not the
@@ -49,23 +49,23 @@ deterministic check.
 
 | Module              | Responsibility                                                         |
 | ------------------- | ---------------------------------------------------------------------- |
-| `errors`            | Exception hierarchy rooted at `CedarIntentError`.                     |
+| `errors`            | Exception hierarchy rooted at `Error`.                     |
 | `requirements`      | Markdown loading, front-matter parsing, slug generation, ID handling.    |
 | `scopes`            | Typed principal / action / resource / condition scope objects.           |
 | `schema`            | Cedar JSON schema wrapper backed by `cedarpy.Schema`.                    |
-| `compiler`          | Deterministic Cedar source emission from a typed `PolicyIntent`.        |
+| `compiler`          | Deterministic Cedar source emission from a typed `Intent`.        |
 | `validation`        | Cedar parsing and schema validation via `cedarpy`.                       |
 | `scenarios`         | Authorization scenario loading and execution through the Cedar engine.  |
-| `generator.base`    | `Generator` Protocol and shared `DraftProposal` / context dataclasses. |
+| `generator.base`    | `Generator` Protocol and shared `Proposal` / context dataclasses. |
 | `generator.offline` | Deterministic generator that infers effect and conditions from text.    |
 | `generator.litellm` | LiteLLM-backed generator with structured JSON output.                    |
 | `storage.base`      | `Repository` Protocol and stored-row dataclasses.                        |
 | `storage.memory`    | Dict-backed repository for tests.                                       |
 | `storage.sqlite`    | SQLite-backed repository with idempotent migrations.                     |
 | `policies.base`     | Abstract `Policy` base class.                                           |
-| `policies.draft`    | `DraftPolicy` with principal / action / resource scopes.                |
-| `policies.existing` | `ExistingPolicy` imported from raw Cedar source.                         |
-| `policies.compiled` | `CompiledPolicy` after validation and scenario tests.                    |
+| `policies.draft`    | `Draft` with principal / action / resource scopes.                |
+| `policies.existing` | `Existing` imported from raw Cedar source.                         |
+| `policies.compiled` | `Compiled` after validation and scenario tests.                    |
 | `verification`      | Static symbolic verification: shadowing, redundancy, coverage.          |
 | `deployment`        | Bundle export and HTTP/local deployment client.                          |
 | `workspace`         | Top-level orchestrator that wires everything together.                   |
@@ -83,15 +83,15 @@ A requirement reaches a deployment bundle through seven stages:
    generator to a specific shape.
 3. **Generate.** A `Generator` (offline or LiteLLM) receives the
    requirement plus the scopes plus any existing policy intents. It
-   produces a typed `DraftProposal` whose `intent` carries effect,
+   produces a typed `Proposal` whose `intent` carries effect,
    when/unless clauses, and refined scope values.
-4. **Compile.** The deterministic compiler renders the `PolicyIntent`
+4. **Compile.** The deterministic compiler renders the `Intent`
    into Cedar source text. The compiler is the only code that emits
    Cedar syntax.
 5. **Validate.** Cedar parses the source and validates it against the
    schema. Compilation produces formatted, normalized text.
 6. **Test.** Optional authorization scenarios are executed through the
-   Cedar engine, producing a `TestReport`. The apply step fails if
+   Cedar engine, producing a `Suite`. The apply step fails if
    any scenario fails.
 7. **Verify.** Static verification flags shadowed `forbid`s, redundant
    duplicates, and missing coverage.
@@ -123,7 +123,7 @@ identifier string, allowing them to survive policy deletion.
 - **New storage backend** — implement the `Repository` Protocol in
   `cedrus.storage.base` and construct the workspace with it.
 - **New verification check** — add a function returning a list of
-  `VerificationFinding` and call it from `verify_policies`.
-- **New deployment target** — extend `DeploymentClient.deploy` with a
-  new branch for your protocol, or compose `BundleExporter` with your
+  `Finding` and call it from `verify_policies`.
+- **New deployment target** — extend `Client.deploy` with a
+  new branch for your protocol, or compose `Bundler` with your
   own transport.

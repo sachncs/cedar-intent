@@ -9,10 +9,10 @@ Why an eager handle
 ------------------
 
 The cedarpy :class:`Schema` handle is constructed eagerly in
-``__post_init__`` so any malformed schema raises :class:`ValidationError`
-the moment the :class:`CedarSchema` is built, rather than at the
+``__post_init__`` so any malformed schema raises :class:`Validate`
+the moment the :class:`Schema` is built, rather than at the
 first downstream call. This makes schema errors surface at the CLI or
-API boundary and prevents a half-constructed :class:`CedarSchema`
+API boundary and prevents a half-constructed :class:`Schema`
 from leaking into the rest of the pipeline.
 """
 
@@ -24,13 +24,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from cedarpy import Schema
+from cedarpy import Schema as _CedarSchema
 
-from .errors import ValidationError
+from .error import Validate
 
 
 @dataclass(frozen=True, slots=True)
-class CedarSchema:
+class Schema:
     """Parsed Cedar JSON schema.
 
     Attributes:
@@ -39,57 +39,57 @@ class CedarSchema:
     """
 
     source: Mapping[str, Any]
-    handle: Schema = field(init=False)
+    handle: _CedarSchema = field(init=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.source, Mapping) or not self.source:
-            raise ValidationError(("schema must be a non-empty Cedar JSON object",), "")
+            raise Validate(("schema must be a non-empty Cedar JSON object",), "")
         try:
             object.__setattr__(
                 self,
                 "handle",
-                Schema.from_json_str(json.dumps(dict(self.source), sort_keys=True)),
+                _CedarSchema.from_json_str(json.dumps(dict(self.source), sort_keys=True)),
             )
         except (TypeError, ValueError) as error:
-            raise ValidationError((f"invalid Cedar JSON schema: {error}",), "") from error
+            raise Validate((f"invalid Cedar JSON schema: {error}",), "") from error
 
     @classmethod
-    def from_mapping(cls, mapping: Mapping[str, Any]) -> CedarSchema:
-        """Build a :class:`CedarSchema` from a JSON-like mapping.
+    def from_mapping(cls, mapping: Mapping[str, Any]) -> Schema:
+        """Build a :class:`Schema` from a JSON-like mapping.
 
         Args:
             mapping: Cedar JSON schema expressed as nested mappings and lists.
 
         Returns:
-            A fully parsed :class:`CedarSchema`.
+            A fully parsed :class:`Schema`.
 
         Raises:
-            ValidationError: If the mapping cannot be parsed by Cedar.
+            Validate: If the mapping cannot be parsed by Cedar.
         """
         normalized = json.loads(json.dumps(mapping, sort_keys=True))
         return cls(source=normalized)
 
     @classmethod
-    def from_json_file(cls, path: Path) -> CedarSchema:
-        """Build a :class:`CedarSchema` from a Cedar JSON schema file.
+    def from_json_file(cls, path: Path) -> Schema:
+        """Build a :class:`Schema` from a Cedar JSON schema file.
 
         Args:
             path: Path to a Cedar JSON schema file.
 
         Returns:
-            A fully parsed :class:`CedarSchema`.
+            A fully parsed :class:`Schema`.
 
         Raises:
-            ValidationError: If the file is missing, unreadable, or invalid.
+            Validate: If the file is missing, unreadable, or invalid.
         """
         if not path.exists() or not path.is_file():
-            raise ValidationError((f"schema file not found: {path}",), "")
+            raise Validate((f"schema file not found: {path}",), "")
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as error:
-            raise ValidationError((f"schema file is not valid JSON: {error}",), "") from error
+            raise Validate((f"schema file is not valid JSON: {error}",), "") from error
         if not isinstance(data, Mapping):
-            raise ValidationError((f"schema file must contain a JSON object: {path}",), "")
+            raise Validate((f"schema file must contain a JSON object: {path}",), "")
         return cls.from_mapping(data)
 
     def entity_type_names(self) -> set[str]:
@@ -220,4 +220,4 @@ def _qualify(namespace: str, name: str) -> str:
     return f"{namespace}::{name}" if namespace else name
 
 
-__all__ = ["CedarSchema"]
+__all__ = ["Schema"]

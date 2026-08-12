@@ -1,8 +1,8 @@
 """Storage Protocol and shared data structures for the persistence layer.
 
 The Repository Protocol is the seam between cedrus and any backing
-store. Two implementations are shipped: :class:`InMemoryRepository` for
-tests and ephemeral use, and :class:`SqliteRepository` for the default
+store. Two implementations are shipped: :class:`Memory` for
+tests and ephemeral use, and :class:`Sqlite` for the default
 on-disk behaviour.
 
 Storage lifecycle
@@ -10,7 +10,7 @@ Storage lifecycle
 
 Every repository covers the same five tables:
 
-* ``requirements`` - one row per loaded :class:`~cedrus.requirements.Requirement`.
+* ``requirements`` - one row per loaded :class:`~cedrus.requirements.Need`.
 * ``policies`` - one row per compiled policy, with the typed intent
   and action namespace stored as JSON.
 * ``drafts`` - the full history of generator proposals per policy,
@@ -36,14 +36,14 @@ single repository instance per process or open one per thread.
 Schema migration
 ----------------
 
-Starting with cedrus 0.6.0, :class:`StoredDraft` carries the
-typed intent and per-slot scope JSON, and :class:`StoredPolicy`
+Starting with cedrus 0.6.0, :class:`DraftStored` carries the
+typed intent and per-slot scope JSON, and :class:`Stored`
 carries the action namespace. Older databases created before this
 version are upgraded on first open by
 :func:`cedrus.migrations.detect_legacy_rows` and
 :func:`cedrus.migrations.migrate_legacy_rows`, exposed via the
 ``cedrus migrate`` CLI subcommand. Until the migration runs,
-:class:`SqliteRepository` raises :class:`StorageError` on open so
+:class:`Sqlite` raises :class:`Store` on open so
 operators cannot accidentally work with a half-migrated store.
 """
 
@@ -54,13 +54,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
-from ..compiler import PolicyIntent
-from ..deployment import DeploymentRecord
-from ..requirements import Requirement
+from ..compiler import Intent
+from ..deployment import Record
+from ..requirements import Need
 
 
 @dataclass(frozen=True, slots=True)
-class StoredPolicy:
+class Stored:
     """Policy row stored in the repository.
 
     Attributes:
@@ -68,13 +68,13 @@ class StoredPolicy:
         domain: Domain the policy belongs to.
         requirement_id: Optional identifier of the originating requirement.
             ``None`` for orphan policies whose requirement was deleted.
-        intent: Optional parsed :class:`PolicyIntent`. ``None`` for
+        intent: Optional parsed :class:`Intent`. ``None`` for
             policies imported from raw Cedar source with no parsed intent.
         cedar: Cedar source text for the policy.
         status: Lifecycle status (``"draft"``, ``"existing"``, ``"compiled"``).
         created_at: Timestamp at which the row was first inserted.
         updated_at: Timestamp of the most recent upsert.
-        action_scope_json: Optional JSON-serialized :class:`ActionScope`
+        action_scope_json: Optional JSON-serialized :class:`Action`
             captured when the policy was compiled, used to keep the
             action namespace authoritative across reloads.
     """
@@ -82,7 +82,7 @@ class StoredPolicy:
     id: str
     domain: str
     requirement_id: str | None
-    intent: PolicyIntent | None
+    intent: Intent | None
     cedar: str
     status: str
     created_at: datetime
@@ -91,7 +91,7 @@ class StoredPolicy:
 
 
 @dataclass(frozen=True, slots=True)
-class StoredDraft:
+class DraftStored:
     """Draft proposal row stored in the repository.
 
     Attributes:
@@ -102,7 +102,7 @@ class StoredDraft:
         unresolved: Items the generator could not safely resolve.
         cedar: Cedar source text produced by the generator.
         created_at: Timestamp at which the draft was recorded.
-        intent_json: JSON-serialized :class:`PolicyIntent` carried by
+        intent_json: JSON-serialized :class:`Intent` carried by
             the generator proposal. Required for verification to reason
             about the proposal without re-parsing.
         principal_scope_json: JSON-serialized principal scope carried by
@@ -127,7 +127,7 @@ class StoredDraft:
 
 
 @dataclass(frozen=True, slots=True)
-class StoredReport:
+class ReportStored:
     """Validation or test report row.
 
     Attributes:
@@ -155,25 +155,25 @@ class Repository(Protocol):
     without inheriting from any base class.
     """
 
-    def add_requirement(self, requirement: Requirement) -> None: ...
-    def get_requirement(self, requirement_id: str) -> Requirement: ...
-    def list_requirements(self, domain: str | None = None) -> Sequence[Requirement]: ...
+    def add_requirement(self, requirement: Need) -> None: ...
+    def get_requirement(self, requirement_id: str) -> Need: ...
+    def list_requirements(self, domain: str | None = None) -> Sequence[Need]: ...
     def remove_requirement(self, requirement_id: str) -> None: ...
 
-    def upsert_policy(self, policy: StoredPolicy) -> None: ...
-    def get_policy(self, policy_id: str) -> StoredPolicy: ...
-    def list_policies(self, domain: str | None = None) -> Sequence[StoredPolicy]: ...
+    def upsert_policy(self, policy: Stored) -> None: ...
+    def get_policy(self, policy_id: str) -> Stored: ...
+    def list_policies(self, domain: str | None = None) -> Sequence[Stored]: ...
     def remove_policy(self, policy_id: str) -> None: ...
 
-    def record_draft(self, draft: StoredDraft) -> None: ...
+    def record_draft(self, draft: DraftStored) -> None: ...
     def update_draft_json(self, draft_id: str, json_columns: Mapping[str, str | None]) -> None: ...
-    def latest_draft(self, policy_id: str) -> StoredDraft: ...
-    def list_drafts(self, policy_id: str | None = None) -> Sequence[StoredDraft]: ...
+    def latest_draft(self, policy_id: str) -> DraftStored: ...
+    def list_drafts(self, policy_id: str | None = None) -> Sequence[DraftStored]: ...
 
-    def record_report(self, report: StoredReport) -> None: ...
-    def latest_report(self, policy_id: str, kind: str) -> StoredReport: ...
+    def record_report(self, report: ReportStored) -> None: ...
+    def latest_report(self, policy_id: str, kind: str) -> ReportStored: ...
 
-    def record_deployment(self, deployment: DeploymentRecord) -> None: ...
+    def record_deployment(self, deployment: Record) -> None: ...
 
     def transaction(self) -> Any:
         """Return a context manager that runs the body inside one transaction.
@@ -187,12 +187,12 @@ class Repository(Protocol):
         ...
     def list_deployments(
         self, domain: str | None = None
-    ) -> Sequence[DeploymentRecord]: ...
+    ) -> Sequence[Record]: ...
 
 
 __all__ = [
     "Repository",
-    "StoredDraft",
-    "StoredPolicy",
-    "StoredReport",
+    "DraftStored",
+    "Stored",
+    "ReportStored",
 ]

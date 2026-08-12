@@ -1,6 +1,6 @@
 """Exception hierarchy for cedrus.
 
-Every error raised by the library inherits from :class:`CedarIntentError`,
+Every error raised by the library inherits from :class:`Error`,
 which lets callers handle the entire family with a single ``except``
 clause. More specific categories are exposed as direct subclasses so
 callers can narrow their handling when needed.
@@ -10,53 +10,51 @@ Hierarchy
 
 The hierarchy is organized by responsibility, not by layer:
 
-* :class:`CedarIntentError` - base class. Catch this when you want
-  every cedrus error.
-* :class:`ConfigError` - bad configuration (CLI flags, env vars,
-  invalid generator options).
-* :class:`RequirementError` - missing or malformed requirement files.
-* :class:`PolicyError` - policy-level issues, plus four subclasses:
-  :class:`CompilationError`, :class:`ValidationError`,
-  :class:`GeneratorError`, :class:`ScopeError`.
-* :class:`StorageError` - repository-level failures such as missing
-  records.
-* :class:`WorkspaceError` - workspace-level invariants violated.
-* :class:`DeploymentError` - deployment operation failed.
+* :class:`Error` - base class. Catch this when you want every
+  cedrus error.
+* :class:`Config` - bad configuration (CLI flags, env vars, invalid
+  generator options).
+* :class:`Require` - missing or malformed requirement files.
+* :class:`Fault` - policy-level issues, plus four subclasses:
+  :class:`Compile`, :class:`Validate`, :class:`Generate`,
+  :class:`ScopeFault`.
+* :class:`Store` - repository-level failures such as missing records.
+* :class:`Space` - workspace-level invariants violated.
+* :class:`Deploy` - deployment operation failed.
 
 Threading and pickling
 ----------------------
 
 All exceptions are plain :class:`Exception` subclasses and are safe
-to propagate across thread boundaries. The :class:`ValidationError`
-adds ``errors`` and ``policy_source`` attributes for downstream
-diagnostic surfaces; other errors keep the default :class:`Exception`
-shape.
+to propagate across thread boundaries. The :class:`Validate` adds
+``errors`` and ``policy_source`` attributes for downstream diagnostic
+surfaces; other errors keep the default :class:`Exception` shape.
 """
 
 from __future__ import annotations
 
 
-class CedarIntentError(Exception):
+class Error(Exception):
     """Base class for every error raised by cedrus."""
 
 
-class ConfigError(CedarIntentError):
+class Config(Error):
     """Raised when a configuration value is missing or invalid."""
 
 
-class RequirementError(CedarIntentError):
+class Require(Error):
     """Raised when a requirement file is missing or malformed."""
 
 
-class PolicyError(CedarIntentError):
+class Fault(Error):
     """Base class for every error related to a policy object."""
 
 
-class CompilationError(PolicyError):
+class Compile(Fault):
     """Raised when a draft cannot be compiled to Cedar source."""
 
 
-class ValidationError(PolicyError):
+class Validate(Fault):
     """Raised when Cedar parsing or schema validation fails.
 
     Attributes:
@@ -70,36 +68,41 @@ class ValidationError(PolicyError):
         super().__init__("Cedar validation failed: " + "; ".join(errors))
 
 
-class GeneratorError(PolicyError):
+class Generate(Fault):
     """Raised when a generator fails to produce a proposal."""
 
 
-class StorageError(CedarIntentError):
+class Store(Error):
     """Raised for repository-level failures such as missing records."""
 
 
-class ScopeError(PolicyError):
+class ScopeFault(Fault):
     """Raised when a scope object is malformed."""
 
 
-class WorkspaceError(CedarIntentError):
+class Space(Error):
     """Raised when the workspace is in an inconsistent state."""
 
 
-class DeploymentError(CedarIntentError):
+class Deploy(Error):
     """Raised when a deployment operation fails."""
 
 
+class Parse(Error):
+    """Raised when cedarpy cannot parse a policy."""
+
+
 __all__ = [
-    "CedarIntentError",
-    "CompilationError",
-    "ConfigError",
-    "DeploymentError",
-    "GeneratorError",
-    "PolicyError",
-    "RequirementError",
-    "ScopeError",
-    "StorageError",
-    "ValidationError",
-    "WorkspaceError",
+    "Compile",
+    "Config",
+    "Deploy",
+    "Error",
+    "Generate",
+    "Parse",
+    "Fault",
+    "Require",
+    "ScopeFault",
+    "Space",
+    "Store",
+    "Validate",
 ]

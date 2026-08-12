@@ -1,8 +1,8 @@
 """Schema migration helpers for cedrus 0.6.0.
 
-Starting with cedrus 0.6.0, every stored :class:`StoredDraft`
+Starting with cedrus 0.6.0, every stored :class:`DraftStored`
 carries a JSON-serialized typed intent and the per-slot scope JSON,
-and every :class:`StoredPolicy` carries the action scope JSON.
+and every :class:`Stored` carries the action scope JSON.
 Databases created before this version are upgraded in place by
 :func:`migrate_legacy_rows`.
 
@@ -36,16 +36,16 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Protocol
 
-from .compiler import PolicyIntent
+from .compiler import Intent
 from .scope_json import (
     action_scope_to_dict,
     principal_scope_to_dict,
     resource_scope_to_dict,
 )
-from .scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
+from .scopes import Action, Clause, Principal, Resource
 
 if TYPE_CHECKING:
-    from .storage.base import StoredDraft, StoredPolicy
+    from .storage.base import DraftStored, Stored
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,10 +53,10 @@ _LOGGER = logging.getLogger(__name__)
 class _RepoLike(Protocol):
     """Subset of :class:`~cedrus.storage.Repository` used by the migration."""
 
-    def get_policy(self, policy_id: str) -> StoredPolicy: ...
-    def upsert_policy(self, policy: StoredPolicy) -> None: ...
-    def list_policies(self, domain: str | None = None) -> Sequence[StoredPolicy]: ...
-    def list_drafts(self, policy_id: str | None = None) -> Sequence[StoredDraft]: ...
+    def get_policy(self, policy_id: str) -> Stored: ...
+    def upsert_policy(self, policy: Stored) -> None: ...
+    def list_policies(self, domain: str | None = None) -> Sequence[Stored]: ...
+    def list_drafts(self, policy_id: str | None = None) -> Sequence[DraftStored]: ...
     def update_draft_json(
         self, draft_id: str, json_columns: Mapping[str, str | None]
     ) -> None: ...
@@ -115,9 +115,9 @@ def migrate_legacy_rows(repository: _RepoLike) -> int:
 
 def _migrate_policy(repository: _RepoLike, policy: Any) -> int:
     """Re-derive ``action_scope_json`` for ``policy`` when missing."""
-    from .storage.base import StoredPolicy
+    from .storage.base import Stored
 
-    if not isinstance(policy, StoredPolicy):
+    if not isinstance(policy, Stored):
         return 0
     if policy.action_scope_json is not None:
         return 0
@@ -131,9 +131,9 @@ def _migrate_policy(repository: _RepoLike, policy: Any) -> int:
 
 def _migrate_draft(repository: _RepoLike, draft: Any) -> int:
     """Rebuild the intent and scope JSON columns for ``draft`` in place."""
-    from .storage.base import StoredDraft
+    from .storage.base import DraftStored
 
-    if not isinstance(draft, StoredDraft):
+    if not isinstance(draft, DraftStored):
         return 0
     if (
         draft.intent_json is not None
@@ -159,8 +159,8 @@ def _migrate_draft(repository: _RepoLike, draft: Any) -> int:
 
 def _parse_intent_from_cedar(
     cedar: str, intent_id: str, requirement_id: str
-) -> PolicyIntent | None:
-    """Rebuild a typed :class:`PolicyIntent` from persisted Cedar text.
+) -> Intent | None:
+    """Rebuild a typed :class:`Intent` from persisted Cedar text.
 
     The migration uses the same heuristic parser as the compile-time
     fallback: an ``any``/``any``/``any`` skeleton with a default
@@ -172,19 +172,19 @@ def _parse_intent_from_cedar(
         return None
     lowered = text.lower()
     effect = "forbid" if lowered.startswith("forbid") else "permit"
-    return PolicyIntent(
+    return Intent(
         id=intent_id,
         requirement_id=requirement_id,
         effect=effect,  # type: ignore[arg-type]
-        principal=PrincipalScope(),
-        action=ActionScope(),
-        resource=ResourceScope(),
+        principal=Principal(),
+        action=Action(),
+        resource=Resource(),
         when_clauses=(),
         unless_clauses=(),
     )
 
 
-def _parse_action_scope(cedar: str) -> ActionScope | None:
+def _parse_action_scope(cedar: str) -> Action | None:
     """Best-effort parse of an action scope from Cedar text.
 
     Returns ``None`` when the Cedar does not name a single action
@@ -202,22 +202,22 @@ def _parse_action_scope(cedar: str) -> ActionScope | None:
     before = cedar[:start]
     if before.endswith("::"):
         namespace = before[: -len("::")]
-    return ActionScope(kind="named", name=action_name, namespace=namespace or None)
+    return Action(kind="named", name=action_name, namespace=namespace or None)
 
 
 def _dumps(scope: Any) -> str:
     """Serialize a scope object to JSON."""
     from .scope_json import intent_to_dict
 
-    if isinstance(scope, PrincipalScope):
+    if isinstance(scope, Principal):
         return json.dumps(principal_scope_to_dict(scope), sort_keys=True)
-    if isinstance(scope, ActionScope):
+    if isinstance(scope, Action):
         return json.dumps(action_scope_to_dict(scope), sort_keys=True)
-    if isinstance(scope, ResourceScope):
+    if isinstance(scope, Resource):
         return json.dumps(resource_scope_to_dict(scope), sort_keys=True)
-    if isinstance(scope, PolicyIntent):
+    if isinstance(scope, Intent):
         return json.dumps(intent_to_dict(scope), sort_keys=True)
-    if isinstance(scope, ConditionClause):
+    if isinstance(scope, Clause):
         return json.dumps({"body": scope.body}, sort_keys=True)
     return json.dumps(scope, sort_keys=True, default=str)
 
@@ -230,9 +230,9 @@ def _migrate_draft_data(
     Used by tests to verify migration without touching the repository.
     Returns ``None`` when the draft is already migrated.
     """
-    from .storage.base import StoredDraft
+    from .storage.base import DraftStored
 
-    if not isinstance(draft, StoredDraft):
+    if not isinstance(draft, DraftStored):
         return None
     if (
         draft.intent_json is not None

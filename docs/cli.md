@@ -15,7 +15,7 @@ directory).
 Exit codes:
 
 - `0` — success
-- `1` — `CedarIntentError` raised at any layer
+- `1` — `Error` raised at any layer
 - `2` — argparse validation error
 
 ## `cedrus init`
@@ -104,9 +104,9 @@ Run the configured generator against the requirement and persist the
 resulting Cedar draft. The generator is chosen by flags and
 environment:
 
-- `--offline` forces the deterministic `OfflineGenerator`.
-- `--model <provider/name>` enables the `LiteLLMGenerator`.
-- `CEDAR_INTENT_ONLINE=1` enables the `LiteLLMGenerator` when no
+- `--offline` forces the deterministic `Offline`.
+- `--model <provider/name>` enables the `Llm`.
+- `CEDAR_INTENT_ONLINE=1` enables the `Llm` when no
   `--offline` flag is present.
 - `CEDAR_INTENT_MODEL=<provider/name>` supplies the model.
 
@@ -282,5 +282,5 @@ default principal / action / resource is `any` for every subcommand.
 
 | Variable                | Purpose                                                    |
 | ----------------------- | ---------------------------------------------------------- |
-| `CEDAR_INTENT_ONLINE`   | When truthy, prefer `LiteLLMGenerator` over offline.        |
+| `CEDAR_INTENT_ONLINE`   | When truthy, prefer `Llm` over offline.        |
 | `CEDAR_INTENT_MODEL`    | Default LiteLLM model identifier.                          |

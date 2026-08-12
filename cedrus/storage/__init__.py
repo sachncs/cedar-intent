@@ -1,14 +1,14 @@
 """Storage backends for cedrus."""
 
-from .base import Repository, StoredDraft, StoredPolicy, StoredReport
-from .memory import InMemoryRepository
-from .sqlite import SqliteRepository
+from .base import DraftStored, ReportStored, Repository, Stored
+from .memory import Memory
+from .sqlite import Sqlite
 
 __all__ = [
-    "InMemoryRepository",
+    "Memory",
     "Repository",
-    "SqliteRepository",
-    "StoredDraft",
-    "StoredPolicy",
-    "StoredReport",
+    "Sqlite",
+    "DraftStored",
+    "Stored",
+    "ReportStored",
 ]

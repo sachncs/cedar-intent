@@ -3,13 +3,13 @@
 Calls :func:`litellm.completion` with a structured JSON response format and
 strict payload validation. The JSON shape is enforced at every stage so
 any deviation from the documented contract raises
-:class:`GeneratorError`.
+:class:`Generate`.
 
 Prompting contract
 ------------------
 
 The system prompt asks the model for an ``intent`` object whose shape
-exactly matches :class:`~cedrus.compiler.PolicyIntent`. The
+exactly matches :class:`~cedrus.compiler.Intent`. The
 model is told to:
 
 * use only entity types, actions, and attributes present in the
@@ -28,7 +28,7 @@ accidentally misformatted requirement text, schema JSON, or
 existing-policy summary cannot impersonate system instructions.
 
 The generator parses the response strictly: missing fields, wrong
-types, or invalid scope kinds all raise :class:`GeneratorError`. The
+types, or invalid scope kinds all raise :class:`Generate`. The
 downstream compiler is deterministic and cannot repair missing data,
 so strict parsing is required to avoid silent corruption.
 
@@ -37,7 +37,7 @@ Error handling
 
 :class:`openai.APIError` (the openai base class for every litellm-raised
 failure) and the stdlib :class:`TimeoutError` are caught and rewrapped
-as :class:`GeneratorError`. The original exception is preserved as the
+as :class:`Generate`. The original exception is preserved as the
 cause so callers can inspect the upstream status code or message.
 """
 
@@ -51,11 +51,11 @@ from typing import Any
 import litellm
 from openai import APIError
 
-from ..compiler import PolicyIntent
-from ..errors import GeneratorError, ScopeError
+from ..compiler import Intent
+from ..error import Generate, ScopeFault
 from ..requirements import slugify
-from ..scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
-from .base import DraftProposal, GenerationContext, GenerationResult
+from ..scopes import Action, Clause, Principal, Resource
+from .base import Context, Proposal, Result
 
 SYSTEM_PROMPT = """You are an authorization engineer producing a typed Cedar policy proposal.
 
@@ -97,7 +97,7 @@ appear in unresolved instead of being guessed.
 
 
 @dataclass(frozen=True, slots=True)
-class LiteLLMGenerator:
+class Llm:
     """Generator backed by LiteLLM.
 
     Attributes:
@@ -110,7 +110,7 @@ class LiteLLMGenerator:
             one is supplied, LiteLLM retries on each fallback in order.
 
     Raises:
-        GeneratorError: If the configuration is invalid (empty model,
+        Generate: If the configuration is invalid (empty model,
             non-positive timeout or max_tokens, negative retries).
     """
 
@@ -123,13 +123,13 @@ class LiteLLMGenerator:
 
     def __post_init__(self) -> None:
         if not self.model or not self.model.strip():
-            raise GeneratorError("LiteLLMGenerator requires a non-empty model name")
+            raise Generate("Llm requires a non-empty model name")
         if self.timeout <= 0 or self.max_tokens <= 0:
-            raise GeneratorError("LiteLLMGenerator timeouts and max_tokens must be positive")
+            raise Generate("Llm timeouts and max_tokens must be positive")
         if self.retries < 0:
-            raise GeneratorError("LiteLLMGenerator retries cannot be negative")
+            raise Generate("Llm retries cannot be negative")
 
-    def generate(self, context: GenerationContext) -> GenerationResult:
+    def generate(self, context: Context) -> Result:
         """Call LiteLLM with the structured prompt and parse the response."""
         options: dict[str, Any] = {
             "model": self.model,
@@ -153,12 +153,12 @@ class LiteLLMGenerator:
             # violations, bad requests, and provider outages. The original
             # exception is preserved as the cause so callers can inspect
             # the upstream status code or message.
-            raise GeneratorError(f"LiteLLM request failed: {error}") from error
+            raise Generate(f"LiteLLM request failed: {error}") from error
         except TimeoutError as error:
             # ``litellm.completion`` raises the stdlib ``TimeoutError`` when
             # the configured HTTP timeout elapses; surface it as a generator
             # failure with a clear message.
-            raise GeneratorError(f"LiteLLM request timed out: {error}") from error
+            raise Generate(f"LiteLLM request timed out: {error}") from error
 
         content = self.extract_content(response)
         payload = self.parse_payload(content)
@@ -166,19 +166,19 @@ class LiteLLMGenerator:
         unresolved = tuple(
             str(item).strip() for item in payload.get("unresolved", []) if item
         )
-        proposal = DraftProposal(
+        proposal = Proposal(
             intent=intent,
             unresolved=tuple(item for item in unresolved if item),
             notes={"generator": self.name, "model": self.model},
         )
-        return GenerationResult(
+        return Result(
             proposal=proposal,
             model=getattr(response, "model", self.model) or self.model,
             request_id=getattr(response, "id", None),
             usage=self.extract_usage(response),
         )
 
-    def build_user_prompt(self, context: GenerationContext) -> str:
+    def build_user_prompt(self, context: Context) -> str:
         """Build the user-message prompt sent to the model.
 
         Every piece of user-controlled content is wrapped in fenced
@@ -211,7 +211,7 @@ class LiteLLMGenerator:
             "<<<END_EXISTING_POLICIES>>>\n"
         )
 
-    def format_existing(self, intent: PolicyIntent) -> str:
+    def format_existing(self, intent: Intent) -> str:
         """Render an existing intent as a one-line summary."""
         return (
             f"- id={intent.id} effect={intent.effect} "
@@ -219,8 +219,8 @@ class LiteLLMGenerator:
             f"resource={intent.resource.kind}"
         )
 
-    def format_principal(self, scope: PrincipalScope) -> str:
-        """Render a :class:`PrincipalScope` as a JSON object."""
+    def format_principal(self, scope: Principal) -> str:
+        """Render a :class:`Principal` as a JSON object."""
         return json.dumps(
             {
                 "kind": scope.kind,
@@ -232,15 +232,15 @@ class LiteLLMGenerator:
             sort_keys=True,
         )
 
-    def format_action(self, scope: ActionScope) -> str:
-        """Render an :class:`ActionScope` as a JSON object."""
+    def format_action(self, scope: Action) -> str:
+        """Render an :class:`Action` as a JSON object."""
         return json.dumps(
             {"kind": scope.kind, "name": scope.name, "group": scope.group},
             sort_keys=True,
         )
 
-    def format_resource(self, scope: ResourceScope) -> str:
-        """Render a :class:`ResourceScope` as a JSON object."""
+    def format_resource(self, scope: Resource) -> str:
+        """Render a :class:`Resource` as a JSON object."""
         return json.dumps(
             {
                 "kind": scope.kind,
@@ -257,9 +257,9 @@ class LiteLLMGenerator:
         try:
             content = response.choices[0].message.content
         except (AttributeError, IndexError, TypeError) as error:
-            raise GeneratorError("LiteLLM returned no message content") from error
+            raise Generate("LiteLLM returned no message content") from error
         if not isinstance(content, str):
-            raise GeneratorError("LiteLLM returned non-text message content")
+            raise Generate("LiteLLM returned non-text message content")
         return content
 
     def parse_payload(self, content: str) -> dict[str, Any]:
@@ -267,26 +267,26 @@ class LiteLLMGenerator:
         try:
             payload = json.loads(content)
         except json.JSONDecodeError as error:
-            raise GeneratorError(f"LiteLLM returned invalid JSON: {error}") from error
+            raise Generate(f"LiteLLM returned invalid JSON: {error}") from error
         if not isinstance(payload, dict) or "intent" not in payload:
-            raise GeneratorError("LiteLLM response must contain an 'intent' object")
+            raise Generate("LiteLLM response must contain an 'intent' object")
         intent = payload["intent"]
         if not isinstance(intent, dict):
-            raise GeneratorError("LiteLLM 'intent' must be a JSON object")
+            raise Generate("LiteLLM 'intent' must be a JSON object")
         return payload
 
-    def build_intent(self, intent_data: dict[str, Any], context: GenerationContext) -> PolicyIntent:
-        """Translate the parsed payload into a typed :class:`PolicyIntent`."""
+    def build_intent(self, intent_data: dict[str, Any], context: Context) -> Intent:
+        """Translate the parsed payload into a typed :class:`Intent`."""
         effect = intent_data.get("effect")
         if effect not in {"permit", "forbid"}:
-            raise GeneratorError(f"intent has invalid effect {effect!r}")
+            raise Generate(f"intent has invalid effect {effect!r}")
         principal = build_principal(intent_data.get("principal") or {})
         action = build_action(intent_data.get("action") or {})
         resource = build_resource(intent_data.get("resource") or {})
         when_clauses = build_clauses(intent_data.get("when") or [])
         unless_clauses = build_clauses(intent_data.get("unless") or [])
         intent_id = f"{context.requirement.domain}-{slugify(context.requirement.id)}"
-        return PolicyIntent(
+        return Intent(
             id=intent_id,
             requirement_id=context.requirement.id,
             effect=effect,
@@ -314,8 +314,8 @@ class LiteLLMGenerator:
         return result
 
 
-def build_principal(data: dict[str, Any]) -> PrincipalScope | None:
-    """Build a :class:`PrincipalScope` from a parsed JSON object.
+def build_principal(data: dict[str, Any]) -> Principal | None:
+    """Build a :class:`Principal` from a parsed JSON object.
 
     Returns ``None`` when the JSON object is missing required fields or the
     fields cannot construct a valid scope.
@@ -324,19 +324,19 @@ def build_principal(data: dict[str, Any]) -> PrincipalScope | None:
     if not isinstance(kind, str):
         return None
     try:
-        return PrincipalScope(
+        return Principal(
             kind=kind,  # type: ignore[arg-type]
             type_name=optional_string(data.get("type_name")),
             entity_id=optional_string(data.get("entity_id")),
             group_type=optional_string(data.get("group_type")),
             group_id=optional_string(data.get("group_id")),
         )
-    except ScopeError:
+    except ScopeFault:
         return None
 
 
-def build_action(data: dict[str, Any]) -> ActionScope | None:
-    """Build an :class:`ActionScope` from a parsed JSON object.
+def build_action(data: dict[str, Any]) -> Action | None:
+    """Build an :class:`Action` from a parsed JSON object.
 
     Returns ``None`` when the JSON object is missing required fields or the
     fields cannot construct a valid scope.
@@ -345,17 +345,17 @@ def build_action(data: dict[str, Any]) -> ActionScope | None:
     if not isinstance(kind, str):
         return None
     try:
-        return ActionScope(
+        return Action(
             kind=kind,  # type: ignore[arg-type]
             name=optional_string(data.get("name")),
             group=optional_string(data.get("group")),
         )
-    except ScopeError:
+    except ScopeFault:
         return None
 
 
-def build_resource(data: dict[str, Any]) -> ResourceScope | None:
-    """Build a :class:`ResourceScope` from a parsed JSON object.
+def build_resource(data: dict[str, Any]) -> Resource | None:
+    """Build a :class:`Resource` from a parsed JSON object.
 
     Returns ``None`` when the JSON object is missing required fields or the
     fields cannot construct a valid scope.
@@ -364,27 +364,27 @@ def build_resource(data: dict[str, Any]) -> ResourceScope | None:
     if not isinstance(kind, str):
         return None
     try:
-        return ResourceScope(
+        return Resource(
             kind=kind,  # type: ignore[arg-type]
             type_name=optional_string(data.get("type_name")),
             entity_id=optional_string(data.get("entity_id")),
             parent_type=optional_string(data.get("parent_type")),
             parent_id=optional_string(data.get("parent_id")),
         )
-    except ScopeError:
+    except ScopeFault:
         return None
 
 
-def build_clauses(values: Any) -> tuple[ConditionClause, ...]:
-    """Build a tuple of :class:`ConditionClause` from a JSON-friendly value."""
+def build_clauses(values: Any) -> tuple[Clause, ...]:
+    """Build a tuple of :class:`Clause` from a JSON-friendly value."""
     if isinstance(values, str):
         values = [values]
     if not isinstance(values, list):
         return ()
-    clauses: list[ConditionClause] = []
+    clauses: list[Clause] = []
     for value in values:
         if isinstance(value, str) and value.strip():
-            clauses.append(ConditionClause(body=value.strip()))
+            clauses.append(Clause(body=value.strip()))
     return tuple(clauses)
 
 
@@ -396,4 +396,4 @@ def optional_string(value: Any) -> str | None:
     return text or None
 
 
-__all__ = ["LiteLLMGenerator", "SYSTEM_PROMPT"]
+__all__ = ["Llm", "SYSTEM_PROMPT"]

@@ -7,7 +7,7 @@ Covers the three Workspace hardening items from audit O-6, O-9, O-12:
   report or policy is persisted.
 - Workspace.init_domain writes schema.json atomically (temp file +
   rename), so a crash mid-write can never leave a truncated file.
-- Workspace.import_existing_policies raises WorkspaceError on
+- Workspace.import_existing_policies raises Space on
   duplicate file stems instead of silently merging them via upsert.
 """
 
@@ -20,19 +20,19 @@ from pathlib import Path
 import pytest
 
 from cedrus import (
-    ActionScope,
-    PolicyIntent,
-    PrincipalScope,
-    Requirement,
-    ResourceScope,
-    Scenario,
+    Action,
+    Case,
+    Intent,
+    Need,
+    Principal,
+    Resource,
+    Space,
     Workspace,
-    WorkspaceError,
 )
 
 
-def _make_requirement(domain: str = "hr", identifier: str = "HR-001") -> Requirement:
-    return Requirement(
+def _make_requirement(domain: str = "hr", identifier: str = "HR-001") -> Need:
+    return Need(
         id=identifier,
         text="Body",
         domain=domain,
@@ -65,17 +65,17 @@ def test_apply_persists_validation_report_and_policy_in_one_transaction(
     requirement = _make_requirement()
     workspace.repository.add_requirement(requirement)
 
-    from cedrus.policies import DraftPolicy
+    from cedrus.policies import Draft
 
-    intent = PolicyIntent(
+    intent = Intent(
         id=requirement.id,
         requirement_id=requirement.id,
         effect="permit",
-        principal=PrincipalScope(kind="is_type", type_name="User"),
-        action=ActionScope(kind="named", name="view", namespace="PhotoFlash"),
-        resource=ResourceScope(kind="is_type", type_name="Photo"),
+        principal=Principal(kind="is_type", type_name="User"),
+        action=Action(kind="named", name="view", namespace="PhotoFlash"),
+        resource=Resource(kind="is_type", type_name="Photo"),
     )
-    draft = DraftPolicy(
+    draft = Draft(
         id=requirement.id,
         requirement=requirement,
         intent=intent,
@@ -100,17 +100,17 @@ def test_apply_rolls_back_when_scenario_fails(tmp_path: Path) -> None:
     requirement = _make_requirement()
     workspace.repository.add_requirement(requirement)
 
-    from cedrus.policies import DraftPolicy
+    from cedrus.policies import Draft
 
-    intent = PolicyIntent(
+    intent = Intent(
         id=requirement.id,
         requirement_id=requirement.id,
         effect="permit",
-        principal=PrincipalScope(kind="is_type", type_name="User"),
-        action=ActionScope(kind="named", name="view"),
-        resource=ResourceScope(kind="any"),
+        principal=Principal(kind="is_type", type_name="User"),
+        action=Action(kind="named", name="view"),
+        resource=Resource(kind="any"),
     )
-    draft = DraftPolicy(
+    draft = Draft(
         id=requirement.id,
         requirement=requirement,
         intent=intent,
@@ -123,7 +123,7 @@ def test_apply_rolls_back_when_scenario_fails(tmp_path: Path) -> None:
         notes={},
     )
     scenarios = [
-        Scenario(
+        Case(
             name="deny-alice",
             principal="PhotoFlash::User::\"alice\"",
             action='PhotoFlash::Action::"view"',
@@ -132,7 +132,7 @@ def test_apply_rolls_back_when_scenario_fails(tmp_path: Path) -> None:
             expected="Deny",
         )
     ]
-    with pytest.raises(WorkspaceError):
+    with pytest.raises(Space):
         workspace.apply(draft, schema, scenarios=scenarios)
 
     # The apply was rolled back: no policy row, no validation report,
@@ -162,17 +162,17 @@ def test_apply_passes_when_scenario_succeeds(tmp_path: Path) -> None:
     requirement = _make_requirement()
     workspace.repository.add_requirement(requirement)
 
-    from cedrus.policies import DraftPolicy
+    from cedrus.policies import Draft
 
-    intent = PolicyIntent(
+    intent = Intent(
         id=requirement.id,
         requirement_id=requirement.id,
         effect="permit",
-        principal=PrincipalScope(kind="is_type", type_name="User"),
-        action=ActionScope(kind="named", name="view"),
-        resource=ResourceScope(kind="any"),
+        principal=Principal(kind="is_type", type_name="User"),
+        action=Action(kind="named", name="view"),
+        resource=Resource(kind="any"),
     )
-    draft = DraftPolicy(
+    draft = Draft(
         id=requirement.id,
         requirement=requirement,
         intent=intent,
@@ -185,7 +185,7 @@ def test_apply_passes_when_scenario_succeeds(tmp_path: Path) -> None:
         notes={},
     )
     scenarios = [
-        Scenario(
+        Case(
             name="allow-alice",
             principal="PhotoFlash::User::\"alice\"",
             action='PhotoFlash::Action::"view"',
@@ -240,7 +240,7 @@ def test_init_domain_idempotent(tmp_path: Path) -> None:
 def test_import_existing_policies_rejects_duplicate_stems(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two glob hits with the same stem raise WorkspaceError.
+    """Two glob hits with the same stem raise Space.
 
     Stem collisions cannot happen on a single directory because two
     files cannot share a name, but the dedup guards against a
@@ -263,7 +263,7 @@ def test_import_existing_policies_rejects_duplicate_stems(
         return matches + matches
 
     monkeypatch.setattr(Path, "glob", duplicate_glob)
-    with pytest.raises(WorkspaceError) as excinfo:
+    with pytest.raises(Space) as excinfo:
         workspace.import_existing_policies("hr")
     assert "duplicate" in str(excinfo.value).lower()
 

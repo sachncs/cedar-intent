@@ -1,6 +1,6 @@
 """Imported Cedar policies with no LLM involvement.
 
-A :class:`ExistingPolicy` represents a Cedar policy that was loaded
+A :class:`Existing` represents a Cedar policy that was loaded
 from disk rather than drafted by a generator. Examples include
 policies committed to a repository before cedrus was adopted,
 policies imported from another authorization tool, or pre-existing
@@ -9,7 +9,7 @@ policies that ship with an application.
 The class carries the raw Cedar source plus an optional parsed
 intent. The intent is populated when the workspace has been told to
 parse existing policies; without it, :meth:`to_intent` raises
-:class:`PolicyError` and the verification pass falls back to a
+:class:`Policy` and the verification pass falls back to a
 placeholder intent.
 """
 
@@ -19,39 +19,39 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ..compiler import PolicyIntent
-from ..errors import PolicyError
-from ..requirements import Requirement
-from .base import Policy
+from ..compiler import Intent
+from ..error import Fault
+from ..requirements import Need
+from .base import Kind
 
 
 @dataclass(frozen=True, slots=True)
-class ExistingPolicy(Policy):
+class Existing(Kind):
     """A policy imported from existing Cedar source.
 
     Attributes:
-        parsed_intent: Optional parsed :class:`PolicyIntent`. When
-            ``None``, :meth:`to_intent` raises :class:`PolicyError`
+        parsed_intent: Optional parsed :class:`Intent`. When
+            ``None``, :meth:`to_intent` raises :class:`Policy`
             and the workspace records the policy as
             ``intent=None`` in the repository.
     """
 
-    parsed_intent: PolicyIntent | None = None
+    parsed_intent: Intent | None = None
 
     def kind(self) -> str:
         """Return the policy kind discriminator (``"existing"``)."""
         return "existing"
 
-    def to_intent(self) -> PolicyIntent:
+    def to_intent(self) -> Intent:
         """Return the parsed intent for this existing policy.
 
         Raises:
-            PolicyError: If the policy was imported without parsing.
+            Policy: If the policy was imported without parsing.
                 Callers can re-import with ``parse_existing=True`` to
                 populate the intent.
         """
         if self.parsed_intent is None:
-            raise PolicyError(
+            raise Fault(
                 f"existing policy {self.id} has no parsed intent; "
                 "re-import with parse_existing=True"
             )
@@ -63,20 +63,20 @@ class ExistingPolicy(Policy):
         Includes the parsed intent id when present, or ``None`` when
         the policy was imported without parsing.
         """
-        data = dict(Policy.to_dict(self))
+        data = dict(Kind.to_dict(self))
         data["parsed_intent"] = None if self.parsed_intent is None else self.parsed_intent.id
         return data
 
     @classmethod
     def from_requirement(
         cls,
-        requirement: Requirement,
+        requirement: Need,
         cedar: str,
         *,
-        parsed_intent: PolicyIntent | None = None,
+        parsed_intent: Intent | None = None,
         policy_id: str | None = None,
-    ) -> ExistingPolicy:
-        """Build an :class:`ExistingPolicy` for a requirement with raw Cedar source.
+    ) -> Existing:
+        """Build an :class:`Existing` for a requirement with raw Cedar source.
 
         Args:
             requirement: Originating requirement.
@@ -88,7 +88,7 @@ class ExistingPolicy(Policy):
                 ``"existing-<requirement.id>"``.
 
         Returns:
-            The constructed :class:`ExistingPolicy`.
+            The constructed :class:`Existing`.
         """
         return cls(
             id=policy_id or f"existing-{requirement.id}",
@@ -98,7 +98,7 @@ class ExistingPolicy(Policy):
         )
 
 
-__all__ = ["ExistingPolicy"]
+__all__ = ["Existing"]
 
 
-__all__ = ["ExistingPolicy"]
+__all__ = ["Existing"]

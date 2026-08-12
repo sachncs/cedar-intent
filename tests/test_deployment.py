@@ -12,22 +12,22 @@ from pathlib import Path
 import pytest
 
 from cedrus import (
-    ActionScope,
-    BundleExporter,
-    CompiledPolicy,
-    DeploymentClient,
-    DeploymentError,
-    DeploymentManifest,
-    DeploymentRecord,
-    PolicyIntent,
-    PrincipalScope,
-    Requirement,
-    ResourceScope,
+    Action,
+    Bundler,
+    Client,
+    Compiled,
+    Deploy,
+    Intent,
+    Manifest,
+    Need,
+    Principal,
+    Record,
+    Resource,
 )
 
 
-def make_requirement(identifier: str) -> Requirement:
-    return Requirement(
+def make_requirement(identifier: str) -> Need:
+    return Need(
         id=identifier,
         text=f"Body for {identifier}",
         domain="hr",
@@ -36,30 +36,30 @@ def make_requirement(identifier: str) -> Requirement:
     )
 
 
-def make_policy(identifier: str) -> CompiledPolicy:
+def make_policy(identifier: str) -> Compiled:
     requirement = make_requirement(identifier)
-    intent = PolicyIntent(
+    intent = Intent(
         id=identifier,
         requirement_id=identifier,
         effect="permit",
-        principal=PrincipalScope(kind="is_type", type_name="User"),
-        action=ActionScope(kind="named", name="view"),
-        resource=ResourceScope(kind="is_type", type_name="Photo"),
+        principal=Principal(kind="is_type", type_name="User"),
+        action=Action(kind="named", name="view"),
+        resource=Resource(kind="is_type", type_name="Photo"),
     )
     cedar = (
         'permit (principal is PhotoFlash::User, '
         'action == PhotoFlash::Action::"view", '
         "resource is PhotoFlash::Photo);"
     )
-    return CompiledPolicy(
+    return Compiled(
         id=identifier, requirement=requirement, cedar=cedar, intent=intent
     )
 
 
 def test_bundle_exporter_builds_manifest() -> None:
-    exporter = BundleExporter()
+    exporter = Bundler()
     manifest = exporter.build("hr", [make_policy("HR-001")])
-    assert isinstance(manifest, DeploymentManifest)
+    assert isinstance(manifest, Manifest)
     assert manifest.domain == "hr"
     assert manifest.bundle_hash
     assert manifest.policy_ids == ("HR-001",)
@@ -67,29 +67,29 @@ def test_bundle_exporter_builds_manifest() -> None:
 
 
 def test_bundle_exporter_rejects_empty_domain() -> None:
-    exporter = BundleExporter()
-    with pytest.raises(DeploymentError):
+    exporter = Bundler()
+    with pytest.raises(Deploy):
         exporter.build("hr", [])
 
 
 def test_bundle_exporter_skips_policies_without_cedar() -> None:
-    exporter = BundleExporter()
+    exporter = Bundler()
     requirement = make_requirement("HR-001")
-    empty = CompiledPolicy(id="HR-002", requirement=requirement, cedar="")
+    empty = Compiled(id="HR-002", requirement=requirement, cedar="")
     manifest = exporter.build("hr", [empty, make_policy("HR-001")])
     assert manifest.policy_ids == ("HR-001",)
 
 
 def test_bundle_exporter_rejects_only_empty_policies() -> None:
-    exporter = BundleExporter()
+    exporter = Bundler()
     requirement = make_requirement("HR-001")
-    empty = CompiledPolicy(id="HR-002", requirement=requirement, cedar="")
-    with pytest.raises(DeploymentError):
+    empty = Compiled(id="HR-002", requirement=requirement, cedar="")
+    with pytest.raises(Deploy):
         exporter.build("hr", [empty])
 
 
 def test_bundle_exporter_writes_and_reads_directory(tmp_path: Path) -> None:
-    exporter = BundleExporter()
+    exporter = Bundler()
     manifest = exporter.build("hr", [make_policy("HR-001")])
     exporter.write_directory(manifest, tmp_path / "dist" / "hr")
     bundle = (tmp_path / "dist" / "hr" / "bundle.cedar").read_text()
@@ -105,59 +105,59 @@ def test_bundle_exporter_writes_and_reads_directory(tmp_path: Path) -> None:
 
 
 def test_bundle_exporter_read_missing_directory(tmp_path: Path) -> None:
-    exporter = BundleExporter()
-    with pytest.raises(DeploymentError):
+    exporter = Bundler()
+    with pytest.raises(Deploy):
         exporter.read_directory(tmp_path / "missing")
 
 
 def test_bundle_exporter_read_detects_hash_mismatch(tmp_path: Path) -> None:
-    exporter = BundleExporter()
+    exporter = Bundler()
     manifest = exporter.build("hr", [make_policy("HR-001")])
     exporter.write_directory(manifest, tmp_path / "dist")
     (tmp_path / "dist" / "bundle.cedar").write_text("permit (principal, action, resource);")
-    with pytest.raises(DeploymentError):
+    with pytest.raises(Deploy):
         exporter.read_directory(tmp_path / "dist")
 
 
 def test_bundle_exporter_read_incomplete_directory(tmp_path: Path) -> None:
-    exporter = BundleExporter()
+    exporter = Bundler()
     target = tmp_path / "dist"
     target.mkdir()
-    with pytest.raises(DeploymentError):
+    with pytest.raises(Deploy):
         exporter.read_directory(target)
 
 
 def test_deployment_client_local_deploy(tmp_path: Path) -> None:
-    manifest = BundleExporter().build("hr", [make_policy("HR-001")])
-    client = DeploymentClient(allow_private_targets=True, allow_loopback=True)
+    manifest = Bundler().build("hr", [make_policy("HR-001")])
+    client = Client(allow_private_targets=True, allow_loopback=True)
     record = client.deploy_local(manifest, tmp_path / "out")
-    assert isinstance(record, DeploymentRecord)
+    assert isinstance(record, Record)
     assert record.target_kind == "local"
     assert (tmp_path / "out" / "bundle.cedar").exists()
 
 
 def test_deployment_client_rejects_empty_target() -> None:
-    client = DeploymentClient(allow_private_targets=True, allow_loopback=True)
-    manifest = BundleExporter().build("hr", [make_policy("HR-001")])
-    with pytest.raises(DeploymentError):
+    client = Client(allow_private_targets=True, allow_loopback=True)
+    manifest = Bundler().build("hr", [make_policy("HR-001")])
+    with pytest.raises(Deploy):
         client.deploy(manifest, "")
 
 
 def test_deployment_client_rejects_non_positive_timeout() -> None:
-    with pytest.raises(DeploymentError):
-        DeploymentClient(timeout=0)
+    with pytest.raises(Deploy):
+        Client(timeout=0)
 
 
 def test_deployment_client_dispatches_based_on_scheme() -> None:
-    manifest = BundleExporter().build("hr", [make_policy("HR-001")])
-    client = DeploymentClient(allow_private_targets=True, allow_loopback=True)
-    with pytest.raises(DeploymentError):
+    manifest = Bundler().build("hr", [make_policy("HR-001")])
+    client = Client(allow_private_targets=True, allow_loopback=True)
+    with pytest.raises(Deploy):
         client.deploy(manifest, "http://127.0.0.1:1/cedar", record_id="x")
 
 
 def test_deployment_client_local_record_id_default() -> None:
-    manifest = BundleExporter().build("hr", [make_policy("HR-001")])
-    client = DeploymentClient(allow_private_targets=True, allow_loopback=True)
+    manifest = Bundler().build("hr", [make_policy("HR-001")])
+    client = Client(allow_private_targets=True, allow_loopback=True)
     record = client.deploy_local(manifest, Path("/tmp/nonexistent-cedar-bundle"))
     assert record.id
     assert record.status == "deployed"
@@ -194,8 +194,8 @@ def test_deployment_client_http_push(tmp_path: Path) -> None:
     thread.start()
     try:
         url = f"http://127.0.0.1:{server.server_address[1]}/cedar"
-        manifest = BundleExporter().build("hr", [make_policy("HR-001")])
-        client = DeploymentClient(allow_private_targets=True, allow_loopback=True)
+        manifest = Bundler().build("hr", [make_policy("HR-001")])
+        client = Client(allow_private_targets=True, allow_loopback=True)
         record = client.deploy_http(
             manifest, url, record_id="x", headers={"X-Test": "yes"}
         )
@@ -226,9 +226,9 @@ def test_deployment_client_http_push_failure(tmp_path: Path) -> None:
     thread.start()
     try:
         url = f"http://127.0.0.1:{server.server_address[1]}/cedar"
-        manifest = BundleExporter().build("hr", [make_policy("HR-001")])
-        client = DeploymentClient(allow_private_targets=True, allow_loopback=True)
-        with pytest.raises(DeploymentError) as excinfo:
+        manifest = Bundler().build("hr", [make_policy("HR-001")])
+        client = Client(allow_private_targets=True, allow_loopback=True)
+        with pytest.raises(Deploy) as excinfo:
             client.deploy_http(manifest, url)
         # Body must NEVER be embedded in error messages.
         assert b"super-secret-token" not in str(excinfo.value).encode("utf-8")
@@ -240,7 +240,7 @@ def test_deployment_client_http_push_failure(tmp_path: Path) -> None:
 
 
 def test_deployment_client_http_connection_error() -> None:
-    manifest = BundleExporter().build("hr", [make_policy("HR-001")])
-    client = DeploymentClient(timeout=1)
-    with pytest.raises(DeploymentError):
+    manifest = Bundler().build("hr", [make_policy("HR-001")])
+    client = Client(timeout=1)
+    with pytest.raises(Deploy):
         client.deploy_http(manifest, "http://127.0.0.1:1/cedar")

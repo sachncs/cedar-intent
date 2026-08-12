@@ -63,7 +63,7 @@ pip install -e ".[test]"
 - **Naming** — descriptive, intention-revealing names. No leading
   underscores on public API; reserve underscores for truly private
   internals that no external module should ever reference.
-- **Exceptions** — raise the most specific `CedarIntentError`
+- **Exceptions** — raise the most specific `Error`
   subclass available. Never use bare `except Exception`.
 - **Logging** — prefer `logging.getLogger(__name__)` over `print`
   for any non-CLI output.
@@ -115,6 +115,6 @@ checklist expands to include the listed concerns.
 | `cedrus/deployment.py` | DNS pinning closes SSRF rebind window; no body bytes in errors; redirects disabled by default; idempotency key recorded; retries bounded; symlink targets refused; atomic writes use fsync. |
 | `cedrus/verification.py` | Structured AST parser (cedarpy) replaces regex; malformed policies emit `malformed-policy` finding; condition signatures normalized via canonical JSON. |
 | `cedrus/generator/litellm.py` | User content fenced in `<<<...>>>` delimiters; system prompt explicitly forbids instructions inside markers. |
-| `cedrus/workspace.py` | `intent_from_draft` returns None or raises WorkspaceError on corrupt stored JSON; never synthesizes a permissive `permit(any/any/any)` fallback. `find_action_namespace` raises on ambiguous action names. |
+| `cedrus/workspace.py` | `intent_from_draft` returns None or raises Space on corrupt stored JSON; never synthesizes a permissive `permit(any/any/any)` fallback. `find_action_namespace` raises on ambiguous action names. |
 | `cedrus/storage/sqlite.py` | `column_exists` validates table against allow-list; transactions wrap multi-statement writes; `check_same_thread=False` paired with RLock; WAL + busy_timeout PRAGMAs. |
-| `cedrus/cli.py` | Top-level catch wraps non-CedarIntentError exceptions in JSON envelope; `parse_headers` rejects CR/LF and reserved names; `validate_identifier` rejects path-traversal-shaped inputs. |
+| `cedrus/cli.py` | Top-level catch wraps non-Error exceptions in JSON envelope; `parse_headers` rejects CR/LF and reserved names; `validate_identifier` rejects path-traversal-shaped inputs. |

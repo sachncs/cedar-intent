@@ -13,7 +13,7 @@ The offline generator applies three lightweight heuristics:
    ``never``, ``prohibit``, or ``disallow``, the proposal is
    ``"forbid"``; otherwise it is ``"permit"``.
 2. **When clause** - the substring after the word ``when`` until the
-   next sentence boundary is captured as a single :class:`ConditionClause`.
+   next sentence boundary is captured as a single :class:`Clause`.
 3. **Unresolved flags** - if both action and resource are ``any`` and
    the requirement does not mention ``public``, the generator flags
    that the requirement does not specify an action or resource.
@@ -22,7 +22,7 @@ The offline generator applies three lightweight heuristics:
 
 These heuristics are intentionally simple: the offline generator
 exists for fast iteration and offline development, not for nuanced
-policy authoring. Use :class:`LiteLLMGenerator` for production
+policy authoring. Use :class:`Llm` for production
 drafting.
 """
 
@@ -32,10 +32,10 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-from ..compiler import PolicyIntent
+from ..compiler import Intent
 from ..requirements import slugify
-from ..scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
-from .base import DraftProposal, GenerationContext, GenerationResult
+from ..scopes import Action, Clause, Principal, Resource
+from .base import Context, Proposal, Result
 
 Effect = Literal["permit", "forbid"]
 
@@ -44,7 +44,7 @@ WHEN_PATTERN = re.compile(r"\bwhen\s+(.+?)(?:\.|$)", flags=re.IGNORECASE | re.DO
 
 
 @dataclass(frozen=True, slots=True)
-class OfflineGenerator:
+class Offline:
     """A deterministic generator for offline and test use.
 
     Attributes:
@@ -55,19 +55,19 @@ class OfflineGenerator:
     name: str = "offline"
     model: str = "offline-deterministic"
 
-    def generate(self, context: GenerationContext) -> GenerationResult:
-        """Produce a :class:`GenerationResult` for ``context``.
+    def generate(self, context: Context) -> Result:
+        """Produce a :class:`Result` for ``context``.
 
         Args:
             context: The generation context supplied by the workspace.
 
         Returns:
-            A :class:`GenerationResult` carrying the typed proposal and
+            A :class:`Result` carrying the typed proposal and
             deterministic provenance.
         """
         intent_id = f"{context.requirement.domain}-{slugify(context.requirement.id)}"
         when_clause = self.detect_when_clause(context.requirement.text)
-        intent = PolicyIntent(
+        intent = Intent(
             id=intent_id,
             requirement_id=context.requirement.id,
             effect=self.detect_effect(context.requirement.text),
@@ -78,12 +78,12 @@ class OfflineGenerator:
             notes={"generator": self.name},
         )
         unresolved = self.detect_unresolved(context)
-        proposal = DraftProposal(
+        proposal = Proposal(
             intent=intent,
             unresolved=unresolved,
             notes={"generator": self.name},
         )
-        return GenerationResult(
+        return Result(
             proposal=proposal,
             model=self.model,
             request_id=None,
@@ -106,14 +106,14 @@ class OfflineGenerator:
         return "permit"
 
     @staticmethod
-    def detect_when_clause(text: str) -> ConditionClause | None:
+    def detect_when_clause(text: str) -> Clause | None:
         """Extract a single ``when`` clause body from the requirement text.
 
         Args:
             text: The requirement body.
 
         Returns:
-            A :class:`ConditionClause` wrapping the substring after the
+            A :class:`Clause` wrapping the substring after the
             first ``when`` keyword, or ``None`` when no such clause is
             present.
         """
@@ -123,10 +123,10 @@ class OfflineGenerator:
         body = match.group(1).strip().rstrip(".")
         if not body:
             return None
-        return ConditionClause(body=body)
+        return Clause(body=body)
 
     @staticmethod
-    def detect_unresolved(context: GenerationContext) -> tuple[str, ...]:
+    def detect_unresolved(context: Context) -> tuple[str, ...]:
         """Surface the kinds of issues an offline generator can identify.
 
         Flags two situations:
@@ -145,19 +145,19 @@ class OfflineGenerator:
         """
         issues: list[str] = []
         if (
-            context.action == ActionScope(kind="any")
-            and context.resource == ResourceScope(kind="any")
+            context.action == Action(kind="any")
+            and context.resource == Resource(kind="any")
             and "public" not in context.requirement.text.lower()
         ):
             issues.append(
-                "Requirement does not specify an action or resource; "
+                "Need does not specify an action or resource; "
                 "manual refinement required."
             )
-        if context.principal == PrincipalScope(kind="any"):
+        if context.principal == Principal(kind="any"):
             issues.append(
                 "Principal scope is 'any'; tighten to a specific principal type or id."
             )
         return tuple(issues)
 
 
-__all__ = ["Effect", "OfflineGenerator"]
+__all__ = ["Effect", "Offline"]

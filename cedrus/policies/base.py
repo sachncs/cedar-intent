@@ -1,24 +1,24 @@
-"""Abstract :class:`Policy` base class and shared helpers.
+"""Abstract :class:`Kind` base class and shared helpers.
 
-The :class:`Policy` base class defines the contract every concrete policy
+The :class:`Kind` base class defines the contract every concrete policy
 type must satisfy:
 
 * a stable ``id``,
 * a :meth:`kind` discriminator returning one of ``"draft"``,
   ``"existing"``, ``"compiled"``,
-* a typed :meth:`to_intent` returning a :class:`PolicyIntent`,
+* a typed :meth:`to_intent` returning a :class:`Intent`,
 * a non-raising :meth:`intent_for_verification` for the verification
   pass (returns a placeholder intent rather than propagating
-  :class:`PolicyError`).
+  :class:`Fault`).
 
 Lifecycle
 ---------
 
-* :class:`DraftPolicy` - the result of a generator proposal; carries
+* :class:`Draft` - the result of a generator proposal; carries
   scope objects and an optional intent.
-* :class:`ExistingPolicy` - imported from raw Cedar source; carries
+* :class:`Existing` - imported from raw Cedar source; carries
   the source and an optional parsed intent.
-* :class:`CompiledPolicy` - the result of a successful :meth:`Workspace.apply`;
+* :class:`Compiled` - the result of a successful :meth:`Workspace.apply`;
   carries the intent that produced the Cedar and the formatted source.
 
 Thread safety
@@ -35,17 +35,17 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from ..compiler import CompiledSource, PolicyIntent, compile_intent
-from ..errors import PolicyError
-from ..requirements import Requirement
-from ..scenarios import Scenario, TestReport, run_scenarios
-from ..schema import CedarSchema
-from ..scopes import ActionScope, PrincipalScope, ResourceScope
-from ..validation import ValidationReport, validate_cedar
+from ..compiler import Intent, Source, compile_intent
+from ..error import Fault
+from ..requirements import Need
+from ..scenarios import Case, Suite, run_scenarios
+from ..schema import Schema
+from ..scopes import Action, Principal, Resource
+from ..validation import Vreport, validate_cedar
 
 
 @dataclass(frozen=True, slots=True)
-class Policy(ABC):
+class Kind(ABC):
     """Abstract base for every policy object in cedrus.
 
     Attributes:
@@ -56,7 +56,7 @@ class Policy(ABC):
     """
 
     id: str
-    requirement: Requirement
+    requirement: Need
     cedar: str = ""
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -67,24 +67,24 @@ class Policy(ABC):
         Subclasses return ``"draft"``, ``"existing"``, or ``"compiled"``.
         """
 
-    def to_intent(self) -> PolicyIntent:
-        """Return the :class:`PolicyIntent` representation of this policy.
+    def to_intent(self) -> Intent:
+        """Return the :class:`Intent` representation of this policy.
 
         Subclasses must implement intent materialization. The base method
-        raises :class:`PolicyError` to make the contract explicit; this
+        raises :class:`Fault` to make the contract explicit; this
         signals to callers that the policy does not yet carry a typed
-        intent (for example, an :class:`ExistingPolicy` whose
-        :attr:`ExistingPolicy.parsed_intent` is ``None``).
+        intent (for example, an :class:`Existing` whose
+        :attr:`Existing.parsed_intent` is ``None``).
         """
-        raise PolicyError(
+        raise Fault(
             f"{type(self).__name__}.to_intent() must be implemented by the subclass"
         )
 
-    def intent_for_verification(self) -> PolicyIntent:
+    def intent_for_verification(self) -> Intent:
         """Return the policy's intent, with a placeholder when unavailable.
 
         Used by verification routines that must inspect every policy
-        without triggering :class:`PolicyError` for unparsed existing
+        without triggering :class:`Fault` for unparsed existing
         policies.
 
         The fallback intent carries no scopes (``any`` everywhere) and a
@@ -93,52 +93,52 @@ class Policy(ABC):
         """
         try:
             return self.to_intent()
-        except PolicyError as error:
-            return PolicyIntent(
+        except Fault as error:
+            return Intent(
                 id=self.id,
                 requirement_id=self.requirement.id,
                 effect="permit",
-                principal=PrincipalScope(),
-                action=ActionScope(),
-                resource=ResourceScope(),
+                principal=Principal(),
+                action=Action(),
+                resource=Resource(),
                 notes={"missing_intent": str(error)},
             )
 
-    def compile(self, schema: CedarSchema) -> CompiledSource:
+    def compile(self, schema: Schema) -> Source:
         """Compile this policy to Cedar source text using its intent.
 
         Args:
             schema: Cedar schema. Accepted for interface symmetry with
-                :class:`CompiledPolicy`; the compiler itself does not
+                :class:`Compiled`; the compiler itself does not
                 consult the schema.
 
         Returns:
-            The compiled :class:`CompiledSource`.
+            The compiled :class:`Source`.
         """
         return compile_intent(self.to_intent())
 
-    def validate(self, schema: CedarSchema) -> ValidationReport:
+    def validate(self, schema: Schema) -> Vreport:
         """Validate the Cedar source for this policy against ``schema``.
 
         Args:
             schema: Cedar schema to validate against.
 
         Returns:
-            A :class:`ValidationReport`.
+            A :class:`Vreport`.
 
         Raises:
-            PolicyError: If the policy has no Cedar source yet.
+            Fault: If the policy has no Cedar source yet.
         """
         if not self.cedar:
-            raise PolicyError(f"policy {self.id} has no Cedar source to validate")
+            raise Fault(f"policy {self.id} has no Cedar source to validate")
         return validate_cedar([self.cedar], schema)
 
     def test(
         self,
-        schema: CedarSchema,
-        scenarios: list[Scenario],
+        schema: Schema,
+        scenarios: list[Case],
         entities: list[Mapping[str, object]] | None = None,
-    ) -> TestReport:
+    ) -> Suite:
         """Run authorization scenarios through the Cedar engine.
 
         Args:
@@ -147,7 +147,7 @@ class Policy(ABC):
             entities: Optional entities to expose to the engine.
 
         Returns:
-            A :class:`TestReport` summarizing the results.
+            A :class:`Suite` summarizing the results.
         """
         return run_scenarios(
             [self.cedar],
@@ -170,4 +170,4 @@ class Policy(ABC):
         }
 
 
-__all__ = ["Policy"]
+__all__ = ["Kind"]

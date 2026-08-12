@@ -19,31 +19,31 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from cedrus import PolicyIntent, Workspace
-from cedrus.compiler import PolicyIntent as CompilerPolicyIntent  # noqa: F401
+from cedrus import Intent, Workspace
+from cedrus.compiler import Intent as CompilerPolicyIntent  # noqa: F401
 from cedrus.scope_json import (
     intent_from_dict,
     intent_to_dict,
 )
 from cedrus.scopes import (
-    ActionScope,
-    ConditionClause,
-    PrincipalScope,
-    ResourceScope,
+    Action,
+    Clause,
+    Principal,
+    Resource,
 )
 
 
-def _make_intent() -> PolicyIntent:
-    return PolicyIntent(
+def _make_intent() -> Intent:
+    return Intent(
         id="HR-042",
         requirement_id="HR-042",
         effect="permit",
-        principal=PrincipalScope(kind="is_type", type_name="User"),
-        action=ActionScope(kind="named", name="view", namespace="hr"),
-        resource=ResourceScope(kind="is_type", type_name="Photo"),
+        principal=Principal(kind="is_type", type_name="User"),
+        action=Action(kind="named", name="view", namespace="hr"),
+        resource=Resource(kind="is_type", type_name="Photo"),
         when_clauses=(
-            ConditionClause(body="principal.owner == resource.owner"),
-            ConditionClause(
+            Clause(body="principal.owner == resource.owner"),
+            Clause(
                 body="context.clientIp != null",
                 attributes={"category": "network"},
             ),
@@ -115,14 +115,14 @@ def test_intent_from_dict_accepts_short_form_string_array() -> None:
     from cedrus.scope_json import condition_clauses_from_list
 
     assert condition_clauses_from_list(["body-1", "body-2"]) == (
-        ConditionClause(body="body-1"),
-        ConditionClause(body="body-2"),
+        Clause(body="body-1"),
+        Clause(body="body-2"),
     )
     assert condition_clauses_from_list(
         [{"body": "x", "attributes": {"k": "v"}}, "y"]
     ) == (
-        ConditionClause(body="x", attributes={"k": "v"}),
-        ConditionClause(body="y"),
+        Clause(body="x", attributes={"k": "v"}),
+        Clause(body="y"),
     )
 
 
@@ -132,18 +132,18 @@ def test_intent_to_dict_none_returns_none() -> None:
 
 
 def test_workspace_stored_draft_round_trip(tmp_path: Path) -> None:
-    """Workspace-built StoredDraft round-trips through intent_from_dict.
+    """Workspace-built DraftStored round-trips through intent_from_dict.
 
     This is the integration check: build_stored_draft (workspace.py)
     writes with the canonical format, intent_from_draft (workspace.py)
     reads with the canonical format.
     """
-    from cedrus import Requirement
-    from cedrus.generator import DraftProposal, GenerationResult
-    from cedrus.policies import DraftPolicy
+    from cedrus import Need
+    from cedrus.generator import Proposal, Result
+    from cedrus.policies import Draft
     from cedrus.workspace import build_stored_draft
 
-    requirement = Requirement(
+    requirement = Need(
         id="HR-042",
         text="Body",
         domain="hr",
@@ -151,7 +151,7 @@ def test_workspace_stored_draft_round_trip(tmp_path: Path) -> None:
         created_at=datetime.now(UTC),
     )
     intent = _make_intent()
-    draft = DraftPolicy(
+    draft = Draft(
         id="draft-1",
         requirement=requirement,
         intent=intent,
@@ -162,8 +162,8 @@ def test_workspace_stored_draft_round_trip(tmp_path: Path) -> None:
         unresolved=(),
         notes={},
     )
-    result = GenerationResult(
-        proposal=DraftProposal(
+    result = Result(
+        proposal=Proposal(
             intent=intent,
             unresolved=(),
             notes={"generator": "offline"},
@@ -184,16 +184,16 @@ def test_workspace_stored_draft_round_trip(tmp_path: Path) -> None:
 
 def test_sqlite_storage_uses_canonical_keys(tmp_path: Path) -> None:
     """Stored rows use the canonical ``when_clauses`` key."""
-    from cedrus import Requirement
+    from cedrus import Need
     from cedrus.scopes import (
-        ActionScope,
-        PrincipalScope,
-        ResourceScope,
+        Action,
+        Principal,
+        Resource,
     )
 
     workspace = Workspace.create(tmp_path / "acme")
     workspace.repository.add_requirement(
-        Requirement(
+        Need(
             id="HR-042",
             text="Body",
             domain="hr",
@@ -201,23 +201,23 @@ def test_sqlite_storage_uses_canonical_keys(tmp_path: Path) -> None:
             created_at=datetime.now(UTC),
         )
     )
-    intent = PolicyIntent(
+    intent = Intent(
         id="HR-042",
         requirement_id="HR-042",
         effect="permit",
-        principal=PrincipalScope(kind="any"),
-        action=ActionScope(kind="named", name="view", namespace="hr"),
-        resource=ResourceScope(kind="any"),
+        principal=Principal(kind="any"),
+        action=Action(kind="named", name="view", namespace="hr"),
+        resource=Resource(kind="any"),
         when_clauses=(
-            ConditionClause(body="principal == User::\"alice\""),
+            Clause(body="principal == User::\"alice\""),
         ),
         unless_clauses=(),
     )
     cedar = 'permit (principal, action == hr::Action::"view", resource);'
-    from cedrus.storage.base import StoredPolicy
+    from cedrus.storage.base import Stored
 
     workspace.repository.upsert_policy(
-        StoredPolicy(
+        Stored(
             id="HR-042",
             domain="hr",
             requirement_id="HR-042",

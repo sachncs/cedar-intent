@@ -1,13 +1,13 @@
 """A policy that has been compiled and validated.
 
-A :class:`CompiledPolicy` is the final form produced by
+A :class:`Compiled` is the final form produced by
 :meth:`Workspace.apply` after the compiler has rendered the intent
 and Cedar has accepted the source. The workspace treats a compiled
 policy as the authoritative artifact for that requirement and
 includes it in subsequent verification, test, and deployment runs.
 
 Compiled policies are immutable. To produce a new version, build a
-:class:`DraftPolicy` from the same requirement and run the apply
+:class:`Draft` from the same requirement and run the apply
 pipeline again; cedrus does not currently version policies
 internally.
 """
@@ -18,49 +18,49 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ..compiler import PolicyIntent
-from ..errors import PolicyError
-from ..requirements import Requirement
-from ..scenarios import Scenario, TestReport, run_scenarios
-from ..schema import CedarSchema
-from ..validation import ValidationReport, validate_cedar
-from .base import Policy
+from ..compiler import Intent
+from ..error import Fault
+from ..requirements import Need
+from ..scenarios import Case, Suite, run_scenarios
+from ..schema import Schema
+from ..validation import Vreport, validate_cedar
+from .base import Kind
 
 
 @dataclass(frozen=True, slots=True)
-class CompiledPolicy(Policy):
+class Compiled(Kind):
     """A policy that has been compiled and successfully validated.
 
     Attributes:
         intent: Typed intent that produced this policy.
     """
 
-    intent: PolicyIntent | None = None
+    intent: Intent | None = None
 
     def kind(self) -> str:
         """Return the policy kind discriminator (``"compiled"``)."""
         return "compiled"
 
-    def to_intent(self) -> PolicyIntent:
+    def to_intent(self) -> Intent:
         """Return the typed intent for this compiled policy.
 
         Raises:
-            PolicyError: If the intent metadata is missing. This
+            Policy: If the intent metadata is missing. This
                 should not happen for policies produced by
                 :meth:`Workspace.apply`; the field is optional only
                 so that legacy storage rows without intent metadata
                 remain readable.
         """
         if self.intent is None:
-            raise PolicyError(f"compiled policy {self.id} is missing intent metadata")
+            raise Fault(f"compiled policy {self.id} is missing intent metadata")
         return self.intent
 
     def test(
         self,
-        schema: CedarSchema,
-        scenarios: list[Scenario],
+        schema: Schema,
+        scenarios: list[Case],
         entities: list[Mapping[str, Any]] | None = None,
-    ) -> TestReport:
+    ) -> Suite:
         """Run authorization scenarios through the Cedar engine.
 
         Args:
@@ -69,7 +69,7 @@ class CompiledPolicy(Policy):
             entities: Optional entities to expose to the engine.
 
         Returns:
-            A :class:`TestReport` summarizing the outcomes.
+            A :class:`Suite` summarizing the outcomes.
         """
         return run_scenarios(
             [self.cedar],
@@ -78,14 +78,14 @@ class CompiledPolicy(Policy):
             schema=schema,
         )
 
-    def validate(self, schema: CedarSchema) -> ValidationReport:
+    def validate(self, schema: Schema) -> Vreport:
         """Validate this policy against ``schema``.
 
         Args:
             schema: Cedar schema to validate against.
 
         Returns:
-            A :class:`ValidationReport` describing the outcome.
+            A :class:`Vreport` describing the outcome.
         """
         return validate_cedar([self.cedar], schema)
 
@@ -95,20 +95,20 @@ class CompiledPolicy(Policy):
         Includes the intent id when present, or ``None`` when the policy
         has no stored intent metadata.
         """
-        data = dict(Policy.to_dict(self))
+        data = dict(Kind.to_dict(self))
         data["intent_id"] = None if self.intent is None else self.intent.id
         return data
 
     @classmethod
     def from_intent(
         cls,
-        intent: PolicyIntent,
+        intent: Intent,
         cedar: str,
-        requirement: Requirement,
+        requirement: Need,
         *,
         policy_id: str | None = None,
-    ) -> CompiledPolicy:
-        """Build a :class:`CompiledPolicy` from a typed intent and Cedar source.
+    ) -> Compiled:
+        """Build a :class:`Compiled` from a typed intent and Cedar source.
 
         Args:
             intent: Typed intent that produced the Cedar.
@@ -118,7 +118,7 @@ class CompiledPolicy(Policy):
                 ``intent.id``.
 
         Returns:
-            The constructed :class:`CompiledPolicy`.
+            The constructed :class:`Compiled`.
         """
         return cls(
             id=policy_id or intent.id,
@@ -128,4 +128,4 @@ class CompiledPolicy(Policy):
         )
 
 
-__all__ = ["CompiledPolicy"]
+__all__ = ["Compiled"]

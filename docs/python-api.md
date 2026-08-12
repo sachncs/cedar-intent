@@ -9,24 +9,24 @@ need to import from submodules directly.
 ```python
 from cedrus import (
     Workspace,
-    CedarSchema,
-    Requirement,
-    PolicyIntent,
-    PrincipalScope,
-    ActionScope,
-    ResourceScope,
-    OfflineGenerator,
-    LiteLLMGenerator,
-    DraftPolicy,
-    ExistingPolicy,
-    CompiledPolicy,
-    Scenario,
-    ValidationReport,
-    VerificationReport,
-    DeploymentManifest,
-    DeploymentRecord,
-    BundleExporter,
-    DeploymentClient,
+    Schema,
+    Need,
+    Intent,
+    Principal,
+    Action,
+    Resource,
+    Offline,
+    Llm,
+    Draft,
+    Existing,
+    Compiled,
+    Case,
+    Vreport,
+    Report,
+    Manifest,
+    Record,
+    Bundler,
+    Client,
     verify_policies,
     validate_cedar,
     run_scenarios,
@@ -53,7 +53,7 @@ workspace = Workspace.in_memory(Path("./ephemeral"))
 
 ```python
 from pathlib import Path
-from cedrus import Workspace, Requirement
+from cedrus import Workspace, Need
 
 workspace = Workspace.open(Path("./acme"))
 
@@ -66,7 +66,7 @@ added = workspace.add_requirement_directory("hr")
 print(requirement.id, requirement.domain, requirement.text)
 ```
 
-Requirement Markdown files use YAML-style front matter:
+Need Markdown files use YAML-style front matter:
 
 ```markdown
 ---
@@ -81,29 +81,29 @@ Only the album owner can view private photos.
 
 ```python
 from cedrus import (
-    DraftPolicy,
-    PrincipalScope,
-    ActionScope,
-    ResourceScope,
-    CedarSchema,
-    PolicyIntent,
-    OfflineGenerator,
+    Draft,
+    Principal,
+    Action,
+    Resource,
+    Schema,
+    Intent,
+    Offline,
 )
 
 # Build a draft policy directly from scope objects.
-draft = DraftPolicy(
+draft = Draft(
     id="hr-hr-042",
     requirement=requirement,
-    principal=PrincipalScope(
+    principal=Principal(
         kind="specific", type_name="User", entity_id="alice"
     ),
-    action=ActionScope(kind="named", name="viewPhoto", namespace="PhotoFlash"),
-    resource=ResourceScope(kind="is_type", type_name="PhotoFlash::Photo"),
+    action=Action(kind="named", name="viewPhoto", namespace="PhotoFlash"),
+    resource=Resource(kind="is_type", type_name="PhotoFlash::Photo"),
 )
 
 # Run the generator against the draft.
-schema = CedarSchema.from_json_file(Path("./acme/hr/schema.json"))
-generator = OfflineGenerator()
+schema = Schema.from_json_file(Path("./acme/hr/schema.json"))
+generator = Offline()
 proposal = draft.generate(schema, generator)
 
 print(proposal.intent)
@@ -115,11 +115,11 @@ print(proposal.unresolved)
 ```python
 draft = workspace.create_draft(
     requirement_id="HR-042",
-    principal=PrincipalScope(
+    principal=Principal(
         kind="specific", type_name="User", entity_id="alice"
     ),
-    action=ActionScope(kind="named", name="viewPhoto", namespace="PhotoFlash"),
-    resource=ResourceScope(kind="is_type", type_name="PhotoFlash::Photo"),
+    action=Action(kind="named", name="viewPhoto", namespace="PhotoFlash"),
+    resource=Resource(kind="is_type", type_name="PhotoFlash::Photo"),
 )
 
 new_draft, result = workspace.generate_draft(
@@ -128,24 +128,24 @@ new_draft, result = workspace.generate_draft(
 print(new_draft.cedar)
 ```
 
-`result` is a `GenerationResult` carrying the model identifier, request
+`result` is a `Result` carrying the model identifier, request
 identifier, and token usage.
 
 ## Compiling a typed intent
 
 ```python
 from cedrus import (
-    PolicyIntent,
+    Intent,
     compile_intent,
 )
 
-intent = PolicyIntent(
+intent = Intent(
     id="hr-hr-042",
     requirement_id="HR-042",
     effect="permit",
-    principal=PrincipalScope(kind="is_type", type_name="PhotoFlash::User"),
-    action=ActionScope(kind="named", name="viewPhoto", namespace="PhotoFlash"),
-    resource=ResourceScope(kind="is_type", type_name="PhotoFlash::Photo"),
+    principal=Principal(kind="is_type", type_name="PhotoFlash::User"),
+    action=Action(kind="named", name="viewPhoto", namespace="PhotoFlash"),
+    resource=Resource(kind="is_type", type_name="PhotoFlash::Photo"),
 )
 
 source = compile_intent(intent)
@@ -170,16 +170,16 @@ compiled = workspace.apply_for_requirement(
 print(compiled.id, compiled.cedar)
 ```
 
-If any scenario fails, `apply` raises `WorkspaceError` and the compiled
+If any scenario fails, `apply` raises `Space` and the compiled
 policy is not persisted.
 
 ## Running scenarios standalone
 
 ```python
-from cedrus import Scenario, run_scenarios
+from cedrus import Case, run_scenarios
 
 scenarios = [
-    Scenario(
+    Case(
         name="alice-can-view",
         principal='PhotoFlash::User::"alice"',
         action='PhotoFlash::Action::"viewPhoto"',
@@ -218,7 +218,7 @@ for finding in report.findings:
 ## Deployment
 
 ```python
-from cedrus import BundleExporter, DeploymentClient
+from cedrus import Bundler, Client
 
 # Build a deployment manifest.
 manifest = workspace.build_bundle("hr", metadata={"channel": "production"})
@@ -236,7 +236,7 @@ record = workspace.deploy(
 print(record.id, record.status, record.target_kind)
 
 # Or push directly via the client.
-client = DeploymentClient(timeout=30)
+client = Client(timeout=30)
 record = client.deploy(manifest, "https://policy-service.example.com/deploy")
 print(record.response)
 ```
@@ -244,14 +244,14 @@ print(record.response)
 ## Storage
 
 ```python
-from cedrus import InMemoryRepository, SqliteRepository
+from cedrus import Memory, Sqlite
 from pathlib import Path
 
 # In-memory repository (tests).
-repo = InMemoryRepository()
+repo = Memory()
 
 # SQLite-backed repository.
-repo = SqliteRepository(Path("./.cedrus/store.db"))
+repo = Sqlite(Path("./.cedrus/store.db"))
 repo.close()
 
 # Both implement the Repository Protocol.
@@ -265,28 +265,28 @@ deployments.
 
 ## Errors
 
-All exceptions inherit from `CedarIntentError`:
+All exceptions inherit from `Error`:
 
 ```python
 from cedrus import (
-    CedarIntentError,
-    ConfigError,
-    RequirementError,
-    PolicyError,
-    CompilationError,
-    ValidationError,
-    GeneratorError,
-    ScopeError,
-    StorageError,
-    WorkspaceError,
-    DeploymentError,
+    Error,
+    Config,
+    Require,
+    Policy,
+    Compile,
+    Validate,
+    Generate,
+    ScopeFault,
+    Store,
+    Space,
+    Deploy,
 )
 
 try:
     workspace.deploy("hr", "")
-except DeploymentError as error:
+except Deploy as error:
     print("deploy failed:", error)
-except CedarIntentError as error:
+except Error as error:
     print("anything else:", error)
 ```
 
@@ -300,16 +300,16 @@ print(cedrus.__version__)
 
 ## Deployment: SSRF guard and pinned transport
 
-The `DeploymentClient` rejects targets in loopback, link-local, and
+The `Client` rejects targets in loopback, link-local, and
 RFC1918 ranges by default. Each connection is pinned to the IP
 address resolved at SSRF-check time so a DNS rebind between the
 guard and the request cannot redirect the deployment into a private
 network. Redirects are disabled by default.
 
 ```python
-from cedrus import DeploymentClient, DeploymentError
+from cedrus import Client, Deploy
 
-client = DeploymentClient(
+client = Client(
     timeout=30,
     allow_private_targets=False,
     allow_loopback=False,
@@ -319,18 +319,18 @@ client = DeploymentClient(
 record = client.deploy(manifest, "https://policy-service.example.com/deploy")
 
 # Tests can opt into loopback:
-test_client = DeploymentClient(
+test_client = Client(
     allow_loopback=True,
     timeout=5,
 )
 record = test_client.deploy(manifest, "http://127.0.0.1:8080/deploy")
 
 # Internal deployments to a private network require the explicit opt-in:
-internal_client = DeploymentClient(allow_private_targets=True)
+internal_client = Client(allow_private_targets=True)
 record = internal_client.deploy(manifest, "http://policy.svc.cluster.local/deploy")
 ```
 
 If the guard rejects a target, the deployment raises
-`DeploymentError` with the blocked network. Response bodies are read
+`Deploy` with the blocked network. Response bodies are read
 in bounded chunks and never embedded in error messages; only a
-SHA-256 of the body is recorded on the `DeploymentRecord`.
+SHA-256 of the body is recorded on the `Record`.

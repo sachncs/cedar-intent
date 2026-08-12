@@ -1,27 +1,27 @@
 """Draft policies produced by a generator.
 
-A :class:`DraftPolicy` is the in-memory representation of a policy under
+A :class:`Draft` is the in-memory representation of a policy under
 authoring. It carries the principal, action, and resource scopes the
 caller supplied plus the optional typed intent the generator produced.
 
 Lifecycle
 ---------
 
-1. :meth:`DraftPolicy.from_requirement` creates an empty draft from a
-   :class:`~cedrus.requirements.Requirement` and caller scopes.
-2. :meth:`DraftPolicy.generate` calls a generator and stores the
-   resulting :class:`~cedrus.generator.DraftProposal` on the
+1. :meth:`Draft.from_requirement` creates an empty draft from a
+   :class:`~cedrus.requirements.Need` and caller scopes.
+2. :meth:`Draft.generate` calls a generator and stores the
+   resulting :class:`~cedrus.generator.Proposal` on the
    draft.
-3. :meth:`DraftPolicy.compile` renders the draft (or a freshly built
-   :class:`~cedrus.compiler.PolicyIntent` if no intent was set)
+3. :meth:`Draft.compile` renders the draft (or a freshly built
+   :class:`~cedrus.compiler.Intent` if no intent was set)
    to Cedar source.
-4. :meth:`DraftPolicy.as_compiled` returns a copy of the draft with the
+4. :meth:`Draft.as_compiled` returns a copy of the draft with the
    compiled Cedar source populated.
 
 Thread safety
 -------------
 
-``DraftPolicy`` is ``frozen=True, slots=True`` and therefore immutable
+``Draft`` is ``frozen=True, slots=True`` and therefore immutable
 and safe to share across threads.
 """
 
@@ -32,19 +32,19 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from ..compiler import CompiledSource, PolicyIntent, compile_intent
-from ..errors import PolicyError
-from ..generator import DraftProposal, GenerationContext, GenerationResult, Generator
-from ..requirements import Requirement
-from ..schema import CedarSchema
-from ..scopes import ActionScope, PrincipalScope, ResourceScope
-from .base import Policy
+from ..compiler import Intent, Source, compile_intent
+from ..error import Fault
+from ..generator import Context, Generator, Proposal, Result
+from ..requirements import Need
+from ..schema import Schema
+from ..scopes import Action, Principal, Resource
+from .base import Kind
 
 DraftStatus = str  # "proposed" | "accepted" | "rejected"
 
 
 @dataclass(frozen=True, slots=True)
-class DraftPolicy(Policy):
+class Draft(Kind):
     """A draft policy with explicit principal, action, and resource scopes.
 
     Attributes:
@@ -59,10 +59,10 @@ class DraftPolicy(Policy):
         request_id: Provider-supplied request identifier (if any).
     """
 
-    principal: PrincipalScope = field(default_factory=lambda: PrincipalScope())
-    action: ActionScope = field(default_factory=lambda: ActionScope())
-    resource: ResourceScope = field(default_factory=lambda: ResourceScope())
-    intent: PolicyIntent | None = None
+    principal: Principal = field(default_factory=lambda: Principal())
+    action: Action = field(default_factory=lambda: Action())
+    resource: Resource = field(default_factory=lambda: Resource())
+    intent: Intent | None = None
     unresolved: tuple[str, ...] = field(default_factory=tuple)
     status: DraftStatus = "proposed"
     notes: Mapping[str, str] = field(default_factory=dict)
@@ -73,27 +73,27 @@ class DraftPolicy(Policy):
         """Return the policy kind discriminator (``"draft"``)."""
         return "draft"
 
-    def to_intent(self) -> PolicyIntent:
+    def to_intent(self) -> Intent:
         """Return the typed intent for this draft.
 
         Raises:
-            PolicyError: If the draft has no compiled intent yet.
+            Policy: If the draft has no compiled intent yet.
         """
         if self.intent is None:
-            raise PolicyError(f"draft {self.id} has no compiled intent yet")
+            raise Fault(f"draft {self.id} has no compiled intent yet")
         return self.intent
 
-    def with_status(self, status: DraftStatus) -> DraftPolicy:
+    def with_status(self, status: DraftStatus) -> Draft:
         """Return a copy of this draft with the given status.
 
         Args:
             status: New lifecycle status.
 
         Returns:
-            A new :class:`DraftPolicy` instance; the original is left
+            A new :class:`Draft` instance; the original is left
             untouched because the dataclass is frozen.
         """
-        return DraftPolicy(
+        return Draft(
             id=self.id,
             requirement=self.requirement,
             cedar=self.cedar,
@@ -111,17 +111,17 @@ class DraftPolicy(Policy):
 
     def generate(
         self,
-        schema: CedarSchema,
+        schema: Schema,
         generator: Generator,
         *,
-        existing: Sequence[Policy] = (),
-    ) -> DraftProposal:
+        existing: Sequence[Kind] = (),
+    ) -> Proposal:
         """Call ``generator`` with this draft's scopes and existing context.
 
-        The existing policies are converted to :class:`PolicyIntent` so
+        The existing policies are converted to :class:`Intent` so
         the generator sees a uniform, typed view. Policies whose
-        ``to_intent`` raises :class:`PolicyError` (typically unparsed
-        :class:`ExistingPolicy`) are silently skipped; they would only
+        ``to_intent`` raises :class:`Fault` (typically unparsed
+        :class:`Existing`) are silently skipped; they would only
         confuse the generator anyway.
 
         Args:
@@ -130,19 +130,19 @@ class DraftPolicy(Policy):
             existing: Existing policies the generator should be aware of.
 
         Returns:
-            A :class:`DraftProposal` produced by the generator.
+            A :class:`Proposal` produced by the generator.
         """
-        existing_intents: list[PolicyIntent] = []
+        existing_intents: list[Intent] = []
         for policy in existing:
-            # ExistingPolicy with no parsed intent raises PolicyError from
+            # Existing with no parsed intent raises Fault from
             # to_intent(); that is the expected case (the generator only
             # sees policies it can reason about). Failing to parse must
             # not block the entire draft.
             try:
                 existing_intents.append(policy.to_intent())
-            except PolicyError:
+            except Fault:
                 continue
-        context = GenerationContext(
+        context = Context(
             requirement=self.requirement,
             schema=schema,
             principal=self.principal,
@@ -153,25 +153,25 @@ class DraftPolicy(Policy):
         result = generator.generate(context)
         return self.apply_result(result)
 
-    def apply_result(self, result: GenerationResult) -> DraftProposal:
-        """Merge a :class:`GenerationResult` into a :class:`DraftProposal`.
+    def apply_result(self, result: Result) -> Proposal:
+        """Merge a :class:`Result` into a :class:`Proposal`.
 
         Args:
             result: Generation result from a :class:`Generator`.
 
         Returns:
-            A :class:`DraftProposal` whose intent matches the generator's
+            A :class:`Proposal` whose intent matches the generator's
             proposal and whose notes merge the draft's own notes with
             the generator's.
         """
         proposal = result.proposal
-        return DraftProposal(
+        return Proposal(
             intent=proposal.intent,
             unresolved=proposal.unresolved,
             notes={**self.notes, **proposal.notes},
         )
 
-    def compile(self, schema: CedarSchema | None = None) -> CompiledSource:
+    def compile(self, schema: Schema | None = None) -> Source:
         """Compile this draft's intent (or build one from scopes) to Cedar source.
 
         If the draft already has an intent, the compiler renders that
@@ -181,18 +181,18 @@ class DraftPolicy(Policy):
 
         Args:
             schema: Optional schema kept for interface compatibility
-                with :class:`Policy.compile`. Compilation itself is
+                with :class:`Fault.compile`. Compilation itself is
                 independent of the schema because the
-                :class:`PolicyIntent` already encodes the namespace
+                :class:`Intent` already encodes the namespace
                 resolution.
 
         Returns:
-            A :class:`CompiledSource` containing the rendered Cedar
+            A :class:`Source` containing the rendered Cedar
             text and metadata.
         """
         if self.intent is not None:
             return compile_intent(self.intent)
-        intent = PolicyIntent(
+        intent = Intent(
             id=self.id,
             requirement_id=self.requirement.id,
             effect="permit",
@@ -203,19 +203,19 @@ class DraftPolicy(Policy):
         )
         return compile_intent(intent)
 
-    def as_compiled(self, schema: CedarSchema | None = None) -> DraftPolicy:
+    def as_compiled(self, schema: Schema | None = None) -> Draft:
         """Return a copy of this draft with cedar populated from the compiler.
 
         Args:
             schema: Forwarded to :meth:`compile` for interface symmetry.
 
         Returns:
-            A new :class:`DraftPolicy` instance with ``cedar`` populated
+            A new :class:`Draft` instance with ``cedar`` populated
             and ``created_at`` bumped to the current time.
         """
         source = self.compile(schema)
         updated_at = datetime.now(UTC)
-        return DraftPolicy(
+        return Draft(
             id=self.id,
             requirement=self.requirement,
             cedar=source.cedar,
@@ -234,10 +234,10 @@ class DraftPolicy(Policy):
     def to_dict(self) -> Mapping[str, Any]:
         """Return a JSON-friendly representation of this draft.
 
-        Extends :meth:`Policy.to_dict` with the scope kinds, lifecycle
+        Extends :meth:`Kind.to_dict` with the scope kinds, lifecycle
         status, and unresolved items.
         """
-        data = dict(Policy.to_dict(self))
+        data = dict(Kind.to_dict(self))
         data.update(
             {
                 "principal": self.principal.kind,
@@ -252,14 +252,14 @@ class DraftPolicy(Policy):
     @classmethod
     def from_requirement(
         cls,
-        requirement: Requirement,
+        requirement: Need,
         *,
-        principal: PrincipalScope | None = None,
-        action: ActionScope | None = None,
-        resource: ResourceScope | None = None,
+        principal: Principal | None = None,
+        action: Action | None = None,
+        resource: Resource | None = None,
         policy_id: str | None = None,
-    ) -> DraftPolicy:
-        """Build a :class:`DraftPolicy` for a requirement with the supplied scopes.
+    ) -> Draft:
+        """Build a :class:`Draft` for a requirement with the supplied scopes.
 
         Args:
             requirement: Originating requirement.
@@ -270,15 +270,15 @@ class DraftPolicy(Policy):
                 ``"draft-<requirement.id>"``.
 
         Returns:
-            An empty :class:`DraftPolicy` with the supplied scopes.
+            An empty :class:`Draft` with the supplied scopes.
         """
         return cls(
             id=policy_id or f"draft-{requirement.id}",
             requirement=requirement,
-            principal=principal or PrincipalScope(),
-            action=action or ActionScope(),
-            resource=resource or ResourceScope(),
+            principal=principal or Principal(),
+            action=action or Action(),
+            resource=resource or Resource(),
         )
 
 
-__all__ = ["DraftPolicy", "DraftStatus"]
+__all__ = ["Draft", "DraftStatus"]

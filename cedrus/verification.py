@@ -69,7 +69,7 @@ VerificationSeverity = str  # "warning" | "info"
 
 
 @dataclass(frozen=True, slots=True)
-class VerificationFinding:
+class Finding:
     """A single finding emitted by :func:`verify_policies`.
 
     Attributes:
@@ -98,7 +98,7 @@ class VerificationFinding:
 
 
 @dataclass(frozen=True, slots=True)
-class VerificationReport:
+class Report:
     """Aggregate result of :func:`verify_policies`.
 
     Attributes:
@@ -111,7 +111,7 @@ class VerificationReport:
     """
 
     domain: str
-    findings: tuple[VerificationFinding, ...]
+    findings: tuple[Finding, ...]
     requirements_covered: tuple[str, ...]
     requirements_uncovered: tuple[str, ...]
     actions_covered: tuple[tuple[str, str], ...]
@@ -136,7 +136,7 @@ class VerificationReport:
 
 
 @dataclass(frozen=True, slots=True)
-class CedarScopeExtraction:
+class Extraction:
     """Scope and condition data extracted from a Cedar policy's source.
 
     The verifier analyzes the deployed Cedar rather than the typed
@@ -187,7 +187,7 @@ def verify_policies(
     action_names: Sequence[tuple[str, str]],
     entity_type_names: Iterable[str],
     actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]] | None = None,
-) -> VerificationReport:
+) -> Report:
     """Run static verification on ``policies`` and return a structured report.
 
     Args:
@@ -201,23 +201,23 @@ def verify_policies(
             (member_action_ids)}}`` for action-group expansion.
 
     Returns:
-        A :class:`VerificationReport` aggregating findings and
+        A :class:`Report` aggregating findings and
         coverage metrics.
     """
-    extracted: list[tuple[Any, CedarScopeExtraction]] = []
+    extracted: list[tuple[Any, Extraction]] = []
     malformed: list[tuple[Any, str]] = []
     for policy in policies:
         try:
             extraction = extract_scope(policy)
-        except VerificationParseError as error:
+        except Parse as error:
             malformed.append((policy, str(error)))
             continue
         extracted.append((policy, extraction))
 
-    findings: list[VerificationFinding] = []
+    findings: list[Finding] = []
     for policy, parse_error in malformed:
         findings.append(
-            VerificationFinding(
+            Finding(
                 kind="malformed-policy",
                 severity="warning",
                 policy_id=_policy_id(policy),
@@ -241,14 +241,14 @@ def verify_policies(
 
 def _verify_extracted(
     domain: str,
-    extracted: Sequence[tuple[Any, CedarScopeExtraction]],
+    extracted: Sequence[tuple[Any, Extraction]],
     requirement_ids: Sequence[str],
     action_names: Sequence[tuple[str, str]],
     entity_type_names: Iterable[str],
     actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]],
-    prior_findings: Sequence[VerificationFinding],
-) -> VerificationReport:
-    findings: list[VerificationFinding] = list(prior_findings)
+    prior_findings: Sequence[Finding],
+) -> Report:
+    findings: list[Finding] = list(prior_findings)
     findings.extend(detect_shadowing(extracted))
     findings.extend(detect_redundancy(extracted))
 
@@ -283,7 +283,7 @@ def _verify_extracted(
             "No policy references entity type {items}.",
         )
     )
-    return VerificationReport(
+    return Report(
         domain=domain,
         findings=tuple(findings),
         requirements_covered=tuple(sorted(covered_requirements)),
@@ -293,11 +293,11 @@ def _verify_extracted(
     )
 
 
-class VerificationParseError(Exception):
+class Parse(Exception):
     """Raised when cedarpy cannot parse a Cedar policy."""
 
 
-def extract_scope(policy: Any) -> CedarScopeExtraction:
+def extract_scope(policy: Any) -> Extraction:
     """Extract scope and condition data from ``policy``.
 
     Cedar source is parsed via :func:`cedarpy.policies_to_json_str`,
@@ -311,18 +311,18 @@ def extract_scope(policy: Any) -> CedarScopeExtraction:
             a ``notes`` mapping carrying ``cedar_text``).
 
     Returns:
-        A :class:`CedarScopeExtraction` capturing principal, action,
+        A :class:`Extraction` capturing principal, action,
         resource, conditions, and effect.
 
     Raises:
-        VerificationParseError: When cedarpy cannot parse the policy.
+        Parse: When cedarpy cannot parse the policy.
     """
     cedar = _policy_cedar(policy)
     return _parse_with_ast(cedar)
 
 
 def _policy_id(policy: Any) -> str:
-    """Return the policy id, accepting Policy or PolicyIntent."""
+    """Return the policy id, accepting Policy or Intent."""
     return getattr(policy, "id", None) or getattr(policy, "intent_id", None) or ""
 
 
@@ -346,8 +346,8 @@ def _policy_cedar(policy: Any) -> str:
 
 
 def detect_shadowing(
-    policies: Sequence[tuple[Any, CedarScopeExtraction]],
-) -> list[VerificationFinding]:
+    policies: Sequence[tuple[Any, Extraction]],
+) -> list[Finding]:
     """Detect ``forbid`` policies that shadow ``permit`` policies.
 
     A forbid shadows a permit when the forbid's scope equals the
@@ -357,13 +357,13 @@ def detect_shadowing(
     principal.
 
     Args:
-        policies: Pairs of (Policy-like object, CedarScopeExtraction)
+        policies: Pairs of (Policy-like object, Extraction)
             to analyze.
 
     Returns:
         A list of shadowing findings. Empty if no shadowing is found.
     """
-    findings: list[VerificationFinding] = []
+    findings: list[Finding] = []
     permits = [
         (policy, extraction)
         for policy, extraction in policies
@@ -378,7 +378,7 @@ def detect_shadowing(
         for forbid, forbid_ex in forbids:
             if scopes_match(permit_ex, forbid_ex):
                 findings.append(
-                    VerificationFinding(
+                    Finding(
                         kind="shadowing",
                         severity="warning",
                         policy_id=_policy_id(permit),
@@ -393,8 +393,8 @@ def detect_shadowing(
 
 
 def detect_redundancy(
-    policies: Sequence[tuple[Any, CedarScopeExtraction]],
-) -> list[VerificationFinding]:
+    policies: Sequence[tuple[Any, Extraction]],
+) -> list[Finding]:
     """Detect policies that duplicate the scope, effect, and conditions of another.
 
     Two policies are redundant when they share the same effect, the
@@ -404,13 +404,13 @@ def detect_redundancy(
     detected by this conservative check.
 
     Args:
-        policies: Pairs of (Policy-like object, CedarScopeExtraction)
+        policies: Pairs of (Policy-like object, Extraction)
             to analyze.
 
     Returns:
         A list of redundancy findings. Empty if no duplication is found.
     """
-    findings: list[VerificationFinding] = []
+    findings: list[Finding] = []
     seen: dict[
         tuple[
             str,
@@ -425,7 +425,7 @@ def detect_redundancy(
         existing = seen.get(extraction.signature)
         if existing is not None:
             findings.append(
-                VerificationFinding(
+                Finding(
                     kind="redundancy",
                     severity="warning",
                     policy_id=_policy_id(policy),
@@ -442,7 +442,7 @@ def detect_redundancy(
 
 
 def scopes_match(
-    permit_ex: CedarScopeExtraction, forbid_ex: CedarScopeExtraction
+    permit_ex: Extraction, forbid_ex: Extraction
 ) -> bool:
     """Return ``True`` when ``forbid_ex`` fully shadows ``permit_ex``.
 
@@ -504,7 +504,7 @@ def _resolve_action_namespace(
 
 
 def action_coverage(
-    policies: Sequence[tuple[Any, CedarScopeExtraction]],
+    policies: Sequence[tuple[Any, Extraction]],
     action_names: Sequence[tuple[str, str]],
     actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]],
 ) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
@@ -515,7 +515,7 @@ def action_coverage(
     that action. ``any`` does not cover any specific action.
 
     Args:
-        policies: Pairs of (Policy-like object, CedarScopeExtraction)
+        policies: Pairs of (Policy-like object, Extraction)
             to scan.
         action_names: All known ``(namespace, action_id)`` pairs.
         actions_by_namespace: Mapping ``{namespace: {action_id:
@@ -563,7 +563,7 @@ def _action_named(action_signature: tuple[str, ...]) -> tuple[str, str]:
 
 
 def requirement_coverage(
-    policies: Sequence[tuple[Any, CedarScopeExtraction]],
+    policies: Sequence[tuple[Any, Extraction]],
     requirement_ids: Sequence[str],
 ) -> tuple[set[str], set[str]]:
     """Return ``(covered, uncovered)`` requirement identifiers."""
@@ -572,7 +572,7 @@ def requirement_coverage(
 
 
 def collect_entity_types(
-    policies: Sequence[tuple[Any, CedarScopeExtraction]],
+    policies: Sequence[tuple[Any, Extraction]],
 ) -> set[str]:
     """Return the set of entity type names referenced by ``policies``."""
     types: set[str] = set()
@@ -614,11 +614,11 @@ def extract_entity_types(policies: Sequence[Any]) -> set[str]:
     Returns:
         Set of entity type identifiers referenced by any policy.
     """
-    extracted: list[tuple[Any, CedarScopeExtraction]] = []
+    extracted: list[tuple[Any, Extraction]] = []
     for policy in policies:
         try:
             extracted.append((policy, extract_scope(policy)))
-        except VerificationParseError:
+        except Parse:
             continue
     return collect_entity_types(extracted)
 
@@ -628,13 +628,13 @@ def missing_coverage_finding(
     domain: str,
     items: list[Any],
     template: str,
-) -> list[VerificationFinding]:
+) -> list[Finding]:
     """Emit a single coverage finding when ``items`` is non-empty."""
     if not items:
         return []
     joined = ", ".join(str(item) for item in items)
     return [
-        VerificationFinding(
+        Finding(
             kind=kind,
             severity="warning",
             policy_id=domain,
@@ -643,7 +643,7 @@ def missing_coverage_finding(
     ]
 
 
-def _parse_with_ast(cedar: str) -> CedarScopeExtraction:
+def _parse_with_ast(cedar: str) -> Extraction:
     """Structured parser that extracts scope and condition data from Cedar.
 
     Uses :func:`cedarpy.policies_to_json_str` to obtain a normalized
@@ -651,30 +651,30 @@ def _parse_with_ast(cedar: str) -> CedarScopeExtraction:
     signatures and a canonicalized condition signature.
 
     Raises:
-        VerificationParseError: When cedarpy cannot parse ``cedar`` or
+        Parse: When cedarpy cannot parse ``cedar`` or
             when the input is empty.
     """
     text = cedar.strip()
     if not text:
-        raise VerificationParseError("empty Cedar policy text")
+        raise Parse("empty Cedar policy text")
     try:
         json_text = cedarpy.policies_to_json_str(text + "\n")
     except (ValueError, RuntimeError) as error:
-        raise VerificationParseError(str(error)) from error
+        raise Parse(str(error)) from error
     try:
         doc = json.loads(json_text)
     except json.JSONDecodeError as error:
-        raise VerificationParseError(str(error)) from error
+        raise Parse(str(error)) from error
     static_policies = doc.get("staticPolicies") or {}
     if not static_policies:
-        raise VerificationParseError("cedarpy produced no static policies")
+        raise Parse("cedarpy produced no static policies")
     policy_node = next(iter(static_policies.values()))
     effect = policy_node.get("effect", "permit")
     principal = _parse_principal_node(policy_node.get("principal") or {})
     action = _parse_action_node(policy_node.get("action") or {})
     resource = _parse_resource_node(policy_node.get("resource") or {})
     conditions = _parse_conditions(policy_node.get("conditions") or [])
-    return CedarScopeExtraction(
+    return Extraction(
         principal=principal,
         action=action,
         resource=resource,
@@ -830,10 +830,10 @@ def _extract_type_names(token: Any) -> list[str]:
 
 
 __all__ = [
-    "CedarScopeExtraction",
-    "VerificationFinding",
-    "VerificationParseError",
-    "VerificationReport",
+    "Extraction",
+    "Finding",
+    "Parse",
+    "Report",
     "detect_redundancy",
     "detect_shadowing",
     "extract_entity_types",

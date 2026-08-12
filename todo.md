@@ -75,103 +75,103 @@ coverage.
 
 | # | Commit | Files | Acceptance |
 |---|--------|-------|------------|
-| 5 | `refactor(error): rename CedarIntentError → Error` | `cedrus/error.py`, `__init__.py`, all import sites | All references updated; `tests/test_errors.py` updated |
-| 6 | `refactor(error): rename ConfigError → Config` | `cedrus/error.py`, all import sites | `Config` subclass of `Error`; tests reference `Config` |
-| 7 | `refactor(error): rename RequirementError → Require` | `cedrus/error.py`, all import sites | `Require` subclass of `Error` |
-| 8 | `refactor(error): rename PolicyError → Policy` | `cedrus/error.py`, all import sites | `Policy` subclass of `Error` |
-| 9 | `refactor(error): rename CompilationError → Compile` | `cedrus/error.py`, all import sites | `Compile` subclass of `Policy` |
-| 10 | `refactor(error): rename ValidationError → Validate` | `cedrus/error.py`, all import sites | `Validate` subclass of `Policy` |
-| 11 | `refactor(error): rename GeneratorError → Generate` | `cedrus/error.py`, all import sites | `Generate` subclass of `Policy` |
-| 12 | `refactor(error): rename ScopeError → Scope` | `cedrus/error.py`, all import sites | `Scope` subclass of `Policy` |
-| 13 | `refactor(error): rename StorageError → Store` | `cedrus/error.py`, all import sites | `Store` subclass of `Error` |
-| 14 | `refactor(error): rename WorkspaceError → Space` | `cedrus/error.py`, all import sites | `Space` subclass of `Error` |
-| 15 | `refactor(error): rename DeploymentError → Deploy` | `cedrus/error.py`, all import sites | `Deploy` subclass of `Error` |
+| 5 | `refactor(error): rename Error → Error` | `cedrus/error.py`, `__init__.py`, all import sites | All references updated; `tests/test_errors.py` updated |
+| 6 | `refactor(error): rename Config → Config` | `cedrus/error.py`, all import sites | `Config` subclass of `Error`; tests reference `Config` |
+| 7 | `refactor(error): rename Require → Require` | `cedrus/error.py`, all import sites | `Require` subclass of `Error` |
+| 8 | `refactor(error): rename Policy → Policy` | `cedrus/error.py`, all import sites | `Policy` subclass of `Error` |
+| 9 | `refactor(error): rename Compile → Compile` | `cedrus/error.py`, all import sites | `Compile` subclass of `Policy` |
+| 10 | `refactor(error): rename Validate → Validate` | `cedrus/error.py`, all import sites | `Validate` subclass of `Policy` |
+| 11 | `refactor(error): rename Generate → Generate` | `cedrus/error.py`, all import sites | `Generate` subclass of `Policy` |
+| 12 | `refactor(error): rename ScopeFault → Scope` | `cedrus/error.py`, all import sites | `Scope` subclass of `Policy` |
+| 13 | `refactor(error): rename Store → Store` | `cedrus/error.py`, all import sites | `Store` subclass of `Error` |
+| 14 | `refactor(error): rename Space → Space` | `cedrus/error.py`, all import sites | `Space` subclass of `Error` |
+| 15 | `refactor(error): rename Deploy → Deploy` | `cedrus/error.py`, all import sites | `Deploy` subclass of `Error` |
 
 ### Verify hierarchy (2 commits)
 
 | # | Commit | Files | Acceptance |
 |---|--------|-------|------------|
-| 16 | `refactor(error): rename VerificationParseError → Parse` | `cedrus/verify.py`, `__init__.py` | `Parse` subclass of `Error` |
+| 16 | `refactor(error): rename Parse → Parse` | `cedrus/verify.py`, `__init__.py` | `Parse` subclass of `Error` |
 
 ### Compiler / Intent (2 commits)
 
 | # | Commit | Files | Acceptance |
 |---|--------|-------|------------|
-| 17 | `refactor(compile): rename PolicyIntent → Intent` | `cedrus/compile.py`, `__init__.py`, all import sites | `Intent` class; all callers updated |
-| 18 | `refactor(compile): rename CompiledSource → Source` | `cedrus/compile.py`, `__init__.py`, all import sites | `Source` class |
+| 17 | `refactor(compile): rename Intent → Intent` | `cedrus/compile.py`, `__init__.py`, all import sites | `Intent` class; all callers updated |
+| 18 | `refactor(compile): rename Source → Source` | `cedrus/compile.py`, `__init__.py`, all import sites | `Source` class |
 
 ### Need / Case (5 commits)
 
 | # | Commit | Files | Acceptance |
 |---|--------|-------|------------|
-| 19 | `refactor(need): rename Requirement → Need` | `cedrus/need.py`, `__init__.py`, all import sites | `Need` class |
-| 20 | `refactor(case): rename Scenario → Case` | `cedrus/case.py`, `__init__.py`, all import sites | `Case` class |
-| 21 | `refactor(case): rename ScenarioResult → Outcome` | `cedrus/case.py`, `__init__.py`, all import sites | `Outcome` class |
-| 22 | `refactor(case): rename TestReport → Suite` | `cedrus/case.py`, `__init__.py`, all import sites | `Suite` class |
-| 23 | `refactor(validate): rename ValidationReport → Vreport` | `cedrus/validate.py`, `__init__.py`, all import sites | `Vreport` class |
+| 19 | `refactor(need): rename Need → Need` | `cedrus/need.py`, `__init__.py`, all import sites | `Need` class |
+| 20 | `refactor(case): rename Case → Case` | `cedrus/case.py`, `__init__.py`, all import sites | `Case` class |
+| 21 | `refactor(case): rename Outcome → Outcome` | `cedrus/case.py`, `__init__.py`, all import sites | `Outcome` class |
+| 22 | `refactor(case): rename Suite → Suite` | `cedrus/case.py`, `__init__.py`, all import sites | `Suite` class |
+| 23 | `refactor(validate): rename Vreport → Vreport` | `cedrus/validate.py`, `__init__.py`, all import sites | `Vreport` class |
 
 ### Scope classes (4 commits)
 
 | # | Commit | Files | Acceptance |
 |---|--------|-------|------------|
-| 24 | `refactor(scope): rename PrincipalScope → Principal` | `cedrus/scope.py`, `__init__.py`, all import sites | `Principal` class |
-| 25 | `refactor(scope): rename ActionScope → Action` | `cedrus/scope.py`, `__init__.py`, all import sites | `Action` class |
-| 26 | `refactor(scope): rename ResourceScope → Resource` | `cedrus/scope.py`, `__init__.py`, all import sites | `Resource` class |
-| 27 | `refactor(scope): rename ConditionClause → Clause` | `cedrus/scope.py`, `__init__.py`, all import sites | `Clause` class |
+| 24 | `refactor(scope): rename Principal → Principal` | `cedrus/scope.py`, `__init__.py`, all import sites | `Principal` class |
+| 25 | `refactor(scope): rename Action → Action` | `cedrus/scope.py`, `__init__.py`, all import sites | `Action` class |
+| 26 | `refactor(scope): rename Resource → Resource` | `cedrus/scope.py`, `__init__.py`, all import sites | `Resource` class |
+| 27 | `refactor(scope): rename Clause → Clause` | `cedrus/scope.py`, `__init__.py`, all import sites | `Clause` class |
 
 ### Verify classes (3 commits)
 
 | # | Commit | Files | Acceptance |
 |---|--------|-------|------------|
-| 28 | `refactor(verify): rename CedarScopeExtraction → Extraction` | `cedrus/verify.py`, `__init__.py`, all import sites | `Extraction` class |
-| 29 | `refactor(verify): rename VerificationFinding → Finding` | `cedrus/verify.py`, `__init__.py`, all import sites | `Finding` class |
-| 30 | `refactor(verify): rename VerificationReport → Report` | `cedrus/verify.py`, `__init__.py`, all import sites | `Report` class |
+| 28 | `refactor(verify): rename Extraction → Extraction` | `cedrus/verify.py`, `__init__.py`, all import sites | `Extraction` class |
+| 29 | `refactor(verify): rename Finding → Finding` | `cedrus/verify.py`, `__init__.py`, all import sites | `Finding` class |
+| 30 | `refactor(verify): rename Report → Report` | `cedrus/verify.py`, `__init__.py`, all import sites | `Report` class |
 
 ### Generator classes (5 commits)
 
 | # | Commit | Files | Acceptance |
 |---|--------|-------|------------|
-| 31 | `refactor(generate): rename GenerationContext → Context` | `cedrus/generate/contract.py`, `__init__.py`, all import sites | `Context` class |
-| 32 | `refactor(generate): rename DraftProposal → Proposal` | `cedrus/generate/contract.py`, `__init__.py`, all import sites | `Proposal` class |
-| 33 | `refactor(generate): rename GenerationResult → Result` | `cedrus/generate/contract.py`, `__init__.py`, all import sites | `Result` class |
-| 34 | `refactor(generate): rename LiteLLMGenerator → Llm` | `cedrus/generate/llm.py`, `__init__.py`, all import sites | `Llm` class |
-| 35 | `refactor(generate): rename OfflineGenerator → Offline` | `cedrus/generate/offline.py`, `__init__.py`, all import sites | `Offline` class |
+| 31 | `refactor(generate): rename Context → Context` | `cedrus/generate/contract.py`, `__init__.py`, all import sites | `Context` class |
+| 32 | `refactor(generate): rename Proposal → Proposal` | `cedrus/generate/contract.py`, `__init__.py`, all import sites | `Proposal` class |
+| 33 | `refactor(generate): rename Result → Result` | `cedrus/generate/contract.py`, `__init__.py`, all import sites | `Result` class |
+| 34 | `refactor(generate): rename Llm → Llm` | `cedrus/generate/llm.py`, `__init__.py`, all import sites | `Llm` class |
+| 35 | `refactor(generate): rename Offline → Offline` | `cedrus/generate/offline.py`, `__init__.py`, all import sites | `Offline` class |
 
 ### Policy classes (3 commits)
 
 | # | Commit | Files | Acceptance |
 |---|--------|-------|------------|
-| 36 | `refactor(policy): rename CompiledPolicy → Compiled` | `cedrus/policy/compiled.py`, `__init__.py`, all import sites | `Compiled` class |
-| 37 | `refactor(policy): rename DraftPolicy → Draft` | `cedrus/policy/draft.py`, `__init__.py`, all import sites | `Draft` class |
-| 38 | `refactor(policy): rename ExistingPolicy → Existing` | `cedrus/policy/existing.py`, `__init__.py`, all import sites | `Existing` class |
+| 36 | `refactor(policy): rename Compiled → Compiled` | `cedrus/policy/compiled.py`, `__init__.py`, all import sites | `Compiled` class |
+| 37 | `refactor(policy): rename Draft → Draft` | `cedrus/policy/draft.py`, `__init__.py`, all import sites | `Draft` class |
+| 38 | `refactor(policy): rename Existing → Existing` | `cedrus/policy/existing.py`, `__init__.py`, all import sites | `Existing` class |
 
 ### Schema (1 commit)
 
 | # | Commit | Files | Acceptance |
 |---|--------|-------|------------|
-| 39 | `refactor(schema): rename CedarSchema → Schema` | `cedrus/schema.py`, `__init__.py`, all import sites | `Schema` class |
+| 39 | `refactor(schema): rename Schema → Schema` | `cedrus/schema.py`, `__init__.py`, all import sites | `Schema` class |
 
 ### Deploy classes (7 commits)
 
 | # | Commit | Files | Acceptance |
 |---|--------|-------|------------|
-| 40 | `refactor(deploy): rename DeploymentManifest → Manifest` | `cedrus/deploy.py`, `__init__.py`, all import sites | `Manifest` class |
-| 41 | `refactor(deploy): rename DeploymentRecord → Record` | `cedrus/deploy.py`, `__init__.py`, all import sites | `Record` class |
-| 42 | `refactor(deploy): rename BundleExporter → Bundler` | `cedrus/deploy.py`, `__init__.py`, all import sites | `Bundler` class |
-| 43 | `refactor(deploy): rename SSRFGuard → Guard` | `cedrus/deploy.py`, `__init__.py`, all import sites | `Guard` class |
-| 44 | `refactor(deploy): rename PinnedAddress → Pin` | `cedrus/deploy.py`, `__init__.py`, all import sites | `Pin` class |
-| 45 | `refactor(deploy): rename DeploymentClient → Client` | `cedrus/deploy.py`, `__init__.py`, all import sites | `Client` class |
-| 46 | `refactor(deploy): rename _PinnedTransport → Transport` | `cedrus/deploy.py`, `__init__.py`, all import sites | `Transport` class |
+| 40 | `refactor(deploy): rename Manifest → Manifest` | `cedrus/deploy.py`, `__init__.py`, all import sites | `Manifest` class |
+| 41 | `refactor(deploy): rename Record → Record` | `cedrus/deploy.py`, `__init__.py`, all import sites | `Record` class |
+| 42 | `refactor(deploy): rename Bundler → Bundler` | `cedrus/deploy.py`, `__init__.py`, all import sites | `Bundler` class |
+| 43 | `refactor(deploy): rename Guard → Guard` | `cedrus/deploy.py`, `__init__.py`, all import sites | `Guard` class |
+| 44 | `refactor(deploy): rename Pin → Pin` | `cedrus/deploy.py`, `__init__.py`, all import sites | `Pin` class |
+| 45 | `refactor(deploy): rename Client → Client` | `cedrus/deploy.py`, `__init__.py`, all import sites | `Client` class |
+| 46 | `refactor(deploy): rename Transport → Transport` | `cedrus/deploy.py`, `__init__.py`, all import sites | `Transport` class |
 
 ### Store classes (5 commits)
 
 | # | Commit | Files | Acceptance |
 |---|--------|-------|------------|
-| 47 | `refactor(store): rename StoredPolicy → Stored` | `cedrus/store/sqlite.py`, `__init__.py`, all import sites | `Stored` class |
-| 48 | `refactor(store): rename StoredDraft → DraftStored` | `cedrus/store/sqlite.py`, `__init__.py`, all import sites | `DraftStored` class |
-| 49 | `refactor(store): rename StoredReport → ReportStored` | `cedrus/store/sqlite.py`, `__init__.py`, all import sites | `ReportStored` class |
-| 50 | `refactor(store): rename InMemoryRepository → Memory` | `cedrus/store/memory.py`, `__init__.py`, all import sites | `Memory` class |
-| 51 | `refactor(store): rename SqliteRepository → Sqlite` | `cedrus/store/sqlite.py`, `__init__.py`, all import sites | `Sqlite` class |
+| 47 | `refactor(store): rename Stored → Stored` | `cedrus/store/sqlite.py`, `__init__.py`, all import sites | `Stored` class |
+| 48 | `refactor(store): rename DraftStored → DraftStored` | `cedrus/store/sqlite.py`, `__init__.py`, all import sites | `DraftStored` class |
+| 49 | `refactor(store): rename ReportStored → ReportStored` | `cedrus/store/sqlite.py`, `__init__.py`, all import sites | `ReportStored` class |
+| 50 | `refactor(store): rename Memory → Memory` | `cedrus/store/memory.py`, `__init__.py`, all import sites | `Memory` class |
+| 51 | `refactor(store): rename Sqlite → Sqlite` | `cedrus/store/sqlite.py`, `__init__.py`, all import sites | `Sqlite` class |
 
 ### Keep-as-is (3 commits)
 
@@ -312,7 +312,7 @@ Each commit introduces one method on one data class.
 | 128 | `refactor(deploy): Manifest.to_dict` | |
 | 129 | `refactor(deploy): Manifest.payload` | `payload()` replaces `to_manifest_payload()` |
 | 130 | `refactor(deploy): Manifest.from_dict` | |
-| 131 | `refactor(deploy): drop old free-function `BundleExporter` style usages` | Old API removed |
+| 131 | `refactor(deploy): drop old free-function `Bundler` style usages` | Old API removed |
 
 ### Need methods (4 commits)
 
@@ -485,7 +485,7 @@ Each commit introduces one method on one data class.
 |---|--------|------------|
 | 244 | `refactor(verify): drop the leading-underscore symbols` | `_parse_with_ast` → `parse_ast`, etc. |
 | 245 | `refactor(migrate): drop the leading-underscore symbols` | `_RepoLike` → `RepoLike`, `_migrate_policy` → `policy_migrate`, etc. |
-| 246 | `refactor(deploy): drop the leading-underscore symbols` | `_PinnedTransport` (already Transport), `_round_trip_http` → `round_trip`, etc. |
+| 246 | `refactor(deploy): drop the leading-underscore symbols` | `Transport` (already Transport), `_round_trip_http` → `round_trip`, etc. |
 | 247 | `refactor(scope): drop the leading-underscore symbols` | `_qualify` → `qualify` |
 | 248 | `refactor(space): rename remaining multi-word variables` | `requirement_id` → `need_id`, `requirements_directory` → `needs_dir`, etc. |
 | 249 | `refactor(deploy): rename remaining multi-word variables` | `response_data` → `receipt`, etc. |

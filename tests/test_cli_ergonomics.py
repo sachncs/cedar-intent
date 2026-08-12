@@ -2,7 +2,7 @@
 
 Covers the production-readiness improvements to the CLI surface:
 
-- Top-level catch wraps unexpected exceptions; only CedarIntentError
+- Top-level catch wraps unexpected exceptions; only Error
   produces the structured one-line error message.
 - --json mode emits a structured JSON envelope for errors.
 - parse_headers rejects empty names, CRLF, and oversize names/values.
@@ -24,7 +24,7 @@ from cedrus.cli import (
     parse_headers,
     validate_identifier,
 )
-from cedrus.errors import ConfigError
+from cedrus.error import Config
 
 
 def test_validate_identifier_accepts_safe_input() -> None:
@@ -37,22 +37,22 @@ def test_validate_identifier_accepts_safe_input() -> None:
     ["", " ", "../etc", "/abs", "x" * 65, "hr\0", "with space", "with/slash"],
 )
 def test_validate_identifier_rejects_unsafe(bad: str) -> None:
-    with pytest.raises(ConfigError):
+    with pytest.raises(Config):
         validate_identifier(bad, "domain")
 
 
 def test_parse_headers_rejects_crlf() -> None:
-    with pytest.raises(ConfigError):
+    with pytest.raises(Config):
         parse_headers(["X-Foo: bar\r\nX-Admin: true"])
 
 
 def test_parse_headers_rejects_empty_name() -> None:
-    with pytest.raises(ConfigError):
+    with pytest.raises(Config):
         parse_headers([": value"])
 
 
 def test_parse_headers_rejects_oversize_name() -> None:
-    with pytest.raises(ConfigError):
+    with pytest.raises(Config):
         parse_headers(["X" * 300 + ": value"])
 
 

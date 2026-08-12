@@ -1,6 +1,6 @@
-"""Requirement model and Markdown loader.
+"""Need model and Markdown loader.
 
-A :class:`Requirement` is the source-of-truth unit that ties a natural
+A :class:`Need` is the source-of-truth unit that ties a natural
 language description to a stable identifier. Identifiers are read from
 YAML-style front matter at the top of a Markdown file, with the
 filename stem as a fallback.
@@ -22,11 +22,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .errors import RequirementError
+from .error import Require
 
 
 @dataclass(frozen=True, slots=True)
-class Requirement:
+class Need:
     """An atomic authorization requirement loaded from disk.
 
     Attributes:
@@ -45,11 +45,11 @@ class Requirement:
 
     def __post_init__(self) -> None:
         if not self.id or not self.id.strip():
-            raise RequirementError("requirement id must be non-empty")
+            raise Require("requirement id must be non-empty")
         if not self.text or not self.text.strip():
-            raise RequirementError(f"requirement {self.id} has no body text")
+            raise Require(f"requirement {self.id} has no body text")
         if not self.domain or not self.domain.strip():
-            raise RequirementError(f"requirement {self.id} has no domain")
+            raise Require(f"requirement {self.id} has no domain")
 
 
 def parse_front_matter(source: str) -> tuple[Mapping[str, str], str]:
@@ -86,7 +86,7 @@ def parse_front_matter(source: str) -> tuple[Mapping[str, str], str]:
         if not stripped or stripped.startswith("#"):
             continue
         if ":" not in stripped:
-            raise RequirementError(f"malformed front matter line: {line!r}")
+            raise Require(f"malformed front matter line: {line!r}")
         key, _, value = stripped.partition(":")
         front_matter[key.strip()] = value.strip().strip('"').strip("'")
     rest = "\n".join(lines[end_index + 1 :]).strip()
@@ -119,7 +119,7 @@ def derive_domain(source_path: Path, workspace_root: Path) -> str:
     return parts[0]
 
 
-def load_requirement(path: Path, workspace_root: Path | None = None) -> Requirement:
+def load_requirement(path: Path, workspace_root: Path | None = None) -> Need:
     """Load a single requirement from a Markdown file.
 
     Args:
@@ -128,24 +128,24 @@ def load_requirement(path: Path, workspace_root: Path | None = None) -> Requirem
             when the front matter does not provide one.
 
     Returns:
-        The parsed :class:`Requirement`.
+        The parsed :class:`Need`.
 
     Raises:
-        RequirementError: If the file is missing, empty, or malformed.
+        Require: If the file is missing, empty, or malformed.
     """
     if not path.exists() or not path.is_file():
-        raise RequirementError(f"requirement file not found: {path}")
+        raise Require(f"requirement file not found: {path}")
     raw = path.read_text(encoding="utf-8")
     front_matter, body = parse_front_matter(raw)
     if not body:
-        raise RequirementError(f"requirement file has empty body: {path}")
+        raise Require(f"requirement file has empty body: {path}")
     requirement_id = front_matter.get("id") or path.stem
     domain = front_matter.get("domain")
     if not domain and workspace_root is not None:
         domain = derive_domain(path, workspace_root)
     if not domain:
-        raise RequirementError(f"requirement {requirement_id} has no domain")
-    return Requirement(
+        raise Require(f"requirement {requirement_id} has no domain")
+    return Need(
         id=requirement_id,
         text=body,
         domain=domain,
@@ -154,7 +154,7 @@ def load_requirement(path: Path, workspace_root: Path | None = None) -> Requirem
     )
 
 
-def load_requirements(directory: Path, workspace_root: Path | None = None) -> list[Requirement]:
+def load_requirements(directory: Path, workspace_root: Path | None = None) -> list[Need]:
     """Load every ``*.md`` requirement in ``directory`` non-recursively.
 
     Args:
@@ -163,20 +163,20 @@ def load_requirements(directory: Path, workspace_root: Path | None = None) -> li
             :func:`load_requirement` for domain derivation.
 
     Returns:
-        A sorted list of :class:`Requirement` objects.
+        A sorted list of :class:`Need` objects.
 
     Raises:
-        RequirementError: If ``directory`` does not exist.
+        Require: If ``directory`` does not exist.
     """
     if not directory.exists() or not directory.is_dir():
-        raise RequirementError(f"requirement directory not found: {directory}")
-    requirements: list[Requirement] = []
+        raise Require(f"requirement directory not found: {directory}")
+    requirements: list[Need] = []
     for path in sorted(directory.glob("*.md")):
         requirements.append(load_requirement(path, workspace_root))
     return requirements
 
 
-def render_requirement(requirement: Requirement) -> str:
+def render_requirement(requirement: Need) -> str:
     """Render a requirement back to Markdown form with front matter."""
     return (
         "---\n"
@@ -188,7 +188,7 @@ def render_requirement(requirement: Requirement) -> str:
 
 
 __all__ = [
-    "Requirement",
+    "Need",
     "derive_domain",
     "load_requirement",
     "load_requirements",

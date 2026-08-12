@@ -19,14 +19,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from ..deployment import DeploymentRecord
-from ..errors import StorageError
-from ..requirements import Requirement
-from .base import StoredDraft, StoredPolicy, StoredReport
+from ..deployment import Record
+from ..error import Store
+from ..requirements import Need
+from .base import DraftStored, ReportStored, Stored
 
 
 @dataclass
-class InMemoryRepository:
+class Memory:
     """Dictionary-backed repository for tests and short-lived sessions.
 
     Attributes:
@@ -37,11 +37,11 @@ class InMemoryRepository:
         deployments: Chronological list of deployment records.
     """
 
-    requirements: dict[str, Requirement] = field(default_factory=dict)
-    policies: dict[str, StoredPolicy] = field(default_factory=dict)
-    drafts: list[StoredDraft] = field(default_factory=list)
-    reports: list[StoredReport] = field(default_factory=list)
-    deployments: list[DeploymentRecord] = field(default_factory=list)
+    requirements: dict[str, Need] = field(default_factory=dict)
+    policies: dict[str, Stored] = field(default_factory=dict)
+    drafts: list[DraftStored] = field(default_factory=list)
+    reports: list[ReportStored] = field(default_factory=list)
+    deployments: list[Record] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # Legacy detection is a no-op for in-memory repositories; the
@@ -49,31 +49,31 @@ class InMemoryRepository:
         # the SQLite backend.
         self._legacy_count: int = 0
 
-    def add_requirement(self, requirement: Requirement) -> None:
+    def add_requirement(self, requirement: Need) -> None:
         """Add or replace ``requirement`` in the store.
 
         Args:
-            requirement: Requirement to store. Identified by ``id``.
+            requirement: Need to store. Identified by ``id``.
         """
         self.requirements[requirement.id] = requirement
 
-    def get_requirement(self, requirement_id: str) -> Requirement:
+    def get_requirement(self, requirement_id: str) -> Need:
         """Return the requirement with ``requirement_id``.
 
         Args:
             requirement_id: Identifier of the requirement to fetch.
 
         Returns:
-            The stored :class:`Requirement`.
+            The stored :class:`Need`.
 
         Raises:
-            StorageError: If no requirement exists with that id.
+            Store: If no requirement exists with that id.
         """
         if requirement_id not in self.requirements:
-            raise StorageError(f"requirement {requirement_id!r} not found")
+            raise Store(f"requirement {requirement_id!r} not found")
         return self.requirements[requirement_id]
 
-    def list_requirements(self, domain: str | None = None) -> Sequence[Requirement]:
+    def list_requirements(self, domain: str | None = None) -> Sequence[Need]:
         """Return all requirements, optionally filtered by ``domain``.
 
         Args:
@@ -81,7 +81,7 @@ class InMemoryRepository:
                 attribute matches are returned.
 
         Returns:
-            A sequence of :class:`Requirement` objects in insertion order.
+            A sequence of :class:`Need` objects in insertion order.
         """
         if domain is None:
             return list(self.requirements.values())
@@ -98,13 +98,13 @@ class InMemoryRepository:
             requirement_id: Identifier of the requirement to remove.
 
         Raises:
-            StorageError: If no requirement exists with that id.
+            Store: If no requirement exists with that id.
         """
         if requirement_id not in self.requirements:
-            raise StorageError(f"requirement {requirement_id!r} not found")
+            raise Store(f"requirement {requirement_id!r} not found")
         del self.requirements[requirement_id]
 
-    def upsert_policy(self, policy: StoredPolicy) -> None:
+    def upsert_policy(self, policy: Stored) -> None:
         """Insert or update ``policy`` in the store.
 
         Args:
@@ -112,23 +112,23 @@ class InMemoryRepository:
         """
         self.policies[policy.id] = policy
 
-    def get_policy(self, policy_id: str) -> StoredPolicy:
+    def get_policy(self, policy_id: str) -> Stored:
         """Return the policy with ``policy_id``.
 
         Args:
             policy_id: Identifier of the policy to fetch.
 
         Returns:
-            The stored :class:`StoredPolicy`.
+            The stored :class:`Stored`.
 
         Raises:
-            StorageError: If no policy exists with that id.
+            Store: If no policy exists with that id.
         """
         if policy_id not in self.policies:
-            raise StorageError(f"policy {policy_id!r} not found")
+            raise Store(f"policy {policy_id!r} not found")
         return self.policies[policy_id]
 
-    def list_policies(self, domain: str | None = None) -> Sequence[StoredPolicy]:
+    def list_policies(self, domain: str | None = None) -> Sequence[Stored]:
         """Return all policies, optionally filtered by ``domain``.
 
         Args:
@@ -136,7 +136,7 @@ class InMemoryRepository:
                 are returned.
 
         Returns:
-            A sequence of :class:`StoredPolicy` in insertion order.
+            A sequence of :class:`Stored` in insertion order.
         """
         if domain is None:
             return list(self.policies.values())
@@ -149,13 +149,13 @@ class InMemoryRepository:
             policy_id: Identifier of the policy to remove.
 
         Raises:
-            StorageError: If no policy exists with that id.
+            Store: If no policy exists with that id.
         """
         if policy_id not in self.policies:
-            raise StorageError(f"policy {policy_id!r} not found")
+            raise Store(f"policy {policy_id!r} not found")
         del self.policies[policy_id]
 
-    def record_draft(self, draft: StoredDraft) -> None:
+    def record_draft(self, draft: DraftStored) -> None:
         """Append ``draft`` to the draft history."""
         self.drafts.append(draft)
 
@@ -164,7 +164,7 @@ class InMemoryRepository:
     ) -> None:
         """Update one or more of ``intent_json`` and the three scope JSON columns.
 
-        Mirrors :meth:`SqliteRepository.update_draft_json` so the
+        Mirrors :meth:`Sqlite.update_draft_json` so the
         migration code path works against both backends.
         """
         allowed = {
@@ -175,10 +175,10 @@ class InMemoryRepository:
         }
         unknown = set(json_columns) - allowed
         if unknown:
-            raise StorageError(f"unknown draft json columns: {sorted(unknown)}")
+            raise Store(f"unknown draft json columns: {sorted(unknown)}")
         for index, draft in enumerate(self.drafts):
             if draft.id == draft_id:
-                updated = StoredDraft(
+                updated = DraftStored(
                     id=draft.id,
                     policy_id=draft.policy_id,
                     model=draft.model,
@@ -199,34 +199,34 @@ class InMemoryRepository:
                 )
                 self.drafts[index] = updated
                 return
-        raise StorageError(f"no draft with id {draft_id!r}")
+        raise Store(f"no draft with id {draft_id!r}")
 
-    def latest_draft(self, policy_id: str) -> StoredDraft:
+    def latest_draft(self, policy_id: str) -> DraftStored:
         """Return the most recent draft for ``policy_id``.
 
         Args:
             policy_id: Identifier of the policy to query.
 
         Returns:
-            The most recent :class:`StoredDraft` for ``policy_id``.
+            The most recent :class:`DraftStored` for ``policy_id``.
 
         Raises:
-            StorageError: If no drafts exist for ``policy_id``.
+            Store: If no drafts exist for ``policy_id``.
         """
         matching = [draft for draft in self.drafts if draft.policy_id == policy_id]
         if not matching:
-            raise StorageError(f"no drafts for policy {policy_id!r}")
+            raise Store(f"no drafts for policy {policy_id!r}")
         return matching[-1]
 
-    def list_drafts(self, policy_id: str | None = None) -> Sequence[StoredDraft]:
+    def list_drafts(self, policy_id: str | None = None) -> Sequence[DraftStored]:
         """Return all drafts, optionally filtered by ``policy_id``."""
         if policy_id is None:
             return list(self.drafts)
         return [draft for draft in self.drafts if draft.policy_id == policy_id]
 
-    def record_report(self, report: StoredReport) -> None:
+    def record_report(self, report: ReportStored) -> None:
         """Append ``report`` to the report history, stamping ``created_at`` when missing."""
-        stamped = StoredReport(
+        stamped = ReportStored(
             policy_id=report.policy_id,
             kind=report.kind,
             passed=report.passed,
@@ -235,7 +235,7 @@ class InMemoryRepository:
         )
         self.reports.append(stamped)
 
-    def latest_report(self, policy_id: str, kind: str) -> StoredReport:
+    def latest_report(self, policy_id: str, kind: str) -> ReportStored:
         """Return the most recent report for ``policy_id`` of ``kind``.
 
         Args:
@@ -243,10 +243,10 @@ class InMemoryRepository:
             kind: Report kind (``"validation"`` or ``"test"``).
 
         Returns:
-            The most recent matching :class:`StoredReport`.
+            The most recent matching :class:`ReportStored`.
 
         Raises:
-            StorageError: If no matching report exists.
+            Store: If no matching report exists.
         """
         matching = [
             report
@@ -254,10 +254,10 @@ class InMemoryRepository:
             if report.policy_id == policy_id and report.kind == kind
         ]
         if not matching:
-            raise StorageError(f"no {kind} report for policy {policy_id!r}")
+            raise Store(f"no {kind} report for policy {policy_id!r}")
         return matching[-1]
 
-    def record_deployment(self, deployment: DeploymentRecord) -> None:
+    def record_deployment(self, deployment: Record) -> None:
         """Append ``deployment`` to the deployment history."""
         self.deployments.append(deployment)
 
@@ -278,7 +278,7 @@ class InMemoryRepository:
 
     def list_deployments(
         self, domain: str | None = None
-    ) -> Sequence[DeploymentRecord]:
+    ) -> Sequence[Record]:
         """Return all deployments, optionally filtered by ``domain``."""
         if domain is None:
             return list(self.deployments)
@@ -287,4 +287,4 @@ class InMemoryRepository:
         ]
 
 
-__all__ = ["InMemoryRepository"]
+__all__ = ["Memory"]

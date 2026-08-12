@@ -12,17 +12,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from cedrus import (
-    ActionScope,
-    PolicyIntent,
-    PrincipalScope,
-    Requirement,
-    ResourceScope,
+    Action,
+    Intent,
+    Need,
+    Principal,
+    Resource,
     verify_policies,
 )
 
 
-def make_requirement() -> Requirement:
-    return Requirement(
+def make_requirement() -> Need:
+    return Need(
         id="HR-001",
         text="Body",
         domain="hr",
@@ -31,14 +31,14 @@ def make_requirement() -> Requirement:
     )
 
 
-def make_policy(cedar: str, identifier: str = "HR-001") -> PolicyIntent:
-    return PolicyIntent(
+def make_policy(cedar: str, identifier: str = "HR-001") -> Intent:
+    return Intent(
         id=identifier,
         requirement_id=identifier,
         effect="permit",
-        principal=PrincipalScope(),
-        action=ActionScope(),
-        resource=ResourceScope(),
+        principal=Principal(),
+        action=Action(),
+        resource=Resource(),
         notes={"cedar_text": cedar},
     )
 

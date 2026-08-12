@@ -8,15 +8,15 @@ from pathlib import Path
 import pytest
 
 from cedrus import (
-    ActionScope,
-    DraftPolicy,
-    ExistingPolicy,
-    OfflineGenerator,
-    PolicyIntent,
-    PrincipalScope,
-    ResourceScope,
+    Action,
+    Draft,
+    Existing,
+    Intent,
+    Offline,
+    Principal,
+    Resource,
+    Space,
     Workspace,
-    WorkspaceError,
 )
 
 PHOTOFLASH_SCHEMA = {
@@ -52,13 +52,13 @@ def make_workspace_with_domain(tmp_path: Path) -> Workspace:
 def test_workspace_open_always_uses_sqlite(tmp_path: Path) -> None:
     workspace = Workspace.open(tmp_path)
     try:
-        assert workspace.repository.__class__.__name__ == "SqliteRepository"
+        assert workspace.repository.__class__.__name__ == "Sqlite"
     finally:
         workspace.close()
 
 
 def test_workspace_open_missing_root_raises(tmp_path: Path) -> None:
-    with pytest.raises(WorkspaceError):
+    with pytest.raises(Space):
         Workspace.open(tmp_path / "missing")
 
 
@@ -131,9 +131,9 @@ def test_workspace_remove_requirement(tmp_path: Path) -> None:
         )
         workspace.add_requirement_file(path)
         workspace.remove_requirement("HR-042")
-        from cedrus import StorageError
+        from cedrus import Store
 
-        with pytest.raises(StorageError):
+        with pytest.raises(Store):
             workspace.get_requirement("HR-042")
     finally:
         workspace.close()
@@ -166,9 +166,9 @@ def test_workspace_create_draft_uses_scopes(tmp_path: Path) -> None:
         workspace.add_requirement_file(path)
         draft = workspace.create_draft(
             "HR-042",
-            principal=PrincipalScope(kind="is_type", type_name="User"),
-            action=ActionScope(kind="named", name="viewPhoto"),
-            resource=ResourceScope(kind="is_type", type_name="Photo"),
+            principal=Principal(kind="is_type", type_name="User"),
+            action=Action(kind="named", name="viewPhoto"),
+            resource=Resource(kind="is_type", type_name="Photo"),
         )
         assert draft.principal.type_name == "User"
         assert draft.action.name == "viewPhoto"
@@ -188,11 +188,11 @@ def test_workspace_generate_draft_persists(tmp_path: Path) -> None:
         schema = workspace.load_schema("hr")
         draft = workspace.create_draft(
             "HR-042",
-            principal=PrincipalScope(kind="is_type", type_name="User"),
-            action=ActionScope(kind="named", name="viewPhoto"),
-            resource=ResourceScope(kind="is_type", type_name="Photo"),
+            principal=Principal(kind="is_type", type_name="User"),
+            action=Action(kind="named", name="viewPhoto"),
+            resource=Resource(kind="is_type", type_name="Photo"),
         )
-        generator = OfflineGenerator()
+        generator = Offline()
         updated, result = workspace.generate_draft(draft, schema, generator)
         assert updated.cedar
         assert result.model == generator.model
@@ -213,17 +213,17 @@ def test_workspace_generate_draft_uses_existing(tmp_path: Path) -> None:
         )
         workspace.add_requirement_file(path)
         schema = workspace.load_schema("hr")
-        existing = ExistingPolicy.from_requirement(
+        existing = Existing.from_requirement(
             workspace.get_requirement("HR-042"),
             cedar="permit (principal, action, resource);",
         )
         draft = workspace.create_draft(
             "HR-042",
-            principal=PrincipalScope(kind="is_type", type_name="User"),
-            action=ActionScope(kind="named", name="viewPhoto"),
-            resource=ResourceScope(kind="is_type", type_name="Photo"),
+            principal=Principal(kind="is_type", type_name="User"),
+            action=Action(kind="named", name="viewPhoto"),
+            resource=Resource(kind="is_type", type_name="Photo"),
         )
-        generator = OfflineGenerator()
+        generator = Offline()
         updated, _ = workspace.generate_draft(draft, schema, generator, existing=[existing])
         assert updated.cedar
     finally:
@@ -240,7 +240,7 @@ def test_workspace_apply_validates_and_persists(tmp_path: Path) -> None:
         )
         workspace.add_requirement_file(path)
         schema = workspace.load_schema("hr")
-        draft = DraftPolicy(
+        draft = Draft(
             id="hr-hr-042",
             requirement=workspace.get_requirement("HR-042"),
             cedar=(
@@ -248,13 +248,13 @@ def test_workspace_apply_validates_and_persists(tmp_path: Path) -> None:
                 'action == PhotoFlash::Action::"viewPhoto", '
                 'resource is PhotoFlash::Photo);'
             ),
-            intent=PolicyIntent(
+            intent=Intent(
                 id="hr-hr-042",
                 requirement_id="HR-042",
                 effect="permit",
-                principal=PrincipalScope(kind="is_type", type_name="User"),
-                action=ActionScope(kind="named", name="viewPhoto"),
-                resource=ResourceScope(kind="is_type", type_name="Photo"),
+                principal=Principal(kind="is_type", type_name="User"),
+                action=Action(kind="named", name="viewPhoto"),
+                resource=Resource(kind="is_type", type_name="Photo"),
             ),
         )
         compiled = workspace.apply(draft, schema)
@@ -295,17 +295,17 @@ def test_workspace_apply_with_scenarios(tmp_path: Path) -> None:
             'action == PhotoFlash::Action::"viewPhoto", '
             'resource == PhotoFlash::Photo::"p1");'
         )
-        draft = DraftPolicy(
+        draft = Draft(
             id="hr-hr-042",
             requirement=workspace.get_requirement("HR-042"),
             cedar=cedar,
-            intent=PolicyIntent(
+            intent=Intent(
                 id="hr-hr-042",
                 requirement_id="HR-042",
                 effect="permit",
-                principal=PrincipalScope(kind="specific", type_name="User", entity_id="alice"),
-                action=ActionScope(kind="named", name="viewPhoto"),
-                resource=ResourceScope(kind="specific", type_name="Photo", entity_id="p1"),
+                principal=Principal(kind="specific", type_name="User", entity_id="alice"),
+                action=Action(kind="named", name="viewPhoto"),
+                resource=Resource(kind="specific", type_name="Photo", entity_id="p1"),
             ),
         )
         scenarios = workspace.load_scenarios("hr")
@@ -346,21 +346,21 @@ def test_workspace_apply_with_failing_scenarios(tmp_path: Path) -> None:
             'action == PhotoFlash::Action::"viewPhoto", '
             'resource);'
         )
-        draft = DraftPolicy(
+        draft = Draft(
             id="hr-hr-042",
             requirement=workspace.get_requirement("HR-042"),
             cedar=cedar,
-            intent=PolicyIntent(
+            intent=Intent(
                 id="hr-hr-042",
                 requirement_id="HR-042",
                 effect="forbid",
-                principal=PrincipalScope(kind="specific", type_name="User", entity_id="bob"),
-                action=ActionScope(kind="named", name="viewPhoto"),
-                resource=ResourceScope(kind="any"),
+                principal=Principal(kind="specific", type_name="User", entity_id="bob"),
+                action=Action(kind="named", name="viewPhoto"),
+                resource=Resource(kind="any"),
             ),
         )
         scenarios = workspace.load_scenarios("hr")
-        with pytest.raises(WorkspaceError):
+        with pytest.raises(Space):
             workspace.apply(draft, schema, scenarios=scenarios)
     finally:
         workspace.close()
@@ -375,8 +375,8 @@ def test_workspace_apply_without_cedar_raises(tmp_path: Path) -> None:
         )
         workspace.add_requirement_file(path)
         schema = workspace.load_schema("hr")
-        draft = DraftPolicy.from_requirement(workspace.get_requirement("HR-042"))
-        with pytest.raises(WorkspaceError):
+        draft = Draft.from_requirement(workspace.get_requirement("HR-042"))
+        with pytest.raises(Space):
             workspace.apply(draft, schema)
     finally:
         workspace.close()
@@ -391,13 +391,13 @@ def test_workspace_apply_with_unresolved_raises(tmp_path: Path) -> None:
         )
         workspace.add_requirement_file(path)
         schema = workspace.load_schema("hr")
-        draft = DraftPolicy(
+        draft = Draft(
             id="hr-hr-042",
             requirement=workspace.get_requirement("HR-042"),
             cedar="permit (principal, action, resource);",
             unresolved=("needs review",),
         )
-        with pytest.raises(WorkspaceError):
+        with pytest.raises(Space):
             workspace.apply(draft, schema)
     finally:
         workspace.close()
@@ -424,7 +424,7 @@ def test_workspace_validate_policies_empty_raises(tmp_path: Path) -> None:
     workspace = make_workspace_with_domain(tmp_path)
     try:
         schema = workspace.load_schema("hr")
-        with pytest.raises(WorkspaceError):
+        with pytest.raises(Space):
             workspace.validate_policies("hr", schema)
     finally:
         workspace.close()
@@ -466,7 +466,7 @@ def test_workspace_test_domain_missing_inputs(tmp_path: Path) -> None:
     workspace = make_workspace_with_domain(tmp_path)
     try:
         schema = workspace.load_schema("hr")
-        with pytest.raises(WorkspaceError):
+        with pytest.raises(Space):
             workspace.test_domain("hr", schema)
     finally:
         workspace.close()
@@ -494,7 +494,7 @@ def test_workspace_export_domain(tmp_path: Path) -> None:
 def test_workspace_export_domain_no_policies_raises(tmp_path: Path) -> None:
     workspace = make_workspace_with_domain(tmp_path)
     try:
-        with pytest.raises(WorkspaceError):
+        with pytest.raises(Space):
             workspace.export_domain("hr", tmp_path / "out.cedar")
     finally:
         workspace.close()
@@ -513,7 +513,7 @@ def test_workspace_scenarios_helper_rejects_bad_payload(tmp_path: Path) -> None:
     workspace = make_workspace_with_domain(tmp_path)
     try:
         workspace.scenarios_path("hr").write_text("{}", encoding="utf-8")
-        with pytest.raises(WorkspaceError):
+        with pytest.raises(Space):
             workspace.load_scenarios("hr")
     finally:
         workspace.close()
@@ -527,7 +527,7 @@ def test_workspace_upsert_compiled_with_unknown_intent(tmp_path: Path) -> None:
             "---\nid: HR-042\ndomain: hr\n---\n\nBody.\n", encoding="utf-8"
         )
         workspace.add_requirement_file(path)
-        existing = ExistingPolicy.from_requirement(
+        existing = Existing.from_requirement(
             workspace.get_requirement("HR-042"),
             cedar="permit (principal, action, resource);",
         )

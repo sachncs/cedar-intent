@@ -30,12 +30,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .compiler import PolicyIntent
-from .scopes import ActionScope, ConditionClause, PrincipalScope, ResourceScope
+from .compiler import Intent
+from .scopes import Action, Clause, Principal, Resource
 
 
-def principal_scope_to_dict(scope: PrincipalScope | None) -> dict[str, Any] | None:
-    """Serialize a :class:`PrincipalScope` to a JSON-friendly dict.
+def principal_scope_to_dict(scope: Principal | None) -> dict[str, Any] | None:
+    """Serialize a :class:`Principal` to a JSON-friendly dict.
 
     Args:
         scope: Principal scope, or ``None``.
@@ -55,20 +55,20 @@ def principal_scope_to_dict(scope: PrincipalScope | None) -> dict[str, Any] | No
     }
 
 
-def principal_scope_from_dict(data: dict[str, Any] | None) -> PrincipalScope | None:
-    """Deserialize a :class:`PrincipalScope` from a JSON-friendly dict.
+def principal_scope_from_dict(data: dict[str, Any] | None) -> Principal | None:
+    """Deserialize a :class:`Principal` from a JSON-friendly dict.
 
     Args:
         data: Mapping previously produced by
             :func:`principal_scope_to_dict`, or ``None``.
 
     Returns:
-        The reconstructed :class:`PrincipalScope`, or ``None`` when
+        The reconstructed :class:`Principal`, or ``None`` when
         ``data`` is ``None``.
     """
     if data is None:
         return None
-    return PrincipalScope(
+    return Principal(
         kind=data.get("kind", "any"),
         type_name=data.get("type_name") or None,
         entity_id=data.get("entity_id") or None,
@@ -77,8 +77,8 @@ def principal_scope_from_dict(data: dict[str, Any] | None) -> PrincipalScope | N
     )
 
 
-def action_scope_to_dict(scope: ActionScope | None) -> dict[str, Any] | None:
-    """Serialize an :class:`ActionScope` to a JSON-friendly dict.
+def action_scope_to_dict(scope: Action | None) -> dict[str, Any] | None:
+    """Serialize an :class:`Action` to a JSON-friendly dict.
 
     Args:
         scope: Action scope, or ``None``.
@@ -96,19 +96,19 @@ def action_scope_to_dict(scope: ActionScope | None) -> dict[str, Any] | None:
     }
 
 
-def action_scope_from_dict(data: dict[str, Any] | None) -> ActionScope | None:
-    """Deserialize an :class:`ActionScope` from a JSON-friendly dict.
+def action_scope_from_dict(data: dict[str, Any] | None) -> Action | None:
+    """Deserialize an :class:`Action` from a JSON-friendly dict.
 
     Args:
         data: Mapping previously produced by
             :func:`action_scope_to_dict`, or ``None``.
 
     Returns:
-        The reconstructed :class:`ActionScope`, or ``None``.
+        The reconstructed :class:`Action`, or ``None``.
     """
     if data is None:
         return None
-    return ActionScope(
+    return Action(
         kind=data.get("kind", "any"),
         name=data.get("name") or None,
         group=data.get("group") or None,
@@ -116,8 +116,8 @@ def action_scope_from_dict(data: dict[str, Any] | None) -> ActionScope | None:
     )
 
 
-def resource_scope_to_dict(scope: ResourceScope | None) -> dict[str, Any] | None:
-    """Serialize a :class:`ResourceScope` to a JSON-friendly dict.
+def resource_scope_to_dict(scope: Resource | None) -> dict[str, Any] | None:
+    """Serialize a :class:`Resource` to a JSON-friendly dict.
 
     Args:
         scope: Resource scope, or ``None``.
@@ -136,19 +136,19 @@ def resource_scope_to_dict(scope: ResourceScope | None) -> dict[str, Any] | None
     }
 
 
-def resource_scope_from_dict(data: dict[str, Any] | None) -> ResourceScope | None:
-    """Deserialize a :class:`ResourceScope` from a JSON-friendly dict.
+def resource_scope_from_dict(data: dict[str, Any] | None) -> Resource | None:
+    """Deserialize a :class:`Resource` from a JSON-friendly dict.
 
     Args:
         data: Mapping previously produced by
             :func:`resource_scope_to_dict`, or ``None``.
 
     Returns:
-        The reconstructed :class:`ResourceScope`, or ``None``.
+        The reconstructed :class:`Resource`, or ``None``.
     """
     if data is None:
         return None
-    return ResourceScope(
+    return Resource(
         kind=data.get("kind", "any"),
         type_name=data.get("type_name") or None,
         entity_id=data.get("entity_id") or None,
@@ -158,7 +158,7 @@ def resource_scope_from_dict(data: dict[str, Any] | None) -> ResourceScope | Non
 
 
 def condition_clauses_to_list(
-    clauses: tuple[ConditionClause, ...],
+    clauses: tuple[Clause, ...],
 ) -> list[dict[str, Any]]:
     """Serialize a tuple of condition clauses to a JSON list."""
     return [{"body": clause.body, "attributes": dict(clause.attributes)} for clause in clauses]
@@ -166,7 +166,7 @@ def condition_clauses_to_list(
 
 def condition_clauses_from_list(
     data: list[dict[str, Any]] | None,
-) -> tuple[ConditionClause, ...]:
+) -> tuple[Clause, ...]:
     """Deserialize a JSON list back into a tuple of condition clauses.
 
     Accepts both the canonical shape
@@ -175,14 +175,14 @@ def condition_clauses_from_list(
     """
     if not data:
         return ()
-    clauses: list[ConditionClause] = []
+    clauses: list[Clause] = []
     for item in data:
         if isinstance(item, str):
-            clauses.append(ConditionClause(body=item))
+            clauses.append(Clause(body=item))
         elif isinstance(item, dict) and "body" in item:
             attrs = item.get("attributes") or {}
             clauses.append(
-                ConditionClause(
+                Clause(
                     body=item["body"],
                     attributes=dict(attrs) if isinstance(attrs, dict) else {},
                 )
@@ -190,8 +190,8 @@ def condition_clauses_from_list(
     return tuple(clauses)
 
 
-def intent_to_dict(intent: PolicyIntent | None) -> dict[str, Any] | None:
-    """Serialize a :class:`PolicyIntent` to a JSON-friendly dict.
+def intent_to_dict(intent: Intent | None) -> dict[str, Any] | None:
+    """Serialize a :class:`Intent` to a JSON-friendly dict.
 
     The canonical wire format uses ``when_clauses`` and
     ``unless_clauses`` keys with ``[{"body": ..., "attributes": ...},
@@ -220,8 +220,8 @@ def intent_to_dict(intent: PolicyIntent | None) -> dict[str, Any] | None:
     }
 
 
-def intent_from_dict(data: dict[str, Any] | None) -> PolicyIntent | None:
-    """Deserialize a :class:`PolicyIntent` from a JSON-friendly dict.
+def intent_from_dict(data: dict[str, Any] | None) -> Intent | None:
+    """Deserialize a :class:`Intent` from a JSON-friendly dict.
 
     Accepts both the canonical ``when_clauses``/``unless_clauses``
     shape and the legacy short form (``when``/``unless`` carrying a
@@ -233,19 +233,19 @@ def intent_from_dict(data: dict[str, Any] | None) -> PolicyIntent | None:
             or ``None``.
 
     Returns:
-        The reconstructed :class:`PolicyIntent`, or ``None`` when
+        The reconstructed :class:`Intent`, or ``None`` when
         ``data`` is ``None``.
     """
     if data is None:
         return None
     when_raw = data.get("when_clauses", data.get("when"))
     unless_raw = data.get("unless_clauses", data.get("unless"))
-    principal = principal_scope_from_dict(data.get("principal")) or PrincipalScope()
-    action = action_scope_from_dict(data.get("action")) or ActionScope()
-    resource = resource_scope_from_dict(data.get("resource")) or ResourceScope()
+    principal = principal_scope_from_dict(data.get("principal")) or Principal()
+    action = action_scope_from_dict(data.get("action")) or Action()
+    resource = resource_scope_from_dict(data.get("resource")) or Resource()
     when_clauses = condition_clauses_from_list(when_raw)
     unless_clauses = condition_clauses_from_list(unless_raw)
-    return PolicyIntent(
+    return Intent(
         id=str(data.get("id", "")),
         requirement_id=str(data.get("requirement_id", "")),
         effect=data.get("effect", "permit"),
