@@ -177,7 +177,7 @@ class Suite:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class Run:
     """Evaluate a sequence of :class:`Case` objects against a schema and policies.
 
