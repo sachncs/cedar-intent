@@ -573,7 +573,7 @@ def policy_apply(workspace: Workspace, args: Namespace, schema: Any) -> Any:
     if not getattr(args, "no_scenarios", False):
         scenarios = workspace.load_scenarios(args.domain)
     compiled = workspace.apply_for_requirement(
-        args.requirement_id, schema, scopes=scenarios, scenarios=scopes
+        args.requirement_id, schema, scopes=scopes, scenarios=scenarios
     )
     return {"compiled": compiled.to_dict()}
 
