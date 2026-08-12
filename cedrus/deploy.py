@@ -902,7 +902,7 @@ class Transport(httpx.BaseTransport):
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass
 class Client:
     """Push a :class:`Manifest` to a local directory or HTTP endpoint.
 
