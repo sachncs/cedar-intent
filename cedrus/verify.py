@@ -230,7 +230,7 @@ class Extraction:
         Raises:
             Parse: When cedarpy cannot parse the policy's Cedar.
         """
-        return parse_ast(policy_cedar(policy), schema_actions_by_namespace)
+        return parse_ast(cls.policy_cedar_text(policy), schema_actions_by_namespace)
 
     @staticmethod
     def policy_id_of(policy: Any) -> str:
@@ -682,83 +682,6 @@ class Verifier:
         ]
 
 
-def verify_policies(
-    domain: str,
-    policies: Sequence[Any],
-    requirement_ids: Sequence[str],
-    action_names: Sequence[tuple[str, str]],
-    entity_type_names: Iterable[str],
-    actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]] | None = None,
-) -> Report:
-    """Run static verification on ``policies`` and return a structured report.
-
-    Public module-level entry point: build a :class:`Verifier` with
-    ``schema.actions_by_namespace()`` and delegate.
-
-    Args:
-        domain: Domain name reported in the result.
-        policies: Policies to inspect. The Cedar source of each
-            policy is parsed to extract scope and condition data.
-        requirement_ids: All known requirement identifiers.
-        action_names: All known ``(namespace, action_id)`` pairs.
-        entity_type_names: All known entity type identifiers.
-        actions_by_namespace: Optional mapping
-            ``{namespace: {action_id: (member_action_ids)}}`` for
-            action-group expansion.
-
-    Returns:
-        A :class:`Report` aggregating findings and coverage metrics.
-    """
-    schema = _build_schema(actions_by_namespace)
-    return Verifier(schema).verify(
-        policies,
-        requirement_ids=requirement_ids,
-        action_names=action_names,
-        entity_type_names=entity_type_names,
-        domain=domain,
-    )
-
-
-def _build_schema(
-    actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]] | None,
-) -> Schema:
-    """Build a minimal :class:`Schema` proxy exposing the actions map.
-
-    The verifier only reads :meth:`Schema.actions_by_namespace`; the
-    proxy is just enough to satisfy that single call.
-
-    Args:
-        actions_by_namespace: Optional mapping ``{namespace:
-            {action_id: (member_action_ids)}}``.
-
-    Returns:
-        A schema-like object whose ``actions_by_namespace`` returns
-        the supplied mapping.
-    """
-    return _SchemaProxy(actions_by_namespace or {})
-
-
-class _SchemaProxy:
-    """Minimal :class:`Schema` proxy exposing only the action map."""
-
-    def __init__(self, actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]]) -> None:
-        self._actions_by_namespace = actions_by_namespace
-
-    def actions_by_namespace(self) -> Mapping[str, Mapping[str, tuple[str, ...]]]:
-        return self._actions_by_namespace
-
-
-def policy_cedar(policy: Any) -> str:
-    """Return the Cedar source text associated with a policy-like object."""
-    cedar = getattr(policy, "cedar", None)
-    if cedar:
-        return str(cedar)
-    notes = getattr(policy, "notes", None)
-    if isinstance(notes, Mapping):
-        return str(notes.get("cedar_text", ""))
-    return ""
-
-
 def parse_ast(
     cedar: str,
     actions_by_namespace: Mapping[str, Mapping[str, tuple[str, ...]]],
@@ -1092,28 +1015,6 @@ def collect_entity_types(
     return types
 
 
-def extract_entity_types(policies: Sequence[Any]) -> set[str]:
-    """Return the set of entity type names referenced by ``policies``.
-
-    Public helper used by callers that want a flat set of entity
-    types referenced anywhere in the policy set.
-
-    Args:
-        policies: Sequence of policies (or policy-shaped objects) to
-            scan.
-
-    Returns:
-        Set of entity type identifiers referenced by any policy.
-    """
-    extracted: list[tuple[Any, Extraction]] = []
-    for policy in policies:
-        try:
-            extracted.append((policy, parse_ast(policy_cedar(policy), {})))
-        except Parse:
-            continue
-    return collect_entity_types(extracted)
-
-
 def missing_coverage_finding(
     kind: str,
     domain: str,
@@ -1140,7 +1041,4 @@ __all__ = [
     "Parse",
     "Report",
     "Verifier",
-    "extract_entity_types",
-    "extract_scope",
-    "verify_policies",
 ]

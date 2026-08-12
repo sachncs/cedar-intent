@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from cedrus.error import Space
-from cedrus.need import Need, load_requirement
+from cedrus.need import Need
 from cedrus.policies import Existing
 
 
@@ -206,7 +206,7 @@ class Domain:
             for path in sorted(self.requirements_dir.glob("*.md")):
                 try:
                     needs.append(
-                        load_requirement(path, workspace_root=self.root)
+                        Need.from_markdown(path, workspace_root=self.root)
                     )
                 except Exception as ex:  # noqa: BLE001
                     print(f"DEBUG: need ERR {path}: {type(ex).__name__}: {ex}")

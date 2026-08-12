@@ -13,7 +13,8 @@ from cedrus import (
     Principal,
     Report,
     Resource,
-    extract_entity_types,
+    Schema,
+    Verifier,
     verify,
 )
 
@@ -379,7 +380,7 @@ def test_action_coverage_handles_same_action_in_two_namespaces() -> None:
     assert ("Finance", "view") in report.actions_uncovered
 
 
-def test_extract_entity_types_collects_references() -> None:
+def test_verifier_types_collects_references() -> None:
     policies = [
         make_policy(
             "HR-001",
@@ -395,7 +396,8 @@ def test_extract_entity_types_collects_references() -> None:
             ),
         )
     ]
-    types = extract_entity_types(policies)
+    schema = Schema.from_mapping({"": {"entityTypes": {}, "actions": {}}})
+    types = Verifier(schema).types(policies)
     assert {"Foo::Group", "Foo::Photo", "Foo::Album"}.issubset(types)
 
 

@@ -72,12 +72,12 @@ import hashlib
 import ipaddress
 import json
 import os
+import math
 import socket
 import ssl
 import tempfile
 import time
 import urllib.parse
-import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -88,6 +88,7 @@ import httpx
 
 from cedrus.error import Deploy
 from cedrus.policies import Compiled, Kind
+from cedrus.utils import id
 
 if TYPE_CHECKING:
     from cedrus.store.sqlite import Backend
@@ -922,6 +923,53 @@ class Transport(httpx.BaseTransport):
         )
 
 
+def validate_headers(headers: Mapping[str, str] | None) -> None:
+    """Reject empty, reserved, or carriage-return-bearing HTTP headers.
+
+    Args:
+        headers: Optional user-supplied headers.
+
+    Raises:
+        Deploy: When a header name is empty, reserved, or
+            contains CR/LF, or when a header value contains CR/LF.
+    """
+    if not headers:
+        return
+    for name, value in headers.items():
+        if not name or not name.strip():
+            raise Deploy("deployment header name must be non-empty")
+        if "\r" in name or "\n" in name:
+            raise Deploy(
+                f"deployment header name contains CR/LF: {name!r}"
+            )
+        if "\r" in value or "\n" in value:
+            raise Deploy(
+                f"deployment header value for {name!r} contains CR/LF"
+            )
+        if name.lower() in RESERVED_HEADERS:
+            raise Deploy(
+                f"deployment header name {name!r} is reserved and cannot be set"
+            )
+        if len(name) > 256:
+            raise Deploy(
+                f"deployment header name {name!r} exceeds 256 characters"
+            )
+        if len(value) > 8192:
+            raise Deploy(
+                f"deployment header value for {name!r} exceeds 8192 characters"
+            )
+
+
+def read_bounded(response: httpx.Response) -> str:
+    """Read the response body with a hard upper bound on bytes consumed."""
+    body_bytes = bytearray()
+    for chunk in response.iter_bytes(chunk_size=4096):
+        body_bytes.extend(chunk)
+        if len(body_bytes) >= HTTP_RESPONSE_READ_LIMIT:
+            break
+    return body_bytes[:HTTP_RESPONSE_READ_LIMIT].decode("utf-8", errors="replace")
+
+
 @dataclass(frozen=True, slots=True)
 class Client:
     """Push a :class:`Manifest` to a local directory or HTTP endpoint.
@@ -986,11 +1034,11 @@ class Client:
             Deploy: If ``timeout`` is not strictly positive or
                 ``max_retries`` is negative.
         """
-        if timeout <= 0 or not self._is_finite(timeout):
+        if timeout <= 0 or not math.isfinite(timeout):
             raise Deploy("deployment timeout must be positive and finite")
         if max_retries < 0:
             raise Deploy("deployment max_retries must be non-negative")
-        if retry_backoff < 0 or not self._is_finite(retry_backoff):
+        if retry_backoff < 0 or not math.isfinite(retry_backoff):
             raise Deploy("deployment retry_backoff must be non-negative")
         self.timeout = timeout
         self.max_retries = max_retries
@@ -1071,7 +1119,7 @@ class Client:
         directory.parent.mkdir(parents=True, exist_ok=True)
         Bundler().write_directory(manifest, directory)
         return Record(
-            id=record_id or self._generate_record_id(),
+            id=record_id or id(),
             domain=manifest.domain,
             target=str(directory.resolve()),
             target_kind=DEPLOYMENT_KIND_LOCAL,
@@ -1116,9 +1164,9 @@ class Client:
                 returns non-2xx, the request times out, or the network
                 fails.
         """
-        self._validate_headers(headers)
+        validate_headers(headers)
         pinned = self.ssrf_guard.check(url)
-        idem = idempotency_key or uuid.uuid4().hex
+        idem = idempotency_key or id()
         payload = json.dumps(manifest.to_dict()).encode("utf-8")
         request_headers: dict[str, str] = {
             "Content-Type": "application/json",
@@ -1146,11 +1194,11 @@ class Client:
                     follow_redirects=self.follow_redirects,
                 ) as client:
                     response = client.send(request)
-                    body = self._read_bounded(response)
+                    body = read_bounded(response)
                     response_sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
                     if 200 <= response.status_code < 300:
                         return Record(
-                            id=record_id or self._generate_record_id(),
+                            id=record_id or id(),
                             domain=manifest.domain,
                             target=url,
                             target_kind=DEPLOYMENT_KIND_HTTP,
@@ -1166,7 +1214,8 @@ class Client:
                         )
                     if response.status_code in {429, 503} and attempt < self.max_retries:
                         attempt += 1
-                        self._sleep(backoff)
+                        if backoff > 0:
+                            time.sleep(backoff)
                         backoff = min(backoff * 2, 8.0)
                         continue
                     raise Deploy(
@@ -1180,75 +1229,13 @@ class Client:
                 if attempt >= self.max_retries:
                     raise last_error from error
                 attempt += 1
-                self._sleep(backoff)
+                if backoff > 0:
+                    time.sleep(backoff)
                 backoff = min(backoff * 2, 8.0)
                 continue
         if last_error is not None:
             raise last_error
         raise Deploy("deployment exhausted retries without a result")
-
-    @staticmethod
-    def _validate_headers(headers: "Mapping[str, str] | None") -> None:
-        """Reject empty, reserved, or carriage-return-bearing HTTP headers.
-
-        Args:
-            headers: Optional user-supplied headers.
-
-        Raises:
-            Deploy: When a header name is empty, reserved, or
-                contains CR/LF, or when a header value contains CR/LF.
-        """
-        if not headers:
-            return
-        for name, value in headers.items():
-            if not name or not name.strip():
-                raise Deploy("deployment header name must be non-empty")
-            if "\r" in name or "\n" in name:
-                raise Deploy(
-                    f"deployment header name contains CR/LF: {name!r}"
-                )
-            if "\r" in value or "\n" in value:
-                raise Deploy(
-                    f"deployment header value for {name!r} contains CR/LF"
-                )
-            if name.lower() in RESERVED_HEADERS:
-                raise Deploy(
-                    f"deployment header name {name!r} is reserved and cannot be set"
-                )
-            if len(name) > 256:
-                raise Deploy(
-                    f"deployment header name {name!r} exceeds 256 characters"
-                )
-            if len(value) > 8192:
-                raise Deploy(
-                    f"deployment header value for {name!r} exceeds 8192 characters"
-                )
-
-    @staticmethod
-    def _read_bounded(response: httpx.Response) -> str:
-        """Read the response body with a hard upper bound on bytes consumed."""
-        body_bytes = bytearray()
-        for chunk in response.iter_bytes(chunk_size=4096):
-            body_bytes.extend(chunk)
-            if len(body_bytes) >= HTTP_RESPONSE_READ_LIMIT:
-                break
-        return body_bytes[:HTTP_RESPONSE_READ_LIMIT].decode("utf-8", errors="replace")
-
-    @staticmethod
-    def _is_finite(value: float) -> bool:
-        """Return True when ``value`` is a finite number (not inf or NaN)."""
-        return value == value and value not in (float("inf"), float("-inf"))
-
-    @staticmethod
-    def _sleep(seconds: float) -> None:
-        """Sleep helper that ignores zero/negative durations."""
-        if seconds > 0:
-            time.sleep(seconds)
-
-    @staticmethod
-    def _generate_record_id() -> str:
-        """Return a fresh UUID-based deployment record identifier."""
-        return uuid.uuid4().hex
 
 
 __all__ = [
@@ -1264,6 +1251,6 @@ __all__ = [
     "Record",
     "RESERVED_HEADERS",
     "Transport",
-    "generate_record_id",
+    "read_bounded",
     "validate_headers",
 ]

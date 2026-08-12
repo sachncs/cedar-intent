@@ -7,7 +7,7 @@ import os
 import time
 
 
-def generate() -> str:
+def id() -> str:
     """Return a unique ``object_id``-style identifier.
 
     Mirrors the layout used by MongoDB / Stripe / etc.: a hex
@@ -23,4 +23,4 @@ def generate() -> str:
     return f"{timestamp:x}{rest}"
 
 
-__all__ = ["generate"]
+__all__ = ["id"]

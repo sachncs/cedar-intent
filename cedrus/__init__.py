@@ -42,7 +42,8 @@ from .deploy import (
     Pin,
     Record,
     Transport,
-    generate_record_id,
+    read_bounded,
+    validate_headers,
 )
 from .domain import Domain
 from .error import (
@@ -129,5 +130,6 @@ __all__ = [
     "Verifier",
     "Vreport",
     "__version__",
-    "generate_record_id",
+    "read_bounded",
+    "validate_headers",
 ]

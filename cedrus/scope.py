@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from cedrus.error import ScopeFault
-from cedrus.utils import generate
+from cedrus.utils import id
 
 Expression = str | bool | int | float | dict[str, Any] | list[Any]
 
@@ -157,7 +157,7 @@ class Principal(Scope):
     IS_TYPE: str = "is_type"
     VARIETIES: frozenset[str] = frozenset({ANY, TYPE, SPECIFIC, IN_GROUP, IS_TYPE})
 
-    id: str = field(default_factory=generate)
+    id: str = field(default_factory=id)
     kind: str = ANY
     type_name: str | None = None
     entity_id: str | None = None
@@ -292,7 +292,7 @@ class Action(Scope):
     IN_GROUP: str = "in_group"
     VARIETIES: frozenset[str] = frozenset({ANY, NAMED, IN_GROUP})
 
-    id: str = field(default_factory=generate)
+    id: str = field(default_factory=id)
     kind: str = ANY
     name: str | None = None
     group: str | None = None
@@ -412,7 +412,7 @@ class Resource(Scope):
     IS_TYPE: str = "is_type"
     VARIETIES: frozenset[str] = frozenset({ANY, TYPE, SPECIFIC, IN_PARENT, IS_TYPE})
 
-    id: str = field(default_factory=generate)
+    id: str = field(default_factory=id)
     kind: str = ANY
     type_name: str | None = None
     entity_id: str | None = None
@@ -532,7 +532,7 @@ class Clause(Scope):
         attributes: Optional attribute bindings referenced by ``body``.
     """
 
-    id: str = field(default_factory=generate)
+    id: str = field(default_factory=id)
     body: str
     attributes: dict[str, Expression] = field(default_factory=dict)
 

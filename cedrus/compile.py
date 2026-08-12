@@ -425,23 +425,4 @@ class Source:
         }
 
 
-def compile_intent(intent: Intent) -> Source:
-    """Compile a single :class:`Intent` to Cedar source.
-
-    Thin convenience wrapper around :meth:`Intent.compile`. The
-    compiler assembles the slot clauses (rendered polymorphically by
-    each scope), appends ``when`` and ``unless`` blocks when present,
-    and terminates the statement with a semicolon. Whitespace is
-    normalized to a single space.
-
-    Args:
-        intent: The intent to compile.
-
-    Returns:
-        A :class:`Source` containing the rendered Cedar text and
-        metadata.
-    """
-    return intent.compile()
-
-
-__all__ = ["Source", "Effect", "Intent", "compile_intent"]
+__all__ = ["Source", "Effect", "Intent"]

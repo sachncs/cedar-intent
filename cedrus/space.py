@@ -51,17 +51,18 @@ from pathlib import Path
 from typing import Any, cast
 
 from cedrus.case import Case, Run, Suite
-from cedrus.compile import Intent, compile_intent
+from cedrus.compile import Intent
 from cedrus.deploy import Bundler, Client, Manifest, Record
 from cedrus.error import Fault, Space
 from cedrus.generate import Context, Generator, Result
-from cedrus.need import Need, load_requirement, load_requirements
+from cedrus.need import Need
 from cedrus.policies import Compiled, Draft, Existing, Kind
 from cedrus.schema import Schema
 from cedrus.scope import Action, Principal, Resource
 from cedrus.store import Backend, DraftStored, Memory, ReportStored, Repository, Stored
+from cedrus.utils import id as generate_id
 from cedrus.validate import Vreport
-from cedrus.verify import Report, verify_policies
+from cedrus.verify import Report, Verifier
 
 DEFAULT_STORAGE_FILENAME = "store.db"
 DEFAULT_REQUIREMENTS_DIRNAME = "requirements"
@@ -249,7 +250,7 @@ class Workspace:
         Raises:
             Require: If the file is missing or malformed.
         """
-        requirement = load_requirement(path, workspace_root=self.root)
+        requirement = Need.from_markdown(path, workspace_root=self.root)
         requirement.save(self.repository)
         return requirement
 
@@ -263,7 +264,7 @@ class Workspace:
             The list of requirements loaded and persisted.
         """
         added: list[Need] = []
-        for requirement in load_requirements(
+        for requirement in Need.from_directory(
             self.requirements_directory(domain), workspace_root=self.root
         ):
             requirement.save(self.repository)
@@ -497,7 +498,7 @@ class Workspace:
         result = generator.generate(self._build_context(draft, schema, existing))
         proposal = result.proposal
         qualified_intent = self._qualify_intent(proposal.intent, schema)
-        compiled_source = compile_intent(qualified_intent)
+        compiled_source = qualified_intent.compile()
         new_draft = Draft(
             id=draft.id,
             requirement=draft.requirement,
@@ -537,13 +538,12 @@ class Workspace:
             requirement.id
             for requirement in Need.list(self.repository, domain=domain)
         ]
-        return verify_policies(
-            domain=domain,
-            policies=policies,
+        return Verifier(schema).verify(
+            policies,
             requirement_ids=requirement_ids,
             action_names=sorted(schema.action_names()),
             entity_type_names=sorted(schema.entity_type_names()),
-            actions_by_namespace=schema.actions_by_namespace(),
+            domain=domain,
         )
 
     def build_bundle(
@@ -766,11 +766,6 @@ class Workspace:
                 "run 'cedrus policy generate' first"
             ) from error
         intent = self._intent_from_draft(stored_draft, placeholder.id, requirement_id)
-        from cedrus.scope import (
-            action_scope_from_dict,
-            principal_scope_from_dict,
-            resource_scope_from_dict,
-        )
         principal_payload = self._loads_optional_json(
             stored_draft.principal_scope_json
         )
@@ -783,10 +778,15 @@ class Workspace:
             requirement=requirement,
             cedar=stored_draft.cedar,
             unresolved=stored_draft.unresolved,
-            principal=principal_scope_from_dict(principal_payload)
-            or placeholder.principal,
-            action=action_scope_from_dict(action_payload) or placeholder.action,
-            resource=resource_scope_from_dict(resource_payload) or placeholder.resource,
+            principal=Principal.from_dict(principal_payload)
+            if principal_payload
+            else placeholder.principal,
+            action=Action.from_dict(action_payload)
+            if action_payload
+            else placeholder.action,
+            resource=Resource.from_dict(resource_payload)
+            if resource_payload
+            else placeholder.resource,
             intent=intent,
             status="proposed",
         )
@@ -949,34 +949,27 @@ class Workspace:
         Returns:
             A :class:`DraftStored` ready for insertion.
         """
-        from cedrus.compile import intent_to_dict
-        from cedrus.scope import (
-            action_scope_to_dict,
-            principal_scope_to_dict,
-            resource_scope_to_dict,
-        )
-
         intent_json: str | None = None
         if draft.intent is not None:
-            intent_json = json.dumps(intent_to_dict(draft.intent), sort_keys=True)
+            intent_json = json.dumps(draft.intent.to_dict(), sort_keys=True)
         principal_json = (
-            json.dumps(principal_scope_to_dict(draft.principal), sort_keys=True)
+            json.dumps(draft.principal.to_dict(), sort_keys=True)
             if draft.principal is not None
             else None
         )
         action_json = (
-            json.dumps(action_scope_to_dict(draft.action), sort_keys=True)
+            json.dumps(draft.action.to_dict(), sort_keys=True)
             if draft.action is not None
             else None
         )
         resource_json = (
-            json.dumps(resource_scope_to_dict(draft.resource), sort_keys=True)
+            json.dumps(draft.resource.to_dict(), sort_keys=True)
             if draft.resource is not None
             else None
         )
 
         return DraftStored(
-            id=str(uuid.uuid4()),
+            id=generate_id(),
             policy_id=draft.id,
             model=result.model,
             request_id=result.request_id,
@@ -1170,15 +1163,13 @@ class Workspace:
             Space: When ``intent_json`` is present but cannot be
                 parsed into the expected scope shape.
         """
-        from cedrus.compile import intent_from_dict
-
         if draft.intent is None:
             return None
         data = Workspace._loads_optional_json(draft.intent.to_dict())
         if data is None:
             return None
         try:
-            intent = intent_from_dict(data)
+            intent = Intent.from_dict(data)
         except (KeyError, TypeError, ValueError) as error:
             raise Space(
                 f"stored draft {draft.id!r} has corrupt intent JSON ({error}); "
@@ -1223,6 +1214,4 @@ __all__ = [
     "DEFAULT_STORAGE_FILENAME",
     "Space",
     "Workspace",
-    "load_requirement",
-    "load_requirements",
 ]

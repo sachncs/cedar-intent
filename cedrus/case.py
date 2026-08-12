@@ -211,47 +211,15 @@ class Run:
             The populated :class:`Suite`. Also stored on
                 ``self.result`` so callers can inspect the run after
                 the call returns.
-
-        Raises:
-            Validate: If the engine returns a decision string that is
-                not ``"Allow"`` or ``"Deny"``.
         """
         policy_set = PolicySet.from_str("\n\n".join(policies))
-        outcomes: list[Outcome] = []
-        for scenario in self.cases:
-            request: dict[str, Any] = {
-                "principal": scenario.principal,
-                "action": scenario.action,
-                "resource": scenario.resource,
-                "context": scenario.context,
-            }
-            auth_result = is_authorized(
-                request, policy_set, [], schema=schema.handle
-            )
-            actual_str = auth_result.decision.name
-            if actual_str == "Allow":
-                actual: Decision = "Allow"
-            elif actual_str == "Deny":
-                actual = "Deny"
-            else:
-                raise Validate(f"unknown Cedar decision: {actual_str!r}")
-            diagnostics: dict[str, Any] = {}
-            reasons = getattr(
-                getattr(auth_result, "diagnostics", None), "reasons", None
-            )
-            if reasons is not None:
-                diagnostics["reasons"] = list(reasons)
-            outcomes.append(
-                Outcome(
-                    scenario=scenario,
-                    actual=actual,
-                    passed=actual == scenario.expected,
-                    diagnostics=diagnostics,
-                )
-            )
+        outcomes = tuple(
+            self.evaluate_one(schema, scenario, policy_set)
+            for scenario in self.cases
+        )
         suite = Suite(
             passed=all(result.passed for result in outcomes),
-            results=tuple(outcomes),
+            results=outcomes,
         )
         self.__dict__["result"] = suite  # bypass frozen __setattr__
         return suite

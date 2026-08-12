@@ -17,8 +17,6 @@ Attributes:
     parse_front_matter: Split a Markdown document into front matter + body.
     slugify: Build a deterministic kebab-case slug from ``text``.
     derive_domain: Derive the domain name from a requirement file path.
-    load_requirement: Load a single requirement from a Markdown file.
-    load_requirements: Load every ``*.md`` requirement in a directory.
     render_requirement: Render a :class:`Need` back to Markdown form.
 """
 
@@ -166,6 +164,71 @@ class Need:
             )
         return [cls.parse(row) for row in rows]
 
+    @classmethod
+    def from_markdown(
+        cls,
+        path: Path,
+        workspace_root: Path | None = None,
+    ) -> Need:
+        """Load a single requirement from a Markdown file.
+
+        Args:
+            path: Path to the Markdown file.
+            workspace_root: Optional workspace root used to derive the
+                domain when the front matter does not provide one.
+
+        Returns:
+            The parsed :class:`Need`.
+
+        Raises:
+            Require: If the file is missing, empty, or malformed.
+        """
+        if not path.exists() or not path.is_file():
+            raise Require(f"requirement file not found: {path}")
+        raw = path.read_text(encoding="utf-8")
+        front_matter, body = parse_front_matter(raw)
+        if not body:
+            raise Require(f"requirement file has empty body: {path}")
+        requirement_id = front_matter.get("id") or path.stem
+        domain = front_matter.get("domain")
+        if not domain and workspace_root is not None:
+            domain = derive_domain(path, workspace_root)
+        if not domain:
+            raise Require(f"requirement {requirement_id} has no domain")
+        return cls(
+            id=requirement_id,
+            text=body,
+            domain=domain,
+            source_path=path,
+            created_at=datetime.now(UTC),
+        )
+
+    @classmethod
+    def from_directory(
+        cls,
+        directory: Path,
+        workspace_root: Path | None = None,
+    ) -> list[Need]:
+        """Load every ``*.md`` requirement in ``directory`` non-recursively.
+
+        Args:
+            directory: Directory to scan for requirement files.
+            workspace_root: Optional workspace root forwarded to
+                :meth:`from_markdown` for domain derivation.
+
+        Returns:
+            A sorted list of :class:`Need` objects.
+
+        Raises:
+            Require: If ``directory`` does not exist.
+        """
+        if not directory.exists() or not directory.is_dir():
+            raise Require(f"requirement directory not found: {directory}")
+        return [
+            cls.from_markdown(path, workspace_root)
+            for path in sorted(directory.glob("*.md"))
+        ]
+
 
 def parse_front_matter(source: str) -> tuple[Mapping[str, str], str]:
     """Split a Markdown document into ``(front_matter, body)``.
@@ -250,65 +313,6 @@ def derive_domain(source_path: Path, workspace_root: Path) -> str:
     return parts[0]
 
 
-def load_requirement(path: Path, workspace_root: Path | None = None) -> Need:
-    """Load a single requirement from a Markdown file.
-
-    Args:
-        path: Path to the Markdown file.
-        workspace_root: Optional workspace root used to derive the
-            domain when the front matter does not provide one.
-
-    Returns:
-        The parsed :class:`Need`.
-
-    Raises:
-        Require: If the file is missing, empty, or malformed.
-    """
-    if not path.exists() or not path.is_file():
-        raise Require(f"requirement file not found: {path}")
-    raw = path.read_text(encoding="utf-8")
-    front_matter, body = parse_front_matter(raw)
-    if not body:
-        raise Require(f"requirement file has empty body: {path}")
-    requirement_id = front_matter.get("id") or path.stem
-    domain = front_matter.get("domain")
-    if not domain and workspace_root is not None:
-        domain = derive_domain(path, workspace_root)
-    if not domain:
-        raise Require(f"requirement {requirement_id} has no domain")
-    return Need(
-        id=requirement_id,
-        text=body,
-        domain=domain,
-        source_path=path,
-        created_at=datetime.now(UTC),
-    )
-
-
-def load_requirements(
-    directory: Path, workspace_root: Path | None = None
-) -> list[Need]:
-    """Load every ``*.md`` requirement in ``directory`` non-recursively.
-
-    Args:
-        directory: Directory to scan for requirement files.
-        workspace_root: Optional workspace root forwarded to
-            :func:`load_requirement` for domain derivation.
-
-    Returns:
-        A sorted list of :class:`Need` objects.
-
-    Raises:
-        Require: If ``directory`` does not exist.
-    """
-    if not directory.exists() or not directory.is_dir():
-        raise Require(f"requirement directory not found: {directory}")
-    requirements: list[Need] = []
-    for path in sorted(directory.glob("*.md")):
-        requirements.append(load_requirement(path, workspace_root))
-    return requirements
-
-
 def render_requirement(requirement: Need) -> str:
     """Render a requirement back to Markdown form with front matter.
 
@@ -331,8 +335,6 @@ def render_requirement(requirement: Need) -> str:
 __all__ = [
     "Need",
     "derive_domain",
-    "load_requirement",
-    "load_requirements",
     "parse_front_matter",
     "render_requirement",
     "slugify",
