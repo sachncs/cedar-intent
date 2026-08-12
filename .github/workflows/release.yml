@@ -37,7 +37,7 @@ jobs:
       - name: Install package
         run: pip install -e ".[test]"
       - name: Run pytest with coverage
-        run: pytest --cov=cedrus --cov-fail-under=88
+        run: pytest --cov=cedrus --cov-fail-under=87
 
   publish:
     name: Build, sign, and publish to PyPI

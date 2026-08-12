@@ -9,15 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [0.7.0] - Unreleased
 
 ### Changed
-- **Rename**: The package is renamed from `cedrus` to `cedrus`.
+- **Rename**: The package is renamed from `cedar_intent` to `cedrus`.
   All classes are renamed to single-word nouns; all methods are
   single-word verbs; all enum discriminators live as class-level
-  constants on the owning class.
+  constants on the owning class. The full rename table is in
+  `todo.md` (Phases B and C).
 - **Polymorphism**: Every entity has an abstract base / Protocol
-  (`Scope`, `Policy`, `Generator`, `Repository`). The Repository is
-  segregated into six Protocols (`NeedRepository`, `StoredRepository`,
-  `DraftRepository`, `ReportRepository`, `DeployRepository`,
-  `UnitOfWork`).
+  (`Scope`, `Policy`, `Generator`, `Repository`). The orchestrators
+  (`Verifier`, `Validator`, `Bundler`, `Runner`, `Migrator`, `Client`,
+  `Parser`, `Space`, `Cli`) are concrete classes subclassable for
+  custom strategies.
 - **Encapsulation**: Wire shapes (`Intent`, `Source`, `Manifest`,
   `Need`, `Case`, etc.) are `@dataclass(frozen=True, slots=True)`.
   Mutable state (`Domain`) uses `@dataclass(slots=True)` with mutation
@@ -26,17 +27,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Internal APIs consume and produce typed objects (`Domain`, `Draft`,
   `Intent`, `Manifest`, `Record`, `Headers`, `Body`, `Receipt`,
   `Target`, `Notes`, `Metadata`, `Unresolved`, `Usage`, `Payload`).
+- **No leading underscores**: Every module-level symbol is single-word
+  and public-by-name. Internal scope is conveyed via `__all__` and
+  module docstrings, not name prefixing.
 - **Space API**: Polymorphic methods (`Space.apply(draft | need)`,
   `Space.load(schema)`, `Space.create(draft)`, `Space.generate(ctx)`,
   `Space.export(domain)`, `Space.write(bundle)`) replace the
   string-based Workspace API.
+- **Single-word files**: All module filenames are single-word:
+  `compile.py`, `deploy.py`, `error.py`, `migrate.py`, `need.py`,
+  `case.py`, `scope.py`, `validate.py`, `verify.py`, `space.py`,
+  `generate/`, `store/`.
+
+### Added
+- `cedrus.data` package: typed wire shapes (`Headers`, `Body`,
+  `Receipt`, `Target`, `Usage`, `Notes`, `Metadata`, `Payload`),
+  in-memory types (`Context`, `Proposal`, `Result`, `Unresolved`),
+  and persistence shapes (`Stored`, `DraftStored`, `ReportStored`).
+- `Domain` dataclass as the rich mutable object the Space operates
+  on. Mutations funnel through `Domain.mutate(**changes)`.
+- `Space` orchestrator (renamed from `Workspace`) with polymorphic
+  methods.
+- `Workspace` kept as a deprecated alias for `Space` during the
+  transition period.
 
 ### Removed (breaking)
-- `cedrus` import path is gone; use `cedrus`.
-- Multi-word class names (`Intent`, `Bundler`, etc.) are
-  gone; use `Intent`, `Bundler`, etc.
-- Free functions (`validate_cedar`, `compile_intent`, etc.) are gone;
-  use orchestrator classes (`Validator`, `Compiler`, etc.).
+- `cedar_intent` import path is gone; use `cedrus`.
+- Multi-word class names (`PolicyIntent`, `BundleExporter`,
+  `DeploymentClient`, etc.) are gone; use `Intent`, `Bundler`,
+  `Client`, etc.
+- Multi-word file names (`compiler.py`, `deployment.py`, etc.) are
+  gone; use `compile.py`, `deploy.py`, etc.
+- All leading-underscore module-level symbols (private convention)
+  are gone; use the public name.
+- Free functions like `validate_cedar`, `compile_intent`,
+  `verify_policies`, `run_scenarios` are kept as deprecated aliases
+  for the orchestrator methods during the transition period.
 
 ## [0.6.0] - Unreleased
 

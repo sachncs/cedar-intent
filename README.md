@@ -225,7 +225,7 @@ Compiled Cedar policies live as plain `.cedar` files inside
                          │
                  Case.test() → Suite
                          │
-           Workspace.verify_domain() → Report
+           Space.verify_domain() → Report
                          │
             Bundler.build() → Manifest
                          │

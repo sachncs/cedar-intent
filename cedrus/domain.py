@@ -12,7 +12,7 @@ accidentally bypass the orchestrator's invariants.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -132,30 +132,37 @@ class Domain:
         re-parses any Cedar files.
         """
         # Re-scan the requirements directory.
-        from .need import Need, load_requirement
+        from .need import load_requirement
 
         self.needs = []
         if self.requirements_dir.exists():
             for path in sorted(self.requirements_dir.glob("*.md")):
                 try:
-                    self.needs.append(load_requirement(path))
-                except Exception:  # noqa: BLE001
+                    self.needs.append(
+                        load_requirement(path, workspace_root=self.root)
+                    )
+                except Exception as ex:  # noqa: BLE001
+                    print(f"DEBUG: policy ERR {path}: {type(ex).__name__}: {ex}")
                     continue
 
         # Re-scan the policies directory.
 
         self.policies = []
         if self.policies_dir.exists():
+            from datetime import datetime as _dt
+
+            from .need import Need as _Need
             for path in sorted(self.policies_dir.glob("*.cedar")):
                 cedar = path.read_text(encoding="utf-8").strip()
                 try:
                     self.policies.append(
                         Existing.from_requirement(
-                            Need(
+                            _Need(
                                 id=path.stem,
                                 text=f"Imported from {path.name}",
                                 domain=self.name,
                                 source_path=path,
+                                created_at=_dt.now(UTC),
                             ),
                             cedar=cedar,
                         )
