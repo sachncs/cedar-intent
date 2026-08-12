@@ -772,7 +772,7 @@ class Transport(httpx.BaseTransport):
                 f"deployment transport mismatch: request url {url!s} disagrees "
                 f"with pinned {self.pinned.host}:{self.pinned.port}"
             )
-        timeout = self._read_timeout(request)
+        timeout = self.read_timeout(request)
         try:
             sock = socket.create_connection(
                 (self.pinned.ip, self.pinned.port), timeout=timeout
@@ -803,7 +803,7 @@ class Transport(httpx.BaseTransport):
                 pass
 
     @staticmethod
-    def _read_timeout(request: httpx.Request) -> float:
+    def read_timeout(request: httpx.Request) -> float:
         """Extract the per-request timeout from the :class:`httpx.Request` extensions."""
         timeout = request.extensions.get("timeout")
         if timeout is None:
@@ -900,53 +900,6 @@ class Transport(httpx.BaseTransport):
             headers=httpx.Headers(header_pairs),
             content=body_bytes,
         )
-
-
-def _validate_headers(headers: Mapping[str, str] | None) -> None:
-    """Reject empty, reserved, or carriage-return-bearing HTTP headers.
-
-    Args:
-        headers: Optional user-supplied headers.
-
-    Raises:
-        Deploy: When a header name is empty, reserved, or
-            contains CR/LF, or when a header value contains CR/LF.
-    """
-    if not headers:
-        return
-    for name, value in headers.items():
-        if not name or not name.strip():
-            raise Deploy("deployment header name must be non-empty")
-        if "\r" in name or "\n" in name:
-            raise Deploy(
-                f"deployment header name contains CR/LF: {name!r}"
-            )
-        if "\r" in value or "\n" in value:
-            raise Deploy(
-                f"deployment header value for {name!r} contains CR/LF"
-            )
-        if name.lower() in RESERVED_HEADERS:
-            raise Deploy(
-                f"deployment header name {name!r} is reserved and cannot be set"
-            )
-        if len(name) > 256:
-            raise Deploy(
-                f"deployment header name {name!r} exceeds 256 characters"
-            )
-        if len(value) > 8192:
-            raise Deploy(
-                f"deployment header value for {name!r} exceeds 8192 characters"
-            )
-
-
-def _read_bounded(response: httpx.Response) -> str:
-    """Read the response body with a hard upper bound on bytes consumed."""
-    body_bytes = bytearray()
-    for chunk in response.iter_bytes(chunk_size=4096):
-        body_bytes.extend(chunk)
-        if len(body_bytes) >= HTTP_RESPONSE_READ_LIMIT:
-            break
-    return body_bytes[:HTTP_RESPONSE_READ_LIMIT].decode("utf-8", errors="replace")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1143,7 +1096,7 @@ class Client:
                 returns non-2xx, the request times out, or the network
                 fails.
         """
-        _validate_headers(headers)
+        self.validate_headers(headers)
         pinned = self.ssrf_guard.check(url)
         idem = idempotency_key or id()
         payload = json.dumps(manifest.to_dict()).encode("utf-8")
@@ -1173,7 +1126,7 @@ class Client:
                     follow_redirects=self.follow_redirects,
                 ) as client:
                     response = client.send(request)
-                    body = _read_bounded(response)
+                    body = self.read_bounded(response)
                     response_sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
                     if 200 <= response.status_code < 300:
                         return Record(
@@ -1215,6 +1168,51 @@ class Client:
         if last_error is not None:
             raise last_error
         raise Deploy("deployment exhausted retries without a result")
+
+    def validate_headers(self, headers: Mapping[str, str] | None) -> None:
+        """Reject empty, reserved, or carriage-return-bearing HTTP headers.
+
+        Args:
+            headers: Optional user-supplied headers.
+
+        Raises:
+            Deploy: When a header name is empty, reserved, or
+                contains CR/LF, or when a header value contains CR/LF.
+        """
+        if not headers:
+            return
+        for name, value in headers.items():
+            if not name or not name.strip():
+                raise Deploy("deployment header name must be non-empty")
+            if "\r" in name or "\n" in name:
+                raise Deploy(
+                    f"deployment header name contains CR/LF: {name!r}"
+                )
+            if "\r" in value or "\n" in value:
+                raise Deploy(
+                    f"deployment header value for {name!r} contains CR/LF"
+                )
+            if name.lower() in RESERVED_HEADERS:
+                raise Deploy(
+                    f"deployment header name {name!r} is reserved and cannot be set"
+                )
+            if len(name) > 256:
+                raise Deploy(
+                    f"deployment header name {name!r} exceeds 256 characters"
+                )
+            if len(value) > 8192:
+                raise Deploy(
+                    f"deployment header value for {name!r} exceeds 8192 characters"
+                )
+
+    def read_bounded(self, response: httpx.Response) -> str:
+        """Read the response body with a hard upper bound on bytes consumed."""
+        body_bytes = bytearray()
+        for chunk in response.iter_bytes(chunk_size=4096):
+            body_bytes.extend(chunk)
+            if len(body_bytes) >= HTTP_RESPONSE_READ_LIMIT:
+                break
+        return body_bytes[:HTTP_RESPONSE_READ_LIMIT].decode("utf-8", errors="replace")
 
 
 __all__ = [
