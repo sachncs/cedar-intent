@@ -543,16 +543,6 @@ def command_verify(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
     return report.to_dict(), exit_code
 
 
-def command_migrate(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
-    """Run ``migrate`` subcommands.
-
-    Default: report the legacy row count (exit 0).
-    ``--apply``: perform the migration and exit 0 (or 1 on failure).
-    ``--check``: exit 1 when legacy rows are present, else exit 0.
-    """
-    raise NotImplementedError("cedrus migrate is no longer supported")
-
-
 def command_deploy(workspace: Workspace, args: Namespace) -> tuple[Any, int]:
     """Handle the three ``deploy`` subcommands."""
     # ``deploy history`` accepts an optional domain filter; only
