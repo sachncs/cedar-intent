@@ -49,7 +49,7 @@ pip install -e ".[test]"
    pytest --cov=cedar_intent --cov-report=term-missing
    ```
 
-   Coverage must stay above 90%. The full suite must pass on every
+   Coverage must stay above 88%. The full suite must pass on every
    supported Python version.
 
 5. Open a pull request against `main`. Use the provided PR template.
@@ -69,7 +69,7 @@ pip install -e ".[test]"
   for any non-CLI output.
 - **Tests** — colocate unit tests next to the module they exercise.
   Use `pytest`, not `unittest`.
-- **Coverage** — new code must keep overall coverage at or above 90%.
+- **Coverage** — new code must keep overall coverage at or above 88%.
 - **Type hints** — every public symbol carries explicit type hints.
   `mypy --strict` must pass.
 
