@@ -40,6 +40,12 @@ def _need() -> Need:
     )
 
 
+def _schema():
+    from cedrus import Schema
+
+    return Schema.from_mapping({"hr": {"entityTypes": {"User": {}, "Photo": {}}, "actions": {}}})
+
+
 def _intent() -> Intent:
     return Intent(
         id="HR-001",
@@ -309,6 +315,102 @@ def test_draft_status_is_string() -> None:
     assert DraftStatus("proposed") == "proposed"
     assert DraftStatus("accepted") == "accepted"
     assert DraftStatus("rejected") == "rejected"
+
+
+# ---------------------------------------------------------------------------
+# Draft.generate / Draft.apply_result
+# ---------------------------------------------------------------------------
+
+
+def test_draft_generate_calls_generator_with_draft_context() -> None:
+    from cedrus.generate import Context, Proposal, Result
+
+    captured: dict = {}
+
+    class StubGenerator:
+        def generate(self, context: Context) -> Result:
+            captured["need"] = context.need.id
+            return Result(
+                proposal=Proposal(
+                    intent=None,  # type: ignore[arg-type]
+                    unresolved=(),
+                    notes=None,  # type: ignore[arg-type]
+                ),
+                model="stub",
+                request_id=None,
+                usage=None,  # type: ignore[arg-type]
+            )
+
+    draft = Draft(
+        id="hr",
+        requirement=_need(),
+        principal=Principal(kind="is_type", type_name="User"),
+        action=Action(kind="named", name="view"),
+        resource=Resource(kind="is_type", type_name="Photo"),
+    )
+    proposal = draft.generate(
+        _schema(),  # type: ignore[arg-type]
+        StubGenerator(),  # type: ignore[arg-type]
+    )
+    assert captured["need"] == "HR-001"
+    assert isinstance(proposal, Proposal)
+
+
+def test_draft_generate_skips_existing_policies_that_cant_be_intented() -> None:
+    from cedrus.generate import Context, Proposal, Result
+
+    captured: dict = {}
+
+    class StubGenerator:
+        def generate(self, context: Context) -> Result:
+            captured["existing_count"] = len(context.existing)
+            return Result(
+                proposal=Proposal(
+                    intent=None,  # type: ignore[arg-type]
+                    unresolved=(),
+                    notes=None,  # type: ignore[arg-type]
+                ),
+                model="stub",
+                request_id=None,
+                usage=None,  # type: ignore[arg-type]
+            )
+
+    existing = Existing(
+        id="HR-099", requirement=_need(), cedar="permit (...);"
+    )
+    draft = Draft(id="hr", requirement=_need())
+    draft.generate(
+        _schema(),  # type: ignore[arg-type]
+        StubGenerator(),  # type: ignore[arg-type]
+        existing=[existing],
+    )
+    assert captured["existing_count"] == 0
+
+
+def test_draft_apply_result_merges_notes() -> None:
+    from cedrus.data import Notes
+    from cedrus.generate import Proposal, Result as GenResult
+
+    base = Draft(
+        id="hr",
+        requirement=_need(),
+        notes=Notes(items=(("author", "alice"),)),
+    )
+    proposal = Proposal(
+        intent=None,  # type: ignore[arg-type]
+        unresolved=("x",),
+        notes=Notes(items=(("generator", "offline"),)),
+    )
+    result = GenResult(
+        proposal=proposal,
+        model="offline",
+        request_id=None,
+        usage=Notes(),
+    )
+    merged = base.apply_result(result)
+    notes = merged.notes.to_dict()
+    assert notes["author"] == "alice"
+    assert notes["generator"] == "offline"
 
 
 __all__ = []

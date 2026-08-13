@@ -190,7 +190,8 @@ class Draft(Kind):
         """
         proposal = result.proposal
         merged = dict(self.notes.to_dict())
-        merged.update(proposal.notes.to_dict())
+        if proposal.notes is not None:
+            merged.update(proposal.notes.to_dict())
         return Proposal(
             intent=proposal.intent,
             unresolved=proposal.unresolved,
