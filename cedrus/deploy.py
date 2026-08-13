@@ -870,7 +870,7 @@ class Transport(httpx.BaseTransport):
             if header_end != -1 and len(response_bytes) >= HTTP_RESPONSE_READ_LIMIT:
                 response_bytes = response_bytes[:HTTP_RESPONSE_READ_LIMIT]
                 break
-        return self.parse_response(bytes(response_bytes))
+        return Transport.parse_response(bytes(response_bytes))
 
     @staticmethod
     def parse_response(raw: bytes) -> httpx.Response:

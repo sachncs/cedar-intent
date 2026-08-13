@@ -446,18 +446,37 @@ class DraftStored:
         if not assignments:
             return
         params: dict[str, Any] = {"id": self.id}
-        if intent is not None:
-            rows = self.to_rows()
-            with repo.transaction():
-                write_intent(repo, rows)
-            params["intent_id"] = intent.id
-        if principal is not None:
-            params["principal_id"] = principal.id
-        if action is not None:
-            params["action_id"] = action.id
-        if resource is not None:
-            params["resource_id"] = resource.id
+        # Insert new scope rows so the FK targets exist before we
+        # update the drafts row.
         with repo.transaction():
+            if principal is not None:
+                repo.execute(
+                    "INSERT OR REPLACE INTO principals "
+                    "(id, kind, type_name, entity_id, group_type, group_id) "
+                    "VALUES (:id, :kind, :type_name, :entity_id, :group_type, :group_id)",
+                    principal.to_data(),
+                )
+                params["principal_id"] = principal.id
+            if action is not None:
+                repo.execute(
+                    "INSERT OR REPLACE INTO actions "
+                    "(id, kind, name, action_group, namespace) "
+                    "VALUES (:id, :kind, :name, :action_group, :namespace)",
+                    action.to_data(),
+                )
+                params["action_id"] = action.id
+            if resource is not None:
+                repo.execute(
+                    "INSERT OR REPLACE INTO resources "
+                    "(id, kind, type_name, entity_id, parent_type, parent_id) "
+                    "VALUES (:id, :kind, :type_name, :entity_id, :parent_type, :parent_id)",
+                    resource.to_data(),
+                )
+                params["resource_id"] = resource.id
+            if intent is not None:
+                rows = self.to_rows()
+                write_intent(repo, rows)
+                params["intent_id"] = intent.id
             repo.execute(
                 f"UPDATE drafts SET {', '.join(assignments)} WHERE id = :id",
                 params,
@@ -657,8 +676,8 @@ def write_intent(repo: Backend, rows: dict[str, Any]) -> None:
     for action in rows.get("actions", ()):
         repo.execute(
             "INSERT OR REPLACE INTO actions "
-            "(id, kind, name, action_group) "
-            "VALUES (:id, :kind, :name, :action_group)",
+            "(id, kind, name, action_group, namespace) "
+            "VALUES (:id, :kind, :name, :action_group, :namespace)",
             action,
         )
     for resource in rows.get("resources", ()):

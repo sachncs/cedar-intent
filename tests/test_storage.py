@@ -397,4 +397,75 @@ def test_memory_satisfies_repository_protocol_via_isinstance() -> None:
     assert isinstance(Memory(), Repository)
 
 
+def test_draft_stored_update_replaces_individual_scopes() -> None:
+    """DraftStored.update swaps individual typed scopes; untargeted scopes are preserved."""
+    from cedrus.scope import Action, Principal, Resource
+
+    repo = Memory()
+    make_requirement("hr-001").save(repo)
+    intent1 = make_intent("hr-001")
+    draft = DraftStored(
+        id="d1",
+        policy_id="hr-001",
+        model="offline",
+        request_id=None,
+        unresolved=(),
+        cedar="permit (principal, action, resource);",
+        created_at=datetime.now(UTC),
+        intent=intent1,
+        principal=Principal(kind="any"),
+        action=Action(kind="any"),
+        resource=Resource(kind="any"),
+    )
+    draft.save(repo)
+
+    new_action = Action(kind="named", name="delete")
+    draft.update(repo, action=new_action)
+    fetched = DraftStored.latest(repo, "hr-001")
+    assert fetched.action.kind == "named"
+    # principal was not updated, should still be "any"
+    assert fetched.principal.kind == "any"
+
+
+def test_stored_to_data_emits_main_row_and_intent_payload() -> None:
+    repo = Memory()
+    make_requirement("hr-001").save(repo)
+    intent = make_intent("hr-001")
+    p = Stored(
+        id="hr-001", domain="hr", requirement_id="hr-001",
+        intent=intent, cedar="permit (...);",
+        status="compiled",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        action=Action(kind="any"),
+    )
+    rows = p.to_rows()
+    assert rows["policies"]["id"] == "hr-001"
+    assert "intents" in rows
+
+
+def test_stored_get_raises_when_missing() -> None:
+    repo = Memory()
+    with pytest.raises(Store):
+        Stored.get(repo, "nope")
+
+
+def test_report_stored_latest_filters_by_kind() -> None:
+    repo = Memory()
+    ReportStored(
+        policy_id="hr-001", kind="validation", passed=True,
+        payload=Payload(data=(("k", "v"),)),
+        created_at=datetime.now(UTC),
+    ).save(repo)
+    ReportStored(
+        policy_id="hr-001", kind="test", passed=True,
+        payload=Payload(data=(("k2", "v2"),)),
+        created_at=datetime.now(UTC),
+    ).save(repo)
+    validation = ReportStored.latest(repo, "hr-001", "validation")
+    test = ReportStored.latest(repo, "hr-001", "test")
+    assert validation.payload.data == (("k", "v"),)
+    assert test.payload.data == (("k2", "v2"),)
+
+
 __all__ = []
