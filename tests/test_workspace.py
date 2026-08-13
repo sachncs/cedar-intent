@@ -644,7 +644,40 @@ def test_space_apply_raises_when_draft_cedar_empty(tmp_path: Path) -> None:
 
 
 def test_space_apply_raises_when_draft_has_unresolved_items(tmp_path: Path) -> None:
-    from cedrus.error import Space
+    ws = _workspace_photosflash(tmp_path)
+    try:
+        ws.repository.execute(
+            "INSERT INTO requirements (id, domain, text, source_path, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("HR-001", "hr", "body", "/tmp/x.md", datetime.now(UTC).isoformat()),
+        )
+        need = ws.get_requirement("HR-001")
+        draft = Draft.from_requirement(
+            need,
+            principal=Principal(kind="is_type", type_name="PhotoFlash::User"),
+            action=Action(kind="named", name="viewPhoto", namespace="PhotoFlash"),
+            resource=Resource(kind="is_type", type_name="PhotoFlash::Photo"),
+        ).with_status("proposed")
+        # Manually attach an unresolved item to force the failure path.
+        object.__setattr__(draft, "unresolved", ("unresolved_x",))
+        intent = Intent(
+            id="HR-001", requirement_id="HR-001", effect="permit",
+            principal=Principal(kind="is_type", type_name="PhotoFlash::User"),
+            action=Action(kind="named", name="viewPhoto", namespace="PhotoFlash"),
+            resource=Resource(kind="is_type", type_name="PhotoFlash::Photo"),
+        )
+        object.__setattr__(draft, "intent", intent)
+        object.__setattr__(draft, "cedar", intent.compile().cedar)
+        schema = ws.load_schema("hr")
+        with pytest.raises(Exception):
+            ws.apply(draft, schema)
+    finally:
+        ws.close()
+
+
+def test_space_generate_draft_persists_stored_draft(tmp_path: Path) -> None:
+    """The persisted DraftStored carries the qualified intent and scopes."""
+    from cedrus.generate import Offline
 
     ws = _workspace_photosflash(tmp_path)
     try:
@@ -659,20 +692,67 @@ def test_space_apply_raises_when_draft_has_unresolved_items(tmp_path: Path) -> N
             principal=Principal(kind="is_type", type_name="User"),
             action=Action(kind="named", name="viewPhoto"),
             resource=Resource(kind="is_type", type_name="Photo"),
-        ).with_status("proposed")
-        # Manually attach an unresolved item to force the failure path.
-        object.__setattr__(draft, "unresolved", ("unresolved_x",))
+        )
+        schema = ws.load_schema("hr")
+        new_draft, result = ws.generate_draft(draft, schema, Offline())
+        assert new_draft.intent is not None
+        from cedrus.store import DraftStored
+
+        stored = DraftStored.latest(ws.repository, "draft-HR-001")
+        assert stored.principal.kind == "is_type"
+        assert stored.action.kind == "named"
+    finally:
+        ws.close()
+
+
+def test_space_apply_with_no_scenarios_skips_scenario_run(tmp_path: Path) -> None:
+    """apply() with empty scenarios skips the test-report path entirely."""
+    ws = _workspace_photosflash(tmp_path)
+    try:
+        ws.repository.execute(
+            "INSERT INTO requirements (id, domain, text, source_path, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("HR-001", "hr", "body", "/tmp/x.md", datetime.now(UTC).isoformat()),
+        )
+        need = ws.get_requirement("HR-001")
+        # Cedar rendering only adds a namespace prefix when Action.namespace
+        # is set; otherwise the type names are bare.
         intent = Intent(
             id="HR-001", requirement_id="HR-001", effect="permit",
-            principal=Principal(kind="is_type", type_name="User"),
-            action=Action(kind="named", name="viewPhoto"),
-            resource=Resource(kind="is_type", type_name="Photo"),
+            principal=Principal(kind="is_type", type_name="PhotoFlash::User"),
+            action=Action(kind="named", name="viewPhoto", namespace="PhotoFlash"),
+            resource=Resource(kind="is_type", type_name="PhotoFlash::Photo"),
         )
-        object.__setattr__(draft, "intent", intent)
-        object.__setattr__(draft, "cedar", intent.compile().cedar)
+        draft = Draft(
+            id="draft-HR-001",
+            requirement=need,
+            cedar=intent.compile().cedar,
+            principal=intent.principal,
+            action=intent.action,
+            resource=intent.resource,
+            intent=intent,
+            status="proposed",
+        )
         schema = ws.load_schema("hr")
-        with pytest.raises(Space):
-            ws.apply(draft, schema)
+        compiled = ws.apply(draft, schema, scenarios=[])
+        assert compiled.id == "draft-HR-001"
+        assert compiled.cedar
+    finally:
+        ws.close()
+
+
+def test_space_test_domain_raises_when_no_scenarios(tmp_path: Path) -> None:
+    """test_domain rejects an empty scenario list."""
+    ws = _workspace_photosflash(tmp_path)
+    try:
+        ws.repository.execute(
+            "INSERT INTO requirements (id, domain, text, source_path, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("HR-001", "hr", "body", "/tmp/x.md", datetime.now(UTC).isoformat()),
+        )
+        schema = ws.load_schema("hr")
+        with pytest.raises(Exception):
+            ws.test_domain("hr", schema)
     finally:
         ws.close()
 

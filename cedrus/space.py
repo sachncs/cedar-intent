@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from cedrus.case import Case, Run, Suite
+from cedrus.data import Payload
 from cedrus.compile import Intent
 from cedrus.deploy import Bundler, Client, Manifest, Record
 from cedrus.error import Fault, Require, Store
@@ -948,7 +949,11 @@ class Space:
             policy_id=policy_id,
             kind=kind,
             passed=report.passed,
-            payload=dict(report.to_dict()),
+            payload=Payload(
+                data=(("formatted", "\n".join(report.formatted)),)
+                if report.formatted
+                else ()
+            ),
             created_at=datetime.now(UTC),
         )
 

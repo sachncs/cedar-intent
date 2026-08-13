@@ -581,7 +581,11 @@ class ReportStored:
             A dict with the ``reports`` main row and the
             ``report_payload`` rows.
         """
-        payload_data = self.payload.to_data()
+        payload = self.payload
+        if hasattr(payload, "to_data"):
+            payload_data = payload.to_data()
+        else:  # pragma: no cover — defensive for raw dict payloads
+            payload_data = dict(payload)
         return {
             "reports": {
                 "policy_id": self.policy_id,
