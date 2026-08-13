@@ -318,19 +318,21 @@ class Intent:
     def parse_sql_shape(cls, data: dict[str, Any]) -> Intent:
         """Parse the SQL-shape dict assembled by the storage layer.
 
+        The ``data`` dict here is the inner intent payload (with
+        ``id``, ``effect``, ``requirement_id`` plus ``principals``,
+        ``actions``, ``resources`` row dicts), not the outer dict that
+        also carries the policy row.
+
         Args:
-            data: Dict with ``"intent"`` / ``"principal"`` /
-                ``"action"`` / ``"resource"`` /
-                ``"when_clauses"`` / ``"unless_clauses"`` /
-                ``"notes"`` keys.
+            data: Inner intent payload from :func:`load_intent_data`.
 
         Returns:
             The constructed :class:`Intent`.
         """
-        intent_row = data["intent"]
-        principal = Principal.parse(data["principal"])
-        action = Action.parse(data["action"])
-        resource = Resource.parse(data["resource"])
+        intent_row = data
+        principal = Principal.parse(data["principals"])
+        action = Action.parse(data["actions"])
+        resource = Resource.parse(data["resources"])
         when_clauses = tuple(
             Clause.parse(c) for c in data.get("when_clauses", ())
         )

@@ -236,19 +236,17 @@ def test_parse_llm_shape_with_effect_key() -> None:
 
 def test_parse_sql_shape_with_intent_key() -> None:
     payload = {
-        "intent": {
-            "id": "hr-001",
-            "effect": "forbid",
-            "requirement_id": "hr-001",
-        },
-        "principal": {"id": "p1", "kind": "any", "type_name": None, "entity_id": None, "group_type": None, "group_id": None},
-        "action": {"id": "a1", "kind": "any", "name": None, "action_group": None},
-        "resource": {"id": "r1", "kind": "any", "type_name": None, "entity_id": None, "parent_type": None, "parent_id": None},
+        "id": "hr-001",
+        "effect": "forbid",
+        "requirement_id": "hr-001",
+        "principals": {"id": "p1", "kind": "any", "type_name": None, "entity_id": None, "group_type": None, "group_id": None},
+        "actions": {"id": "a1", "kind": "any", "name": None, "action_group": None},
+        "resources": {"id": "r1", "kind": "any", "type_name": None, "entity_id": None, "parent_type": None, "parent_id": None},
         "when_clauses": [],
         "unless_clauses": [],
         "notes": [],
     }
-    intent = Intent.parse(payload)
+    intent = Intent.parse_sql_shape(payload)
     assert intent.id == "hr-001"
     assert intent.effect == "forbid"
 
@@ -265,19 +263,17 @@ def test_parse_raises_on_non_dict() -> None:
 
 def test_parse_sql_shape_carries_note_records() -> None:
     payload = {
-        "intent": {
-            "id": "hr-001",
-            "effect": "permit",
-            "requirement_id": "hr-001",
-        },
-        "principal": {"id": "p1", "kind": "any", "type_name": None, "entity_id": None, "group_type": None, "group_id": None},
-        "action": {"id": "a1", "kind": "any", "name": None, "action_group": None},
-        "resource": {"id": "r1", "kind": "any", "type_name": None, "entity_id": None, "parent_type": None, "parent_id": None},
+        "id": "hr-001",
+        "effect": "permit",
+        "requirement_id": "hr-001",
+        "principals": {"id": "p1", "kind": "any", "type_name": None, "entity_id": None, "group_type": None, "group_id": None},
+        "actions": {"id": "a1", "kind": "any", "name": None, "action_group": None},
+        "resources": {"id": "r1", "kind": "any", "type_name": None, "entity_id": None, "parent_type": None, "parent_id": None},
         "when_clauses": [],
         "unless_clauses": [],
         "notes": [{"key": "generator", "value": "offline"}],
     }
-    intent = Intent.parse(payload)
+    intent = Intent.parse_sql_shape(payload)
     assert intent.notes == {"generator": "offline"}
 
 

@@ -117,8 +117,13 @@ class Stored:
             The reconstructed :class:`Stored`.
         """
         row = data["policies"]
+        # data["intents"] holds the multi-row shape from load_intent_data
+        # (single 'intents' row + typed-object rows).
         intent_data = data.get("intents")
-        intent = Intent.parse(int(intent_data)) if intent_data else None
+        if intent_data and "id" in intent_data:
+            intent = Intent.parse_sql_shape(intent_data)
+        else:
+            intent = None
         return cls(
             id=row["id"],
             domain=row["domain"],
@@ -154,6 +159,7 @@ class Stored:
         if self.intent is not None:
             intent_data = self.intent.to_data()
             rows.update(intent_data)
+            rows["policies"]["intent_id"] = self.intent.id
         return rows
 
     def upsert(self, repo: Backend) -> None:
@@ -337,7 +343,7 @@ class DraftStored:
             unresolved=unresolved,
             cedar=row["cedar"],
             created_at=datetime.fromisoformat(row["created_at"]),
-            intent=Intent.parse(data["intents"]),
+            intent=Intent.parse(data["intents"]) if data.get("intents") else None,
             principal=Principal.parse(data["principals"]),
             action=Action.parse(data["actions"]),
             resource=Resource.parse(data["resources"]),
@@ -808,7 +814,7 @@ def load_intent_data(repo: Backend, intent_id: str) -> dict[str, Any]:
         (intent_id,),
     )
     return {
-        "intents": intent_row,
+        "intent": intent_row,
         "principals": principal_row,
         "actions": action_row,
         "resources": resource_row,
@@ -870,7 +876,7 @@ def fetch_draft_data(repo: Backend, row: dict[str, Any]) -> dict[str, Any]:
     unresolved = tuple(r["item"] for r in unresolved_rows)
     return {
         "drafts": row,
-        "intents": intent_data["intents"] if intent_data else None,
+        "intent": intent_data["intent"] if intent_data else None,
         "principals": principal.to_data(),
         "actions": action.to_data(),
         "resources": resource.to_data(),

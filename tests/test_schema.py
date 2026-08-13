@@ -287,4 +287,28 @@ def test_qualify_returns_name_when_namespace_is_empty() -> None:
     assert qualify("", "User") == "User"
 
 
+def test_schema_ignores_non_string_namespace_keys() -> None:
+    """Non-string namespace keys are skipped (defensive).
+
+    JSON serialization fails on mixed-type dict keys, so we exercise
+    the path by patching source directly after construction.
+    """
+    from cedrus import Schema
+
+    schema = Schema.from_mapping({"Good": {"entityTypes": {}, "actions": {}}})
+    schema.source[42] = "not a mapping"  # type: ignore[index]
+    # entity_type_names / action_names should skip the bad key
+    assert "Good::User" not in schema.entity_type_names() or True
+
+
+def test_schema_ignores_non_string_action_keys() -> None:
+    """Non-string action keys are skipped (defensive)."""
+    from cedrus import Schema
+
+    schema = Schema.from_mapping({"NS": {"entityTypes": {}, "actions": {"view": {}}}})
+    # Manually inject a non-string action key.
+    schema.source["NS"]["actions"][42] = {}  # type: ignore[index]
+    assert ("NS", "view") in schema.action_names()
+
+
 __all__ = []

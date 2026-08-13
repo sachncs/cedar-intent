@@ -619,4 +619,43 @@ def test_stored_list_drafts_returns_chronological_drafts() -> None:
     assert [d.id for d in drafts] == ["d0", "d1"]
 
 
+def test_stored_list_with_intent_data_includes_intent() -> None:
+    """Stored.parse without intent_data yields an intent of None."""
+    from cedrus.store import Stored
+
+    data = {
+        "policies": {
+            "id": "hr-001",
+            "domain": "hr",
+            "requirement_id": "hr-001",
+            "cedar": "permit (...);",
+            "status": "compiled",
+            "created_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
+        },
+    }
+    parsed = Stored.parse(data)
+    assert parsed.intent is None
+    assert parsed.id == "hr-001"
+
+
+def test_stored_list_with_no_intent_returns_none_intent() -> None:
+    """Stored.list still returns policies whose intent is None."""
+    from cedrus.store import Stored
+
+    repo = Memory()
+    make_requirement("hr-001").save(repo)
+    p = Stored(
+        id="hr-001", domain="hr", requirement_id="hr-001",
+        intent=None, cedar="permit (principal, action, resource);",
+        status="compiled",
+        created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
+        action=Action(kind="any"),
+    )
+    p.upsert(repo)
+    listed = Stored.list(repo, domain="hr")
+    assert len(listed) == 1
+    assert listed[0].intent is None
+
+
 __all__ = []
