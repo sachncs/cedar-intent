@@ -594,4 +594,47 @@ def test_verify_all_malformed_policies_yield_malformed_findings() -> None:
     assert len(malformed) == 2
 
 
+# ---------------------------------------------------------------------------
+# AST parsing helpers
+# ---------------------------------------------------------------------------
+
+
+def test_extract_signature_includes_all_slots() -> None:
+    schema = _schema()
+    intent = Intent(
+        id="HR-001",
+        requirement_id="HR-001",
+        effect="permit",
+        principal=Principal(kind="is_type", type_name="User"),
+        action=Action(kind="named", name="viewPhoto"),
+        resource=Resource(kind="is_type", type_name="Photo"),
+    )
+    extraction = Verifier(schema).extract_one(intent)
+    sig = extraction.signature
+    assert sig[0] == "permit"
+    assert sig[1] == ("User",)
+    # action signature: (namespace_or_blank, name, kind_token)
+    assert sig[2][1] == "viewPhoto"
+    assert sig[2][2] == "named"
+    assert sig[3] == ("Photo",)
+    assert sig[4] == ()
+
+
+def test_extraction_dataclass_exposes_all_fields() -> None:
+    schema = _schema()
+    intent = _intent(
+        "HR-001",
+        principal=Principal(kind="any"),
+        action=Action(kind="any"),
+        resource=Resource(kind="any"),
+    )
+    extraction = Verifier(schema).extract_one(intent)
+    assert isinstance(extraction.principal, tuple)
+    assert isinstance(extraction.action, tuple)
+    assert isinstance(extraction.resource, tuple)
+    assert isinstance(extraction.conditions, tuple)
+    assert extraction.effect == "permit"
+    assert "permit" in extraction.cedar
+
+
 __all__ = []

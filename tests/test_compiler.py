@@ -1,4 +1,13 @@
-"""Tests for :mod:`cedrus.compile` — Intent, Source, deterministic compile."""
+"""Tests for :mod:`cedrus.compile` — Intent, Source, deterministic compile.
+
+Covers data modelling (constructor validation, frozen semantics, kind
+constants), behaviour modelling (compile determinism, every slot
+rendering, when/unless block assembly), JSON round-trip
+(to_dict / from_dict / parse_llm_shape / parse_sql_shape with
+both legacy 'when'/'unless' and canonical 'when_clauses'/'unless_clauses'
+shapes), and ugly paths (non-dict input, unknown shape, empty
+clauses, missing requirement_id).
+"""
 from __future__ import annotations
 
 import pytest
@@ -173,7 +182,6 @@ def test_from_dict_round_trips() -> None:
 
 
 def test_from_dict_accepts_legacy_when_unless_keys() -> None:
-    """Legacy row shape used the bare 'when'/'unless' keys."""
     payload = {
         "id": "hr-001",
         "requirement_id": "hr-001",
@@ -301,6 +309,75 @@ def test_to_data_emits_intents_principals_actions_resources_keys() -> None:
     assert "principals" in rows
     assert "actions" in rows
     assert "resources" in rows
+
+
+def test_to_data_includes_when_unless_clause_rows() -> None:
+    intent = _intent(
+        when_clauses=(Clause(body='principal.role == "admin"'),),
+        unless_clauses=(Clause(body='principal.role == "owner"'),),
+    )
+    rows = intent.to_data()
+    assert len(rows["when_clause_rows"]) == 1
+    assert len(rows["unless_clause_rows"]) == 1
+
+
+def test_to_data_includes_intent_notes_rows() -> None:
+    intent = _intent(notes={"generator": "offline", "model": "m"})
+    rows = intent.to_data()
+    assert len(rows["intent_notes"]) == 2
+    keys = {row["key"] for row in rows["intent_notes"]}
+    assert keys == {"generator", "model"}
+
+
+# ---------------------------------------------------------------------------
+# Intent.parse_llm_shape with need parameter
+# ---------------------------------------------------------------------------
+
+
+def test_parse_llm_shape_with_need_uses_need_domain_in_id() -> None:
+    from cedrus.need import Need
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    need = Need(
+        id="HR-042",
+        text="body",
+        domain="hr",
+        source_path=Path("/tmp/x.md"),
+        created_at=datetime.now(UTC),
+    )
+    payload = {
+        "effect": "permit",
+        "principal": {"kind": "any"},
+        "action": {"kind": "any"},
+        "resource": {"kind": "any"},
+        "when": [],
+        "unless": [],
+    }
+    intent = Intent.parse(payload, need=need, generator_name="offline")
+    assert intent.id == "hr-hr-042"
+    assert intent.requirement_id == "HR-042"
+
+
+# ---------------------------------------------------------------------------
+# Intent.from_dict with empty clauses
+# ---------------------------------------------------------------------------
+
+
+def test_from_dict_with_empty_when_clauses() -> None:
+    payload = {
+        "id": "hr-001",
+        "requirement_id": "hr-001",
+        "effect": "permit",
+        "principal": {"kind": "any"},
+        "action": {"kind": "any"},
+        "resource": {"kind": "any"},
+        "when": [],
+        "unless": [],
+    }
+    rebuilt = Intent.from_dict(payload)
+    assert rebuilt.when_clauses == ()
+    assert rebuilt.unless_clauses == ()
 
 
 __all__ = []

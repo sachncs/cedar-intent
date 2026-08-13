@@ -90,4 +90,13 @@ def test_vreport_is_frozen() -> None:
         report.passed = False  # type: ignore[misc]
 
 
+def test_validator_validate_delegates_to_from_cedar() -> None:
+    from cedrus.validate import Validator
+
+    schema = _schema()
+    validator = Validator(schema)
+    report = validator.validate([VALID_POLICY])
+    assert report.passed
+
+
 __all__ = []
