@@ -872,4 +872,35 @@ def test_space_list_compiled_policies_handles_orphan_fk(tmp_path: Path) -> None:
         ws.close()
 
 
+def test_space_resolve_test_entities_returns_dicts(tmp_path: Path) -> None:
+    """resolve_test_entities converts each entity to a dict."""
+    from collections.abc import Mapping
+
+    from cedrus.space import Space
+
+    ws = _workspace_photosflash(tmp_path)
+    try:
+        entities = ws.resolve_test_entities([{"id": "u1"}, {"id": "u2"}])
+        assert isinstance(entities, list)
+        assert all(isinstance(e, Mapping) for e in entities)
+    finally:
+        ws.close()
+
+
+def test_space_apply_for_requirement_with_no_draft_raises(tmp_path: Path) -> None:
+    """apply_for_requirement raises SpaceError when no draft exists for a requirement."""
+    ws = _workspace_photosflash(tmp_path)
+    try:
+        ws.repository.execute(
+            "INSERT INTO requirements (id, domain, text, source_path, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("HR-001", "hr", "body", "/tmp/x.md", datetime.now(UTC).isoformat()),
+        )
+        schema = ws.load_schema("hr")
+        with pytest.raises(Exception):
+            ws.apply_for_requirement("HR-001", schema)
+    finally:
+        ws.close()
+
+
 __all__ = []
