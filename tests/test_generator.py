@@ -532,4 +532,84 @@ def test_llm_usage_returns_empty_when_response_has_no_usage() -> None:
     assert usage.completion == 0
 
 
+def test_llm_extract_raises_on_non_text_content() -> None:
+    """extract raises when message.content is not a string."""
+    from cedrus.generate.litellm import Llm
+
+    class StubResponse:
+        def __init__(self):
+            self.choices = [StubChoice()]
+
+    class StubChoice:
+        def __init__(self):
+            self.message = StubMessage()
+
+    class StubMessage:
+        content = 42
+
+    llm = Llm(model="openai/gpt-4", timeout=60)
+    with pytest.raises(Exception):
+        llm.extract(StubResponse())
+
+
+def test_llm_extract_raises_on_invalid_json() -> None:
+    """extract raises when message.content is not valid JSON."""
+    from cedrus.generate.litellm import Llm
+
+    class StubResponse:
+        def __init__(self):
+            self.choices = [StubChoice()]
+
+    class StubChoice:
+        def __init__(self):
+            self.message = StubMessage()
+
+    class StubMessage:
+        content = "not valid json {"
+
+    llm = Llm(model="openai/gpt-4", timeout=60)
+    with pytest.raises(Exception):
+        llm.extract(StubResponse())
+
+
+def test_llm_extract_raises_on_missing_intent_key() -> None:
+    """extract raises when JSON is valid but missing the 'intent' key."""
+    from cedrus.generate.litellm import Llm
+
+    class StubResponse:
+        def __init__(self):
+            self.choices = [StubChoice()]
+
+    class StubChoice:
+        def __init__(self):
+            self.message = StubMessage()
+
+    class StubMessage:
+        content = '{"foo": "bar"}'
+
+    llm = Llm(model="openai/gpt-4", timeout=60)
+    with pytest.raises(Exception):
+        llm.extract(StubResponse())
+
+
+def test_llm_extract_raises_when_intent_not_dict() -> None:
+    """extract raises when payload['intent'] is not a JSON object."""
+    from cedrus.generate.litellm import Llm
+
+    class StubResponse:
+        def __init__(self):
+            self.choices = [StubChoice()]
+
+    class StubChoice:
+        def __init__(self):
+            self.message = StubMessage()
+
+    class StubMessage:
+        content = '{"intent": "not a dict"}'
+
+    llm = Llm(model="openai/gpt-4", timeout=60)
+    with pytest.raises(Exception):
+        llm.extract(StubResponse())
+
+
 __all__ = []
