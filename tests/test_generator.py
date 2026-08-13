@@ -24,7 +24,7 @@ def make_need() -> Need:
 
 def make_context() -> Context:
     return Context(
-        need=_need(),
+        need=make_need(),
         schema=None,
         principal=Principal(kind="is_type", type_name="User"),
         action=Action(kind="named", name="delete"),
@@ -39,7 +39,7 @@ def make_context() -> Context:
 
 
 def test_offline_returns_permit_for_default_text() -> None:
-    result = Offline().generate(_context())
+    result = Offline().generate(make_context())
     assert result.proposal.intent.effect == "permit"
     assert result.model == "offline-deterministic"
 
@@ -147,7 +147,7 @@ def test_offline_emits_unresolved_when_principal_action_resource_are_all_any_and
 
 
 def test_offline_records_generator_name_in_notes() -> None:
-    result = Offline(name="custom-gen", model="custom-model").generate(_context())
+    result = Offline(name="custom-gen", model="custom-model").generate(make_context())
     notes = result.proposal.notes.to_dict()
     assert notes["generator"] == "custom-gen"
     assert notes["model"] == "custom-model"
@@ -159,26 +159,26 @@ def test_offline_records_generator_name_in_notes() -> None:
 
 
 def test_proposal_data_modelling() -> None:
-    intent = None
+    from cedrus.data import Notes, Unresolved
+
     proposal = Proposal(
-        intent=intent,
-        unresolved=("a", "b"),
-        notes=None,
+        intent=None,  # type: ignore[arg-type]
+        unresolved=Unresolved(items=("a", "b")),
+        notes=Notes(),
     )
     assert proposal.intent is None
-    assert proposal.unresolved == ("a", "b")
+    assert proposal.unresolved == Unresolved(items=("a", "b"))
 
 
 def test_result_data_modelling() -> None:
-    from cedrus.data import Notes
+    from cedrus.data import Notes, Unresolved, Usage
 
-    intent = None
     proposal = Proposal(
-        intent=intent,
-        unresolved=(),
-        notes=None,
+        intent=None,  # type: ignore[arg-type]
+        unresolved=Unresolved(),
+        notes=Notes(),
     )
-    result = Result(proposal=proposal, model="m", request_id="r", usage=Notes())
+    result = Result(proposal=proposal, model="m", request_id="r", usage=Usage(prompt=0, completion=0, total=0))
     assert result.model == "m"
     assert result.request_id == "r"
 
@@ -368,11 +368,14 @@ def test_llm_format_renders_intent_as_one_line_summary() -> None:
 
 
 def test_llm_format_rejects_unsupported_type() -> None:
+    from typing import cast
+
     from cedrus.generate.litellm import Llm
+    from cedrus.scope import Scope
 
     llm = Llm(model="openai/gpt-4", timeout=60)
     with pytest.raises(Exception):
-        llm.format("not a scope")
+        llm.format(cast(Scope, "not a scope"))
 
 
 # ---------------------------------------------------------------------------
@@ -409,7 +412,7 @@ def test_llm_build_dict_with_effect_calls_intent_parse() -> None:
         "when": [],
         "unless": [],
     }
-    ctx = _context()
+    ctx = make_context()
     intent = llm.build(payload, context=ctx)
     assert intent.effect == "permit"
     assert intent.requirement_id == "HR-001"
@@ -486,10 +489,12 @@ def test_llm_extract_returns_payload_for_valid_response_shape() -> None:
 
 
 def test_llm_extract_raises_on_missing_message_content() -> None:
+    from typing import Any
+
     from cedrus.generate.litellm import Llm
 
     class StubResponse:
-        choices = []
+        choices: list[Any] = []
 
     llm = Llm(model="openai/gpt-4", timeout=60)
     with pytest.raises(Exception):

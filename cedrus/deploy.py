@@ -91,7 +91,7 @@ from cedrus.policies import Compiled, Kind
 from cedrus.utils import id
 
 if TYPE_CHECKING:
-    from cedrus.store.sqlite import Backend
+    from cedrus.store import Backend, Repository
 
 DEPLOYMENT_KIND_LOCAL = "local"
 DEPLOYMENT_KIND_HTTP = "http"
@@ -225,7 +225,7 @@ class Record:
             ],
         }
 
-    def save(self, repo: "Backend") -> None:
+    def save(self, repo: "Repository") -> None:
         """Persist this deployment (insert + response rows).
 
         Args:
@@ -284,7 +284,7 @@ class Record:
     @classmethod
     def list(
         cls,
-        repo: "Backend",
+        repo: "Repository",
         *,
         domain: str | None = None,
     ) -> list["Record"]:

@@ -144,18 +144,16 @@ class Scope(ABC):
             if "name" in data:
                 return Action.from_dict(data)
             if "kind" in data:
-                # Discriminator-by-kind: route to the matching
-                # subclass based on the kind value. This keeps the
-                # round-trip parse(to_dict(...)) == ... contract.
-                # VARIETIES is a class-level frozenset on the
-                # non-slots classes; with slots=True the class-level
-                # access is a member_descriptor, so instantiate first.
+                # Discriminator-by-kind for kinds that are unique to
+                # one class. Kinds that overlap (any, type, is_type,
+                # specific) are deliberately NOT auto-dispatched here
+                # because the wrong match would produce a silently
+                # wrong Scope. Callers that want kind-only dispatch
+                # should pass a typed default and the fallback below.
                 kind = data["kind"]
-                if kind in Principal().VARIETIES:
+                if kind == "in_group" and "in_group" in Principal().VARIETIES:
                     return Principal.from_dict(data)
-                if kind in Action().VARIETIES:
-                    return Action.from_dict(data)
-                if kind in Resource().VARIETIES:
+                if kind == "in_parent" and "in_parent" in Resource().VARIETIES:
                     return Resource.from_dict(data)
         except ScopeFault as error:
             raise Compile(f"scope payload is invalid: {error}") from error

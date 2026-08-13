@@ -64,9 +64,10 @@ def make_intent() -> Intent:
 
 def test_kind_is_abstract() -> None:
     with pytest.raises(TypeError):
-        # The 2-arg form below is the minimum needed to reach
-        # the type: ignore[abstract] check on the class.
-        Existing(id="x", requirement=make_need(), cedar="")  # type: ignore[abstract]
+        # Kind has the abstract kind() method; instantiating
+        # the abstract base directly raises TypeError because
+        # the abstract method has no implementation.
+        Kind(id="x", requirement=make_need(), cedar="")  # type: ignore[abstract]
 
 
 def test_draft_kind_discriminator_is_draft() -> None:

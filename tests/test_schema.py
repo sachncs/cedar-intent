@@ -41,7 +41,7 @@ def test_from_mapping_non_mapping_raises() -> None:
 
 
 def test_from_json_file_round_trip(tmp_path: Path) -> None:
-    payload = {"Demo": {"entityTypes": {"User": {}}, "actions": {"view": {}}}}
+    payload: dict = {"Demo": {"entityTypes": {"User": {}}, "actions": {"view": {}}}}
     path = tmp_path / "schema.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     schema = Schema.from_json_file(path)

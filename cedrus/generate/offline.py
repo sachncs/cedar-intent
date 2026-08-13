@@ -134,7 +134,7 @@ class Offline:
         return Result(
             proposal=proposal,
             model=self.model,
-            request_id=None,
+            request_id="",
             usage=Usage(prompt=0, completion=0, total=0),
         )
 

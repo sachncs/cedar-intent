@@ -30,7 +30,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from cedrus.error import Compile
 from cedrus.need import slugify
@@ -186,7 +186,7 @@ class Intent:
         return cls(
             id=str(data.get("id", "")),
             requirement_id=str(data.get("requirement_id", "")),
-            effect=str(data.get("effect", "permit")),
+            effect=cast(Effect, str(data.get("effect", "permit"))),
             principal=principal,
             action=action,
             resource=resource,
@@ -289,9 +289,22 @@ class Intent:
         effect = data.get("effect")
         if effect not in {"permit", "forbid"}:
             raise Compile(f"intent has invalid effect {effect!r}")
-        parsed_principal = Scope.parse(data.get("principal") or {}) or principal or Principal()
-        parsed_action = Scope.parse(data.get("action") or {}) or action or Action()
-        parsed_resource = Scope.parse(data.get("resource") or {}) or resource or Resource()
+        # Scope.parse raises Compile on ambiguous inputs (e.g.
+        # {"kind": "specific"} without parent_type or group_type).
+        # For those we fall back to the typed default that the
+        # caller supplied, so round-trips of to_dict() through a
+        # caller that already knows the kind keep working.
+        def _resolve(cls: type, default: Any, payload: Any) -> Any:
+            if not payload:
+                return default if default is not None else cls()
+            try:
+                return Scope.parse(payload)
+            except Compile:
+                return default if default is not None else cls()
+
+        parsed_principal: Principal = _resolve(Principal, principal, data.get("principal"))
+        parsed_action: Action = _resolve(Action, action, data.get("action"))
+        parsed_resource: Resource = _resolve(Resource, resource, data.get("resource"))
         when_clauses = Clause.normalize(data.get("when") or [])
         unless_clauses = Clause.normalize(data.get("unless") or [])
         if need is not None:

@@ -49,7 +49,7 @@ import sys
 from argparse import Namespace, _SubParsersAction
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from cedrus import Error, Llm, Offline, Space
 from cedrus.case import Case
@@ -955,7 +955,7 @@ def humanize(payload: Any) -> str:
         return json.dumps(payload, indent=2, default=str)
     for predicate, render in HUMANIZERS:
         if predicate(payload):
-            return render(payload)
+            return cast(str, render(payload))
     return json.dumps(payload, indent=2, default=str)
 
 

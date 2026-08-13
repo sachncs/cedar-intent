@@ -162,7 +162,7 @@ class Stored:
             rows["policies"]["intent_id"] = self.intent.id
         return rows
 
-    def upsert(self, repo: Backend) -> None:
+    def upsert(self, repo: Repository) -> None:
         """Persist this policy (insert or replace by ``id``).
 
         Writes the main ``policies`` row plus the full intent graph
@@ -185,7 +185,7 @@ class Stored:
             if self.intent is not None:
                 write_intent(repo, rows)
 
-    def latest_draft(self, repo: Backend) -> DraftStored | None:
+    def latest_draft(self, repo: Repository) -> DraftStored | None:
         """Most recent draft for this policy's id, or ``None``.
 
         Args:
@@ -204,7 +204,7 @@ class Stored:
             return None
         return DraftStored.parse(fetch_draft_data(repo, rows[0]))
 
-    def list_drafts(self, repo: Backend) -> list[DraftStored]:
+    def list_drafts(self, repo: Repository) -> list[DraftStored]:
         """All drafts for this policy's id, in chronological order.
 
         Args:
@@ -224,16 +224,16 @@ class Stored:
     @classmethod
     def list(
         cls,
-        repo: Backend,
+        repo: Repository,
         *,
         domain: str | None = None,
-    ) -> list[Stored]:
+    ) -> "list[Stored]":
         """All policies, optionally filtered by ``domain``.
 
         Args:
             repo: Storage backend to read from.
             domain: When provided, only policies whose ``domain``
-                matches are returned.
+                attribute matches are returned.
 
         Returns:
             A list of :class:`Stored` in id order.
@@ -259,7 +259,7 @@ class Stored:
         return result
 
     @classmethod
-    def get(cls, repo: Backend, policy_id: str) -> Stored:
+    def get(cls, repo: Repository, policy_id: str) -> Stored:
         """Load the policy with ``policy_id``.
 
         Args:
@@ -314,7 +314,7 @@ class DraftStored:
     unresolved: tuple[str, ...]
     cedar: str
     created_at: datetime
-    intent: Intent
+    intent: Intent | None
     principal: Principal
     action: Action
     resource: Resource
@@ -356,7 +356,19 @@ class DraftStored:
             A dict with the ``drafts`` main row, the typed-object
             rows (intent + 3 scopes), and the ``draft_unresolved``
             rows.
+
+        Raises:
+            RuntimeError: When called on a draft with no intent
+                attached. ``to_rows`` is only meaningful when the
+                caller has just produced an intent (via ``save`` or
+                ``update``); a stored draft loaded from the database
+                is reconstructed with its intent already populated.
         """
+        if self.intent is None:
+            raise RuntimeError(
+                f"DraftStored.to_rows requires an intent; "
+                f"draft {self.id!r} has none"
+            )
         intent_data = self.intent.to_data()
         return {
             "drafts": {
@@ -381,7 +393,7 @@ class DraftStored:
             ],
         }
 
-    def save(self, repo: Backend) -> None:
+    def save(self, repo: Repository) -> None:
         """Persist this draft (insert by id, full intent graph).
 
         Writes the main ``drafts`` row plus the intent + 3 scopes +
@@ -416,7 +428,7 @@ class DraftStored:
 
     def update(
         self,
-        repo: Backend,
+        repo: Repository,
         *,
         intent: Intent | None = None,
         principal: Principal | None = None,
@@ -489,7 +501,7 @@ class DraftStored:
             )
 
     @classmethod
-    def latest(cls, repo: Backend, policy_id: str) -> DraftStored:
+    def latest(cls, repo: Repository, policy_id: str) -> DraftStored:
         """Most recent draft for ``policy_id``.
 
         Args:
@@ -514,10 +526,10 @@ class DraftStored:
     @classmethod
     def list(
         cls,
-        repo: Backend,
+        repo: Repository,
         *,
         policy_id: str | None = None,
-    ) -> list[DraftStored]:
+    ) -> "list[DraftStored]":
         """All drafts, optionally filtered by ``policy_id``.
 
         Args:
@@ -590,8 +602,13 @@ class ReportStored:
         payload = self.payload
         if hasattr(payload, "to_data"):
             payload_data = payload.to_data()
-        else:  # pragma: no cover — defensive for raw dict payloads
-            payload_data = dict(payload)
+        else:  # pragma: no cover — defensive for non-Payload payloads
+            payload_data = {
+                "report_payload": [
+                    {"position": i, "key": k, "value": v}
+                    for i, (k, v) in enumerate(payload.data)
+                ]
+            }
         return {
             "reports": {
                 "policy_id": self.policy_id,
@@ -602,7 +619,7 @@ class ReportStored:
             **payload_data,
         }
 
-    def save(self, repo: Backend) -> None:
+    def save(self, repo: Repository) -> None:
         """Persist this report (insert + payload rows).
 
         Args:
@@ -629,7 +646,7 @@ class ReportStored:
                 )
 
     @classmethod
-    def latest(cls, repo: Backend, policy_id: str, kind: str) -> ReportStored:
+    def latest(cls, repo: Repository, policy_id: str, kind: str) -> ReportStored:
         """Most recent report for ``(policy_id, kind)``.
 
         Args:
@@ -663,7 +680,7 @@ class ReportStored:
         )
 
 
-def write_intent(repo: Backend, rows: dict[str, Any]) -> None:
+def write_intent(repo: Repository, rows: dict[str, Any]) -> None:
     """Persist the typed intent graph from a multi-row dict.
 
     Public module-level function shared by ``Stored.upsert`` and
@@ -768,7 +785,7 @@ def write_intent(repo: Backend, rows: dict[str, Any]) -> None:
         )
 
 
-def load_intent_data(repo: Backend, intent_id: str) -> dict[str, Any]:
+def load_intent_data(repo: Repository, intent_id: str) -> dict[str, Any]:
     """Load the typed intent graph for ``intent_id``.
 
     Public module-level function used by
@@ -832,7 +849,7 @@ def load_intent_data(repo: Backend, intent_id: str) -> dict[str, Any]:
     }
 
 
-def fetch_draft_data(repo: Backend, row: dict[str, Any]) -> dict[str, Any]:
+def fetch_draft_data(repo: Repository, row: dict[str, Any]) -> dict[str, Any]:
     """Assemble the multi-row dict for one ``drafts`` row.
 
     Public module-level function used by
@@ -903,7 +920,7 @@ class Repository(Protocol):
     SQL primitives those calls need.
     """
 
-    def fetch(self, query: str, params: tuple = ()) -> list[dict[str, Any]]:
+    def fetch(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         """Execute ``query`` and return rows as dicts.
 
         Single general row fetcher. Every typed-object CRUD method
@@ -912,7 +929,7 @@ class Repository(Protocol):
         """
         ...
 
-    def execute(self, query: str, params: dict[str, Any] | tuple = ()) -> None:
+    def execute(self, query: str, params: dict[str, Any] | tuple[Any, ...] = ()) -> None:
         """Execute a write statement (``INSERT`` / ``UPDATE`` / ``DELETE``).
 
         Used by typed-object ``save`` / ``update`` methods inside a

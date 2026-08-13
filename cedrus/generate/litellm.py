@@ -58,9 +58,9 @@ from typing import Any
 import litellm
 from openai import APIError
 
-from cedrus.compile import Compile, Intent
+from cedrus.compile import Intent
 from cedrus.data import Notes, Unresolved, Usage
-from cedrus.error import Generate
+from cedrus.error import Compile, Generate
 from cedrus.generate.base import Context, Proposal, Result
 from cedrus.scope import Action, Clause, Principal, Resource, Scope
 
@@ -361,7 +361,7 @@ class Llm:
         return Result(
             proposal=proposal,
             model=getattr(response, "model", self.model) or self.model,
-            request_id=getattr(response, "id", None),
+            request_id=getattr(response, "id", "") or "",
             usage=self.usage(response),
         )
 
@@ -383,9 +383,13 @@ class Llm:
         Returns:
             A new :class:`Prompt` with the data slots populated.
         """
-        schema_dump = json.dumps(
-            context.schema.source, sort_keys=True, separators=(",", ":")
-        )
+        schema_obj = context.schema
+        if schema_obj is None:
+            schema_dump = ""
+        else:
+            schema_dump = json.dumps(
+                schema_obj.source, sort_keys=True, separators=(",", ":")
+            )
         requirement = (
             f"id: {context.need.id}\n"
             f"domain: {context.need.domain}\n"
@@ -437,7 +441,7 @@ class Llm:
                 f"principal={obj.principal.kind} action={obj.action.kind} "
                 f"resource={obj.resource.kind}"
             )
-        projections: dict[type[Scope], Callable[[Scope], dict[str, Any]]] = {
+        projections: dict[type[Scope], Callable[[Any], dict[str, Any]]] = {
             Principal: lambda s: {
                 "kind": s.kind,
                 "type_name": s.type_name,

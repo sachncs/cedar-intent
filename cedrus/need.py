@@ -22,6 +22,7 @@ Attributes:
 
 from __future__ import annotations
 
+import builtins
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -31,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 from cedrus.error import Require
 
 if TYPE_CHECKING:
-    from cedrus.store.sqlite import Backend
+    from cedrus.store import Backend, Repository
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +101,7 @@ class Need:
             "created_at": self.created_at.isoformat(),
         }
 
-    def save(self, repo: Backend) -> None:
+    def save(self, repo: Repository) -> None:
         """Persist this :class:`Need` (insert or replace by ``id``).
 
         Args:
@@ -117,7 +118,7 @@ class Need:
             )
 
     @classmethod
-    def get(cls, repo: Backend, requirement_id: str) -> Need:
+    def get(cls, repo: Repository, requirement_id: str) -> Need:
         """Load the requirement with ``requirement_id``.
 
         Args:
@@ -141,10 +142,10 @@ class Need:
     @classmethod
     def list(
         cls,
-        repo: Backend,
+        repo: Repository,
         *,
         domain: str | None = None,
-    ) -> Sequence[Need]:
+    ) -> "builtins.list[Need]":
         """Load all requirements, optionally filtered by ``domain``.
 
         Args:
@@ -169,7 +170,7 @@ class Need:
         cls,
         path: Path,
         workspace_root: Path | None = None,
-    ) -> Need:
+    ) -> "Need":
         """Load a single requirement from a Markdown file.
 
         Args:
@@ -208,7 +209,7 @@ class Need:
         cls,
         directory: Path,
         workspace_root: Path | None = None,
-    ) -> list[Need]:
+    ) -> "builtins.list[Need]":
         """Load every ``*.md`` requirement in ``directory`` non-recursively.
 
         Args:

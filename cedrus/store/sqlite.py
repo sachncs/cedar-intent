@@ -337,7 +337,7 @@ class Backend:
     def fetch(
         self,
         query: str,
-        params: tuple = (),
+        params: tuple[Any, ...] = (),
     ) -> list[dict[str, Any]]:
         """Execute ``query`` and return rows as dicts.
 
@@ -363,7 +363,7 @@ class Backend:
     def execute(
         self,
         query: str,
-        params: dict[str, Any] | tuple = (),
+        params: dict[str, Any] | tuple[Any, ...] = (),
     ) -> None:
         """Execute a write statement and discard the result.
 

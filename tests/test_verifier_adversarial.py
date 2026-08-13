@@ -32,7 +32,7 @@ def make_requirement() -> Need:
     )
 
 
-def _schema():
+def build_schema():
     from cedrus import Schema
 
     return Schema.from_mapping(
@@ -56,7 +56,7 @@ def _schema():
 
 
 def test_malformed_cedar_emits_finding() -> None:
-    schema = _schema()
+    schema = build_schema()
 
     class StubPolicy:
         id = "bad"
@@ -75,7 +75,7 @@ def test_malformed_cedar_emits_finding() -> None:
 
 def test_comment_containing_permit_does_not_shadow() -> None:
     """A comment with the word 'permit' is not a Cedar policy statement."""
-    schema = _schema()
+    schema = build_schema()
     policy = type("P", (), {"id": "p", "cedar": "/* permit */"})()
     report = Verifier(schema).verify(
         [policy],
@@ -89,7 +89,7 @@ def test_comment_containing_permit_does_not_shadow() -> None:
 
 
 def test_empty_cedar_emits_malformed_finding() -> None:
-    schema = _schema()
+    schema = build_schema()
     policy = type("P", (), {"id": "p", "cedar": ""})()
     report = Verifier(schema).verify(
         [policy],
@@ -104,7 +104,7 @@ def test_empty_cedar_emits_malformed_finding() -> None:
 
 def test_multiline_permit_parses() -> None:
     """A multi-line permit statement parses correctly."""
-    schema = _schema()
+    schema = build_schema()
     policy = type("P", (), {"id": "p", "cedar": (
         'permit (\n'
         '    principal == PhotoFlash::User::"alice",\n'
@@ -127,7 +127,7 @@ def test_multiline_permit_parses() -> None:
 
 def test_resource_in_parent_parses() -> None:
     """`resource is X in Y` syntax is extracted by cedarpy."""
-    schema = _schema()
+    schema = build_schema()
     policy = type("P", (), {"id": "p", "cedar": (
         'permit (principal, action == PhotoFlash::Action::"viewPhoto", '
         'resource is PhotoFlash::Photo in PhotoFlash::Album::"v")'
@@ -146,7 +146,7 @@ def test_resource_in_parent_parses() -> None:
 
 def test_two_policies_with_distinct_conditions_not_redundant() -> None:
     """Two policies with the same scope but different conditions are not redundant."""
-    schema = _schema()
+    schema = build_schema()
     policy_admin = type("P", (), {
         "id": "HR-001",
         "cedar": (
@@ -170,7 +170,7 @@ def test_two_policies_with_distinct_conditions_not_redundant() -> None:
 
 def test_two_policies_with_same_conditions_flagged_redundant() -> None:
     """Two policies with the same condition AST are flagged as redundant."""
-    schema = _schema()
+    schema = build_schema()
     policy_a = type("P", (), {
         "id": "HR-001",
         "cedar": (

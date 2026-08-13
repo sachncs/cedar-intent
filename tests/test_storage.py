@@ -291,12 +291,12 @@ def test_memory_supports_stored_to_rows() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _backend(tmp_path: Path) -> Backend:
+def backend_repo(tmp_path: Path) -> Backend:
     return Backend(tmp_path / "store.db")
 
 
 def test_sqlite_repository_round_trip(tmp_path: Path) -> None:
-    repo = _backend(tmp_path)
+    repo = backend_repo(tmp_path)
     need = make_requirement("hr-001")
     need.save(repo)
     got = Need.get(repo, "hr-001")
@@ -309,33 +309,33 @@ def test_sqlite_repository_round_trip(tmp_path: Path) -> None:
 
 
 def test_sqlite_repository_handles_missing_records(tmp_path: Path) -> None:
-    repo = _backend(tmp_path)
+    repo = backend_repo(tmp_path)
     with pytest.raises(Store):
         Stored.get(repo, "ghost")
 
 
 def test_sqlite_repository_persists_across_instances(tmp_path: Path) -> None:
-    first = _backend(tmp_path)
+    first = backend_repo(tmp_path)
     make_requirement("hr-001").save(first)
-    second = _backend(tmp_path)
+    second = backend_repo(tmp_path)
     assert Need.get(second, "hr-001").id == "hr-001"
 
 
 def test_sqlite_repository_is_idempotent(tmp_path: Path) -> None:
-    make_requirement("hr-001").save(_backend(tmp_path))
-    repo = _backend(tmp_path)
+    make_requirement("hr-001").save(backend_repo(tmp_path))
+    repo = backend_repo(tmp_path)
     assert Need.get(repo, "hr-001").id == "hr-001"
 
 
 def test_sqlite_repository_lists_filtered_by_domain(tmp_path: Path) -> None:
-    repo = _backend(tmp_path)
+    repo = backend_repo(tmp_path)
     make_requirement("a", domain="hr").save(repo)
     make_requirement("b", domain="finance").save(repo)
     assert sorted(n.id for n in Need.list(repo, domain="hr")) == ["a"]
 
 
 def test_sqlite_repository_orphan_policies_rejected_by_foreign_key(tmp_path: Path) -> None:
-    repo = _backend(tmp_path)
+    repo = backend_repo(tmp_path)
     with pytest.raises(IntegrityError):
         Stored(
             id="orphan", domain="hr", requirement_id="ghost",
@@ -346,7 +346,7 @@ def test_sqlite_repository_orphan_policies_rejected_by_foreign_key(tmp_path: Pat
 
 
 def test_sqlite_repository_records_deployments(tmp_path: Path) -> None:
-    repo = _backend(tmp_path)
+    repo = backend_repo(tmp_path)
     Record(
         id="d1", domain="hr", target="/tmp", target_kind=DEPLOYMENT_KIND_LOCAL,
         bundle_hash="x", status="deployed", created_at=datetime.now(UTC),
@@ -355,7 +355,7 @@ def test_sqlite_repository_records_deployments(tmp_path: Path) -> None:
 
 
 def test_sqlite_repository_close_is_idempotent(tmp_path: Path) -> None:
-    backend = _backend(tmp_path)
+    backend = backend_repo(tmp_path)
     backend.close()
     backend.close()  # second call is a no-op
 
@@ -367,7 +367,7 @@ def test_sqlite_repository_path_attribute(tmp_path: Path) -> None:
 
 
 def test_sqlite_repository_wal_mode_enabled(tmp_path: Path) -> None:
-    backend = _backend(tmp_path)
+    backend = backend_repo(tmp_path)
     cursor = backend.connection.execute("PRAGMA journal_mode")
     assert cursor.fetchone()[0].lower() == "wal"
 

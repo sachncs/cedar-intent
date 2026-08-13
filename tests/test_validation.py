@@ -90,19 +90,15 @@ def test_vreport_default_constructor_carries_empty_collections() -> None:
 
 def test_vreport_is_frozen() -> None:
     """Vreport is a frozen dataclass."""
-    # Verify the frozen flag via an isinstance check, which mypy
-    # accepts without complaining about __dataclass_params__.
-    from dataclasses import asdict, is_dataclass, fields
+    from dataclasses import asdict
 
-    assert is_dataclass(Vreport)
-    params = fields(Vreport)
-    # Frozen status lives on the fields metadata, but the simplest
-    # way to assert it is to verify that an instance is hashable and
-    # that the existing sentinel pattern works.
     instance = Vreport(passed=True, errors=(), formatted=())
-    # asdict works on frozen dataclasses (returns a copy).
     snapshot = asdict(instance)
-    assert snapshot == {"passed": True, "errors": [], "formatted": ()}
+    # asdict preserves the underlying tuple types: errors is a
+    # tuple, formatted is a tuple, not list.
+    assert snapshot == {"passed": True, "errors": (), "formatted": ()}
+    # Frozen instances are also hashable.
+    assert hash(instance) == hash(instance)
 
 
 def test_validator_validate_delegates_to_from_cedar() -> None:

@@ -721,7 +721,12 @@ class Space:
                 self.repository
             )
             if scenarios and test_report is not None:
-                self.build_stored_report(draft.id, "test", test_report).save(
+                test_report_vreport = Vreport(
+                    passed=test_report.passed,
+                    errors=(),
+                    formatted=tuple(str(r) for r in test_report.results),
+                )
+                self.build_stored_report(draft.id, "test", test_report_vreport).save(
                     self.repository
                 )
             compiled = Compiled(
@@ -931,7 +936,7 @@ class Space:
     def build_stored_report(
         policy_id: str,
         kind: str,
-        report: Vreport | Suite,
+        report: Vreport,
     ) -> ReportStored:
         """Build a :class:`ReportStored` from a validation or test report.
 

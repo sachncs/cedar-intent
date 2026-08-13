@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -14,6 +15,7 @@ from cedrus import (
     Compiled,
     Draft,
     Existing,
+    Generator,
     Intent,
     Manifest,
     Memory,
@@ -694,7 +696,7 @@ def test_space_generate_draft_persists_stored_draft(tmp_path: Path) -> None:
             resource=Resource(kind="is_type", type_name="Photo"),
         )
         schema = ws.load_schema("hr")
-        new_draft, result = ws.generate_draft(draft, schema, Offline())
+        new_draft, result = ws.generate_draft(draft, schema, cast(Generator, Offline()))
         assert new_draft.intent is not None
         from cedrus.store import DraftStored
 
@@ -837,7 +839,7 @@ def test_space_deploy_raises_when_verifier_rejects(tmp_path: Path) -> None:
         )
         schema = ws.load_schema("hr")
         with pytest.raises(Exception):
-            ws.deploy("hr", str(tmp_path / "out"), schema=schema)
+            ws.deploy("hr", str(tmp_path / "out"), skip_verify=False)
     finally:
         ws.close()
 
@@ -908,7 +910,7 @@ def test_space_find_action_namespace_returns_matching_namespace() -> None:
     from cedrus import Action
     from cedrus.space import Space
 
-    schema = _schema_only()  # build a small schema
+    schema = schema_only()  # build a small schema
     action = Action(kind="named", name="viewPhoto")
     namespace = Space.find_action_namespace(action, schema)
     assert namespace == "PhotoFlash"
@@ -919,7 +921,7 @@ def test_space_find_action_namespace_falls_back_to_action_namespace() -> None:
     from cedrus import Action
     from cedrus.space import Space
 
-    schema = _schema_only()
+    schema = schema_only()
     action = Action(kind="named", name="unknown", namespace="Custom")
     namespace = Space.find_action_namespace(action, schema)
     assert namespace == "Custom"

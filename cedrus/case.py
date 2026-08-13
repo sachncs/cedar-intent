@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from cedarpy import PolicySet, is_authorized
 
@@ -115,7 +115,7 @@ class Case:
                     action=str(item["action"]),
                     resource=str(item["resource"]),
                     context=dict(item.get("context") or {}),
-                    expected=expected,  # type: ignore[arg-type]
+                    expected=cast(Decision, expected),
                 )
             )
         return cases
