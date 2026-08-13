@@ -938,4 +938,77 @@ def _schema_only():
     )
 
 
+def test_space_qualify_intent_rewrites_unqualified_types() -> None:
+    """qualify_intent looks up bare type names and prefixes them with the namespace."""
+    from cedrus import Action, Principal, Resource
+    from cedrus.space import Space
+
+    schema = Schema.from_mapping(
+        {
+            "PhotoFlash": {
+                "entityTypes": {"User": {}, "Photo": {}},
+                "actions": {"viewPhoto": {}},
+            }
+        }
+    )
+    intent = Intent(
+        id="hr-001", requirement_id="hr-001", effect="permit",
+        principal=Principal(kind="is_type", type_name="User"),
+        action=Action(kind="named", name="viewPhoto"),
+        resource=Resource(kind="is_type", type_name="Photo"),
+    )
+    qualified = Space.qualify_intent(intent, schema)
+    assert qualified.principal.type_name == "PhotoFlash::User"
+    assert qualified.resource.type_name == "PhotoFlash::Photo"
+
+
+def test_space_qualify_intent_passes_through_unknown_type() -> None:
+    """Types not in the schema are left unchanged."""
+    from cedrus import Action, Principal, Resource
+    from cedrus.space import Space
+
+    schema = Schema.from_mapping(
+        {"NS": {"entityTypes": {}, "actions": {}}}
+    )
+    intent = Intent(
+        id="hr-001", requirement_id="hr-001", effect="permit",
+        principal=Principal(kind="is_type", type_name="Mystery"),
+        action=Action(kind="named", name="view"),
+        resource=Resource(kind="is_type", type_name="Mystery"),
+    )
+    qualified = Space.qualify_intent(intent, schema)
+    assert qualified.principal.type_name == "Mystery"
+
+
+def test_space_find_action_namespace_raises_on_ambiguous() -> None:
+    """An action declared in two namespaces without an explicit hint raises SpaceError."""
+    from cedrus import Action
+    from cedrus.space import Space
+
+    schema = Schema.from_mapping(
+        {
+            "NS1": {"entityTypes": {}, "actions": {"view": {}}},
+            "NS2": {"entityTypes": {}, "actions": {"view": {}}},
+        }
+    )
+    action = Action(kind="named", name="view")
+    with pytest.raises(Exception):
+        Space.find_action_namespace(action, schema)
+
+
+def test_space_build_stored_report_round_trip(tmp_path: Path) -> None:
+    """build_stored_report builds a ReportStored with the correct fields."""
+    from cedrus import Vreport
+    from cedrus.space import Space
+
+    ws = _workspace_photosflash(tmp_path)
+    schema = ws.load_schema("hr")
+    report = Vreport.from_cedar(['permit (principal, action, resource);'], schema)
+    stored = Space.build_stored_report("draft-HR-001", "validation", report)
+    assert stored.policy_id == "draft-HR-001"
+    assert stored.kind == "validation"
+    assert stored.passed is True
+    assert "formatted" in dict(stored.payload.data)
+
+
 __all__ = []
