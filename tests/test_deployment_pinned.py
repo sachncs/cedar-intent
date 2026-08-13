@@ -13,6 +13,9 @@ These tests cover:
   max_retries; a 500 is not retried.
 """
 
+import hashlib
+from datetime import UTC, datetime
+
 from __future__ import annotations
 
 import hashlib
@@ -29,32 +32,30 @@ from cedrus import (
 )
 
 
-def _start_server(handler_cls: type[BaseHTTPRequestHandler]) -> tuple[HTTPServer, int]:
+def start_server(handler_cls: type[BaseHTTPRequestHandler]) -> tuple[HTTPServer, int]:
     server = HTTPServer(("127.0.0.1", 0), handler_cls)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, server.server_address[1]
 
 
-def _stop_server(server: HTTPServer) -> None:
+def stop_server(server: HTTPServer) -> None:
     server.shutdown()
     server.server_close()
 
 
-def _make_manifest() -> Manifest:
+def make_manifest() -> Manifest:
     return Manifest(
         domain="hr",
         cedar='permit (principal, action, resource);',
         bundle_hash=hashlib.sha256(b"permit (principal, action, resource);").hexdigest(),
         policy_ids=("HR-001",),
-        created_at=None,  # type: ignore[arg-type]
+        created_at=datetime.now(UTC),
         metadata={},
     )
 
 
-def _patched_created_at(manifest: Manifest) -> Manifest:
-    from datetime import UTC, datetime
-
+def patched_created_at(manifest: Manifest) -> Manifest:
     return Manifest(
         domain=manifest.domain,
         cedar=manifest.cedar,
@@ -75,14 +76,14 @@ def test_pinned_transport_rejects_redirect_by_default() -> None:
         def log_message(self, *_args: Any) -> None:  # noqa: D401
             return
 
-    server, port = _start_server(Redirect)
+    server, port = start_server(Redirect)
     try:
         client = Client(allow_loopback=True)
-        manifest = _patched_created_at(_make_manifest())
+        manifest = patched_created_at(make_manifest())
         with pytest.raises(Deploy):
             client.deploy_http(manifest, f"http://127.0.0.1:{port}/cedar")
     finally:
-        _stop_server(server)
+        stop_server(server)
 
 
 def test_pinned_transport_pins_resolved_ip() -> None:
@@ -104,15 +105,15 @@ def test_pinned_transport_pins_resolved_ip() -> None:
         def log_message(self, *_args: Any) -> None:  # noqa: D401
             return
 
-    server, port = _start_server(Capture)
+    server, port = start_server(Capture)
     try:
         client = Client(allow_loopback=True)
-        manifest = _patched_created_at(_make_manifest())
+        manifest = patched_created_at(make_manifest())
         record = client.deploy_http(manifest, f"http://127.0.0.1:{port}/cedar")
         assert record.status == "deployed"
         assert captured_ip == ["127.0.0.1"]
     finally:
-        _stop_server(server)
+        stop_server(server)
 
 
 def test_response_body_is_bounded() -> None:
@@ -134,10 +135,10 @@ def test_response_body_is_bounded() -> None:
         def log_message(self, *_args: Any) -> None:  # noqa: D401
             return
 
-    server, port = _start_server(Flood)
+    server, port = start_server(Flood)
     try:
         client = Client(allow_loopback=True, timeout=10)
-        manifest = _patched_created_at(_make_manifest())
+        manifest = patched_created_at(make_manifest())
         record = client.deploy_http(manifest, f"http://127.0.0.1:{port}/cedar")
         assert record.status == "deployed"
         assert record.response["body_sha256"]
@@ -145,7 +146,7 @@ def test_response_body_is_bounded() -> None:
         # We do not check the exact body because the server may have
         # closed the connection early, but the record must have a hash.
     finally:
-        _stop_server(server)
+        stop_server(server)
     assert HTTP_RESPONSE_READ_LIMIT == 65536
 
 
@@ -160,15 +161,15 @@ def test_idempotency_key_recorded_in_response() -> None:
         def log_message(self, *_args: Any) -> None:  # noqa: D401
             return
 
-    server, port = _start_server(Ok)
+    server, port = start_server(Ok)
     try:
         client = Client(allow_loopback=True)
-        manifest = _patched_created_at(_make_manifest())
+        manifest = patched_created_at(make_manifest())
         record = client.deploy_http(manifest, f"http://127.0.0.1:{port}/cedar")
         assert record.response["idempotency_key"]
         assert record.response["retry_count"] == "0"
     finally:
-        _stop_server(server)
+        stop_server(server)
 
 
 def test_500_response_is_not_retried() -> None:
@@ -185,14 +186,14 @@ def test_500_response_is_not_retried() -> None:
         def log_message(self, *_args: Any) -> None:  # noqa: D401
             return
 
-    server, port = _start_server(Boom)
+    server, port = start_server(Boom)
     try:
         client = Client(
             allow_loopback=True, max_retries=3, retry_backoff=0.01
         )
-        manifest = _patched_created_at(_make_manifest())
+        manifest = patched_created_at(make_manifest())
         with pytest.raises(Deploy):
             client.deploy_http(manifest, f"http://127.0.0.1:{port}/cedar")
         assert len(attempts) == 1
     finally:
-        _stop_server(server)
+        stop_server(server)
