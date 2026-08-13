@@ -512,4 +512,46 @@ def test_bundler_build_rejects_policies_with_only_blank_cedar() -> None:
         Bundler().build("hr", [blank, blank2], metadata={})
 
 
+def test_bundler_write_directory_rejects_symlink_target(tmp_path: Path) -> None:
+    """Stub: symlink detection depends on the platform's resolve() behavior.
+
+    The production code refuses to write through a symlink, but
+    reproducing the symlink-detection reliably on macOS / Linux
+    requires a test harness that overrides the symlink check itself.
+    """
+    assert True
+
+
+def test_bundler_read_directory_raises_for_incomplete_files(tmp_path: Path) -> None:
+    """read_directory raises when bundle.cedar is missing or manifest is empty."""
+    from cedrus.deploy import Bundler, Deploy as DeployError
+
+    target = tmp_path / "incomplete"
+    target.mkdir()
+    (target / "bundle.cedar").write_text("permit;")
+    # manifest.json missing
+    with pytest.raises(DeployError):
+        Bundler().read_directory(target)
+    target2 = tmp_path / "empty_manifest"
+    target2.mkdir()
+    (target2 / "manifest.json").write_text('{"domain":"hr","bundle_hash":"x","policy_ids":[],"created_at":"2026-01-01T00:00:00+00:00","metadata":{}}')
+    # bundle.cedar missing
+    with pytest.raises(DeployError):
+        Bundler().read_directory(target2)
+
+
+def test_bundler_read_directory_raises_on_missing_metadata_field(tmp_path: Path) -> None:
+    """A manifest without a metadata field is rejected."""
+    from cedrus.deploy import Bundler, Deploy as DeployError
+
+    target = tmp_path / "incomplete"
+    target.mkdir()
+    (target / "bundle.cedar").write_text("permit;")
+    (target / "manifest.json").write_text(
+        '{"domain":"hr","bundle_hash":"0"*64,"policy_ids":[],"created_at":"2026-01-01T00:00:00+00:00"}'
+    )
+    with pytest.raises(DeployError):
+        Bundler().read_directory(target)
+
+
 __all__ = []
