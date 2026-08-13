@@ -19,10 +19,11 @@ from typing import Any
 
 import pytest
 
-from cedrus.deploy import Deploy, Guard
+from cedrus.deploy import Guard
+from cedrus.error import Deploy
 
 
-def _fake_addrinfo_returning(ip: str) -> Any:
+def fake_addrinfo_returning(ip: str) -> Any:
     """Build a resolver that returns one fake getaddrinfo result for ``ip``."""
 
     def fake(_host: str) -> list[Any]:
