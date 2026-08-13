@@ -706,3 +706,26 @@ def test_main_returns_zero_for_successful_init(tmp_path: Path) -> None:
     code = main(["init", "--path", str(tmp_path / "ws")])
     assert code == 0
     assert (tmp_path / "ws" / ".cedrus").exists()
+
+
+def test_main_returns_one_for_unexpected_handler_error(capsys) -> None:
+    """Unexpected (non-cedrus) exceptions inside a handler return 1."""
+    from cedrus.cli import main
+
+    # 'export' expects an existing workspace; an empty tmp_path won't
+    # be a workspace and the handler raises a generic exception.
+    code = main(["--workspace", str(Path("/no/such/workspace-xyz-9876")), "domain", "list"])
+    assert code == 1
+
+
+def test_main_emits_json_output_when_json_flag_set(tmp_path: Path, capsys) -> None:
+    """With --json, the result dict is JSON-serialized to stdout."""
+    import json
+
+    from cedrus.cli import main
+
+    code = main(["--json", "init", "--path", str(tmp_path / "ws")])
+    assert code == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["initialized"] == str((tmp_path / "ws").resolve())
