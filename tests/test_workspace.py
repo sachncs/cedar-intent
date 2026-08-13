@@ -757,4 +757,58 @@ def test_space_test_domain_raises_when_no_scenarios(tmp_path: Path) -> None:
         ws.close()
 
 
+def test_space_test_domain_raises_when_no_compiled_policies(tmp_path: Path) -> None:
+    """test_domain requires at least one compiled policy with cedar."""
+    from cedrus import Case
+
+    ws = _workspace_photosflash(tmp_path)
+    try:
+        (tmp_path / "hr" / "scenarios.json").write_text(
+            json.dumps([
+                {
+                    "name": "x", "principal": "p", "action": "a",
+                    "resource": "r", "context": {}, "expected": "Allow",
+                }
+            ]),
+            encoding="utf-8",
+        )
+        schema = ws.load_schema("hr")
+        with pytest.raises(Exception):
+            ws.test_domain("hr", schema)
+    finally:
+        ws.close()
+
+
+def test_space_test_domain_uses_default_schema_when_none(tmp_path: Path) -> None:
+    """test_domain with schema=None raises when cedarpy can't resolve entities."""
+    from cedrus import Compiled
+    from cedrus.need import Need
+
+    ws = _workspace_photosflash(tmp_path)
+    try:
+        ws.repository.execute(
+            "INSERT INTO requirements (id, domain, text, source_path, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("HR-001", "hr", "body", "/tmp/x.md", datetime.now(UTC).isoformat()),
+        )
+        (tmp_path / "hr" / "scenarios.json").write_text(
+            json.dumps([
+                {
+                    "name": "x", "principal": "p", "action": "a",
+                    "resource": "r", "context": {}, "expected": "Allow",
+                }
+            ]),
+            encoding="utf-8",
+        )
+        need = Need.get(ws.repository, "HR-001")
+        compiled = Compiled(
+            id="HR-001", requirement=need, cedar="permit (principal, action, resource);"
+        )
+        ws.upsert_compiled(compiled)
+        with pytest.raises(Exception):
+            ws.test_domain("hr", schema=None)  # type: ignore[arg-type]
+    finally:
+        ws.close()
+
+
 __all__ = []

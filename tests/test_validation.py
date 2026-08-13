@@ -62,9 +62,9 @@ def test_vreport_from_cedar_raises_on_malformed_cedar() -> None:
 
 
 def test_vreport_from_cedar_raises_typeerror_on_non_string_input() -> None:
-    """Validate enforces string input at the join step; TypeError is the contract."""
+    """Validate enforces string input; raises Validate via the TypeError branch."""
     schema = _schema()
-    with pytest.raises(TypeError):
+    with pytest.raises(Validate):
         Vreport.from_cedar([42], schema)  # type: ignore[list-item]
 
 
@@ -97,6 +97,34 @@ def test_validator_validate_delegates_to_from_cedar() -> None:
     validator = Validator(schema)
     report = validator.validate([VALID_POLICY])
     assert report.passed
+
+
+def test_vreport_from_cedar_wraps_typeerror() -> None:
+    """Non-string policy input raises Validate via the TypeError branch."""
+    schema = _schema()
+    with pytest.raises(Validate) as exc:
+        Vreport.from_cedar([42], schema)  # type: ignore[list-item]
+    assert "not a string" in str(exc.value.errors)
+
+
+def test_vreport_from_cedar_wraps_valueerror() -> None:
+    """cedarpy ValueError is rewrapped as Validate."""
+    schema = _schema()
+    with pytest.raises(Validate):
+        Vreport.from_cedar(["this is not valid cedar syntax !!!"], schema)
+
+
+def test_vreport_from_cedar_wraps_cedarpy_validation_errors() -> None:
+    """When validation fails, the cedarpy error list is surfaced as Validate."""
+    schema = _schema()
+    bogus = (
+        'permit (principal == PhotoFlash::User::"alice", '
+        'action == PhotoFlash::Action::"download", '
+        'resource == PhotoFlash::Photo::"p1");'
+    )
+    with pytest.raises(Validate) as exc:
+        Vreport.from_cedar([bogus], schema)
+    assert exc.value.errors
 
 
 __all__ = []

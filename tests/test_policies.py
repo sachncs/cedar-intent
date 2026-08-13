@@ -368,6 +368,21 @@ def test_kind_test_returns_suite_even_without_results() -> None:
     assert suite.results == ()
 
 
+def test_kind_validate_raises_fault_on_empty_cedar() -> None:
+    """Kind.validate refuses to validate a policy with no Cedar source."""
+    from cedrus.error import Fault
+
+    policy = Draft(
+        id="hr",
+        requirement=_need(),
+        principal=Principal(kind="any"),
+        action=Action(kind="any"),
+        resource=Resource(kind="any"),
+    )
+    with pytest.raises(Fault):
+        policy.validate(_schema())
+
+
 # ---------------------------------------------------------------------------
 # Draft.generate / Draft.apply_result
 # ---------------------------------------------------------------------------

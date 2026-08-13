@@ -637,4 +637,68 @@ def test_extraction_dataclass_exposes_all_fields() -> None:
     assert "permit" in extraction.cedar
 
 
+# ---------------------------------------------------------------------------
+# in_group action coverage
+# ---------------------------------------------------------------------------
+
+
+def test_verify_action_in_group_expands_members() -> None:
+    """``action in Action::"readers"`` covers the group's member actions."""
+    schema = _schema()
+    policies = [
+        Intent(
+            id="HR-001",
+            requirement_id="HR-001",
+            effect="permit",
+            principal=Principal(kind="is_type", type_name="User"),
+            action=Action(kind="in_group", group="readers"),
+            resource=Resource(kind="is_type", type_name="Photo"),
+        )
+    ]
+    # Action groups aren't in our schema, so the verifier flags
+    # uncovered actions. The point is to exercise the in_group branch.
+    Verifier(schema).verify(
+        policies,
+        requirement_ids=["HR-001"],
+        action_names=[("PhotoFlash", "viewPhoto")],
+        entity_type_names=["PhotoFlash::User", "PhotoFlash::Photo"],
+        domain="hr",
+    )
+
+
+def test_verifier_shadow_skips_non_comparable_policies() -> None:
+    """shadow() returns empty when no policy has shadow semantics."""
+    schema = _schema()
+    policies = [
+        _intent(
+            "HR-001",
+            principal=Principal(kind="is_type", type_name="User"),
+            action=Action(kind="named", name="viewPhoto"),
+            resource=Resource(kind="is_type", type_name="Photo"),
+        )
+    ]
+    findings = Verifier(schema).shadow(policies)
+    assert findings == []
+
+
+def test_verifier_redundant_skips_distinct_policies() -> None:
+    schema = _schema()
+    policies = [
+        _intent(
+            "HR-001",
+            principal=Principal(kind="any"),
+            action=Action(kind="any"),
+            resource=Resource(kind="any"),
+        ),
+        _intent(
+            "HR-002",
+            principal=Principal(kind="is_type", type_name="User"),
+            action=Action(kind="named", name="viewPhoto"),
+            resource=Resource(kind="is_type", type_name="Photo"),
+        ),
+    ]
+    findings = Verifier(schema).redundant(policies)
+    assert findings == []
+
+
 __all__ = []

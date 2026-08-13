@@ -86,8 +86,13 @@ class Vreport:
         Raises:
             Validate: If parsing or schema validation fails.
         """
-        policy_text = tuple(policies)
-        combined = "\n\n".join(policy_text)
+        try:
+            policy_text = tuple(policies)
+            combined = "\n\n".join(policy_text)
+        except TypeError as error:
+            raise Validate(
+                (f"policy input is not a string: {error}",), ""
+            ) from error
         # cedarpy raises TypeError for non-string policies and
         # ValueError for malformed Cedar syntax; surface each with a
         # distinct message.

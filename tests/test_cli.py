@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -562,3 +563,77 @@ def test_build_generator_online_missing_model_raises(
     monkeypatch.delenv(MODEL_ENV_VAR, raising=False)
     generator = build_generator(args)
     assert generator.model == "provider/test-model"
+
+
+# ---------------------------------------------------------------------------
+# argparse type helpers
+# ---------------------------------------------------------------------------
+
+
+def test_positive_finite_float_accepts_positive_number() -> None:
+    from cedrus.cli import positive_finite_float
+    assert positive_finite_float("3.14") == 3.14
+
+
+def test_positive_finite_float_rejects_infinity() -> None:
+    from cedrus.cli import positive_finite_float
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_finite_float("inf")
+
+
+def test_positive_finite_float_rejects_nan() -> None:
+    from cedrus.cli import positive_finite_float
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_finite_float("nan")
+
+
+def test_positive_finite_float_rejects_zero() -> None:
+    from cedrus.cli import positive_finite_float
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_finite_float("0")
+
+
+def test_positive_finite_float_rejects_negative() -> None:
+    from cedrus.cli import positive_finite_float
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_finite_float("-1.0")
+
+
+def test_positive_finite_float_rejects_non_number() -> None:
+    from cedrus.cli import positive_finite_float
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_finite_float("not a number")
+
+
+def test_non_negative_int_accepts_zero() -> None:
+    from cedrus.cli import non_negative_int
+    assert non_negative_int("0") == 0
+
+
+def test_non_negative_int_accepts_positive() -> None:
+    from cedrus.cli import non_negative_int
+    assert non_negative_int("42") == 42
+
+
+def test_non_negative_int_rejects_negative() -> None:
+    from cedrus.cli import non_negative_int
+    with pytest.raises(argparse.ArgumentTypeError):
+        non_negative_int("-1")
+
+
+def test_non_negative_int_rejects_non_integer() -> None:
+    from cedrus.cli import non_negative_int
+    import argparse
+    with pytest.raises(argparse.ArgumentTypeError):
+        non_negative_int("3.14")
+
+
+def test_positive_int_rejects_zero() -> None:
+    from cedrus.cli import positive_int
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_int("0")
+
+
+def test_positive_int_accepts_one() -> None:
+    from cedrus.cli import positive_int
+    assert positive_int("1") == 1

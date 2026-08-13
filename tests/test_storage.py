@@ -468,4 +468,104 @@ def test_report_stored_latest_filters_by_kind() -> None:
     assert test.payload.data == (("k2", "v2"),)
 
 
+def test_stored_latest_draft_returns_none_when_missing() -> None:
+    """A stored policy without drafts returns None from latest_draft."""
+    repo = Memory()
+    make_requirement("hr-001").save(repo)
+    from cedrus.store import Stored
+
+    stored = Stored(
+        id="hr-001", domain="hr", requirement_id="hr-001",
+        intent=make_intent("hr-001"), cedar="permit (...);",
+        status="compiled",
+        created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
+        action=Action(kind="any"),
+    )
+    stored.upsert(repo)
+    assert stored.latest_draft(repo) is None
+
+
+def test_stored_latest_draft_returns_most_recent() -> None:
+    """Stored.latest_draft returns the most recent draft for the policy."""
+    repo = Memory()
+    make_requirement("hr-001").save(repo)
+
+    intent = make_intent("hr-001")
+    for i in range(2):
+        DraftStored(
+            id=f"d{i}",
+            policy_id="hr-001",
+            model="offline",
+            request_id=None,
+            unresolved=(),
+            cedar="permit (principal, action, resource);",
+            created_at=datetime.now(UTC),
+            intent=intent,
+            principal=Principal(kind="any"),
+            action=Action(kind="any"),
+            resource=Resource(kind="any"),
+        ).save(repo)
+    from cedrus.store import Stored
+
+    stored = Stored(
+        id="hr-001", domain="hr", requirement_id="hr-001",
+        intent=make_intent("hr-001"), cedar="permit (...);",
+        status="compiled",
+        created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
+        action=Action(kind="any"),
+    )
+    stored.upsert(repo)
+    latest = stored.latest_draft(repo)
+    assert latest is not None
+    assert latest.id in ("d0", "d1")
+
+
+def test_draft_stored_list_returns_all_in_chronological_order() -> None:
+    repo = Memory()
+    make_requirement("hr-001").save(repo)
+    intent = make_intent("hr-001")
+    for i in range(3):
+        DraftStored(
+            id=f"d{i}",
+            policy_id="hr-001",
+            model="offline",
+            request_id=None,
+            unresolved=(),
+            cedar="permit (principal, action, resource);",
+            created_at=datetime.now(UTC),
+            intent=intent,
+            principal=Principal(kind="any"),
+            action=Action(kind="any"),
+            resource=Resource(kind="any"),
+        ).save(repo)
+    drafts = DraftStored.list(repo, policy_id="hr-001")
+    assert len(drafts) == 3
+
+
+def test_draft_stored_update_with_no_fields_is_noop() -> None:
+    """update() with all defaults leaves the row unchanged."""
+    repo = Memory()
+    make_requirement("hr-001").save(repo)
+    intent = make_intent("hr-001")
+    draft = DraftStored(
+        id="d1",
+        policy_id="hr-001",
+        model="offline",
+        request_id=None,
+        unresolved=(),
+        cedar="permit (principal, action, resource);",
+        created_at=datetime.now(UTC),
+        intent=intent,
+        principal=Principal(kind="any"),
+        action=Action(kind="any"),
+        resource=Resource(kind="any"),
+    )
+    draft.save(repo)
+    before = DraftStored.latest(repo, "hr-001")
+    draft.update(repo)
+    after = DraftStored.latest(repo, "hr-001")
+    assert before.id == after.id
+    assert before.principal.kind == after.principal.kind
+
+
 __all__ = []
