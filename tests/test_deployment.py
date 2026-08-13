@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import httpx
 import pytest
@@ -23,17 +24,7 @@ from cedrus.deploy import (
 )
 
 
-def _validate_headers(headers):
-    """Drive the validator through a Client instance."""
-    Client(timeout=30).validate_headers(headers)
-
-
-def _read_bounded(response):
-    """Drive the reader through a Client instance."""
-    return Client(timeout=30).read_bounded(response)
-
-
-def _manifest(domain: str = "hr", cedar: str = "permit (principal, action, resource);") -> Manifest:
+def build_test_manifest(domain: str = "hr", cedar: str = "permit (principal, action, resource);") -> Manifest:
     import hashlib
 
     bundle_hash = hashlib.sha256(cedar.encode("utf-8")).hexdigest()
@@ -53,7 +44,7 @@ def _manifest(domain: str = "hr", cedar: str = "permit (principal, action, resou
 
 
 def test_manifest_to_dict_includes_cedar_payload() -> None:
-    manifest = _manifest()
+    manifest = build_test_manifest()
     d = manifest.to_dict()
     assert d["domain"] == "hr"
     assert d["bundle_hash"]
@@ -61,7 +52,7 @@ def test_manifest_to_dict_includes_cedar_payload() -> None:
 
 
 def test_manifest_to_manifest_payload_excludes_cedar() -> None:
-    manifest = _manifest()
+    manifest = build_test_manifest()
     d = manifest.to_manifest_payload()
     assert "cedar" not in d
     assert d["domain"] == "hr"
@@ -146,14 +137,14 @@ def test_bundler_read_directory_round_trips(tmp_path: Path) -> None:
 
 
 def test_bundler_read_directory_raises_for_missing(tmp_path: Path) -> None:
-    from cedrus.deploy import Deploy as DeployError
+    from cedrus.error import Deploy as DeployError
 
     with pytest.raises(Exception):
         Bundler().read_directory(tmp_path / "ghost")
 
 
 def test_bundler_read_directory_raises_on_hash_mismatch(tmp_path: Path) -> None:
-    from cedrus.deploy import Deploy as DeployError
+    from cedrus.error import Deploy as DeployError
 
     target = tmp_path / "out"
     target.mkdir()
@@ -211,65 +202,74 @@ def test_guard_returns_pin_with_resolved_ip() -> None:
 
 
 # ---------------------------------------------------------------------------
-# validate_headers helper
+# Client.validate_headers helper
 # ---------------------------------------------------------------------------
 
 
-def test_validate_headers_accepts_none() -> None:
-    _validate_headers(None)
+def test_client_validate_headers_accepts_none() -> None:
+    client = Client(timeout=30)
+    client.validate_headers(None)
 
 
-def test_validate_headers_accepts_valid() -> None:
-    _validate_headers({"X-Custom": "value"})
+def test_client_validate_headers_accepts_valid() -> None:
+    client = Client(timeout=30)
+    client.validate_headers({"X-Custom": "value"})
 
 
-def test_validate_headers_rejects_empty_name() -> None:
-    from cedrus.deploy import Deploy as DeployError
-
-    with pytest.raises(DeployError):
-        _validate_headers({"": "value"})
-
-
-def test_validate_headers_rejects_whitespace_name() -> None:
-    from cedrus.deploy import Deploy as DeployError
+def test_client_validate_headers_rejects_empty_name() -> None:
+    from cedrus.error import Deploy as DeployError
 
     with pytest.raises(DeployError):
-        _validate_headers({"   ": "value"})
+        client = Client(timeout=30)
+        client.validate_headers({"": "value"})
 
 
-def test_validate_headers_rejects_crlf_in_name() -> None:
-    from cedrus.deploy import Deploy as DeployError
-
-    with pytest.raises(DeployError):
-        _validate_headers({"X-Bad\rName": "value"})
-
-
-def test_validate_headers_rejects_crlf_in_value() -> None:
-    from cedrus.deploy import Deploy as DeployError
+def test_client_validate_headers_rejects_whitespace_name() -> None:
+    from cedrus.error import Deploy as DeployError
 
     with pytest.raises(DeployError):
-        _validate_headers({"X-Bad": "line1\r\nline2"})
+        client = Client(timeout=30)
+        client.validate_headers({"   ": "value"})
 
 
-def test_validate_headers_rejects_reserved_header_case_insensitively() -> None:
-    from cedrus.deploy import Deploy as DeployError
-
-    with pytest.raises(DeployError):
-        _validate_headers({"host": "evil.example"})
-
-
-def test_validate_headers_rejects_oversize_name() -> None:
-    from cedrus.deploy import Deploy as DeployError
+def test_client_validate_headers_rejects_crlf_in_name() -> None:
+    from cedrus.error import Deploy as DeployError
 
     with pytest.raises(DeployError):
-        _validate_headers({"X-" + "a" * 300: "value"})
+        client = Client(timeout=30)
+        client.validate_headers({"X-Bad\rName": "value"})
 
 
-def test_validate_headers_rejects_oversize_value() -> None:
-    from cedrus.deploy import Deploy as DeployError
+def test_client_validate_headers_rejects_crlf_in_value() -> None:
+    from cedrus.error import Deploy as DeployError
 
     with pytest.raises(DeployError):
-        _validate_headers({"X-Long": "v" * 10000})
+        client = Client(timeout=30)
+        client.validate_headers({"X-Bad": "line1\r\nline2"})
+
+
+def test_client_validate_headers_rejects_reserved_header_case_insensitively() -> None:
+    from cedrus.error import Deploy as DeployError
+
+    with pytest.raises(DeployError):
+        client = Client(timeout=30)
+        client.validate_headers({"host": "evil.example"})
+
+
+def test_client_validate_headers_rejects_oversize_name() -> None:
+    from cedrus.error import Deploy as DeployError
+
+    with pytest.raises(DeployError):
+        client = Client(timeout=30)
+        client.validate_headers({"X-" + "a" * 300: "value"})
+
+
+def test_client_validate_headers_rejects_oversize_value() -> None:
+    from cedrus.error import Deploy as DeployError
+
+    with pytest.raises(DeployError):
+        client = Client(timeout=30)
+        client.validate_headers({"X-Long": "v" * 10000})
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +279,7 @@ def test_validate_headers_rejects_oversize_value() -> None:
 
 def test_client_local_deploy_writes_to_directory(tmp_path: Path) -> None:
     client = Client(timeout=30)
-    record = client.deploy_local(_manifest(), tmp_path / "out")
+    record = client.deploy_local(build_test_manifest(), tmp_path / "out")
     assert isinstance(record, Record)
     assert record.domain == "hr"
     assert record.target_kind == DEPLOYMENT_KIND_LOCAL
@@ -288,26 +288,26 @@ def test_client_local_deploy_writes_to_directory(tmp_path: Path) -> None:
 
 def test_client_local_deploy_uses_supplied_record_id(tmp_path: Path) -> None:
     client = Client(timeout=30)
-    record = client.deploy_local(_manifest(), tmp_path / "out", record_id="custom-id")
+    record = client.deploy_local(build_test_manifest(), tmp_path / "out", record_id="custom-id")
     assert record.id == "custom-id"
 
 
 def test_client_local_deploy_creates_parent_directories(tmp_path: Path) -> None:
     client = Client(timeout=30)
-    record = client.deploy_local(_manifest(), tmp_path / "deep" / "out")
+    record = client.deploy_local(build_test_manifest(), tmp_path / "deep" / "out")
     assert (tmp_path / "deep" / "out" / "bundle.cedar").exists()
 
 
 def test_client_rejects_empty_target() -> None:
     client = Client(timeout=30)
     with pytest.raises(Exception):
-        client.deploy(_manifest(), "")
+        client.deploy(build_test_manifest(), "")
 
 
 def test_client_rejects_whitespace_target() -> None:
     client = Client(timeout=30)
     with pytest.raises(Exception):
-        client.deploy(_manifest(), "   ")
+        client.deploy(build_test_manifest(), "   ")
 
 
 # ---------------------------------------------------------------------------
@@ -316,56 +316,56 @@ def test_client_rejects_whitespace_target() -> None:
 
 
 def test_client_rejects_zero_timeout() -> None:
-    from cedrus.deploy import Deploy as DeployError
+    from cedrus.error import Deploy as DeployError
 
     with pytest.raises(DeployError):
         Client(timeout=0)
 
 
 def test_client_rejects_negative_timeout() -> None:
-    from cedrus.deploy import Deploy as DeployError
+    from cedrus.error import Deploy as DeployError
 
     with pytest.raises(DeployError):
         Client(timeout=-1)
 
 
 def test_client_rejects_infinite_timeout() -> None:
-    from cedrus.deploy import Deploy as DeployError
+    from cedrus.error import Deploy as DeployError
 
     with pytest.raises(DeployError):
         Client(timeout=float("inf"))
 
 
 def test_client_rejects_nan_timeout() -> None:
-    from cedrus.deploy import Deploy as DeployError
+    from cedrus.error import Deploy as DeployError
 
     with pytest.raises(DeployError):
         Client(timeout=float("nan"))
 
 
 def test_client_rejects_negative_max_retries() -> None:
-    from cedrus.deploy import Deploy as DeployError
+    from cedrus.error import Deploy as DeployError
 
     with pytest.raises(DeployError):
         Client(timeout=30, max_retries=-1)
 
 
 def test_client_rejects_negative_backoff() -> None:
-    from cedrus.deploy import Deploy as DeployError
+    from cedrus.error import Deploy as DeployError
 
     with pytest.raises(DeployError):
         Client(timeout=30, retry_backoff=-0.5)
 
 
 def test_client_rejects_infinite_backoff() -> None:
-    from cedrus.deploy import Deploy as DeployError
+    from cedrus.error import Deploy as DeployError
 
     with pytest.raises(DeployError):
         Client(timeout=30, retry_backoff=float("inf"))
 
 
 def test_client_rejects_nan_backoff() -> None:
-    from cedrus.deploy import Deploy as DeployError
+    from cedrus.error import Deploy as DeployError
 
     with pytest.raises(DeployError):
         Client(timeout=30, retry_backoff=float("nan"))
@@ -458,30 +458,31 @@ def test_deployment_kind_constants() -> None:
 def test_transport_read_timeout_defaults_when_extension_missing() -> None:
     from cedrus.deploy import Transport
 
-    request = type("R", (), {"extensions": {}})()
-    assert Transport.read_timeout(request) == 30.0  # type: ignore[arg-type]
+    request = cast(httpx.Request, type("R", (), {"extensions": {}})())
+    assert Transport.read_timeout(request) == 30.0
 
 
 def test_transport_read_timeout_extracts_httpx_timeout_connect() -> None:
     from cedrus.deploy import Transport
 
-    request = type("R", (), {"extensions": {"timeout": httpx.Timeout(5.0)}})()
-    assert Transport.read_timeout(request) == 5.0  # type: ignore[arg-type]
+    request = cast(httpx.Request, type("R", (), {"extensions": {"timeout": httpx.Timeout(5.0)}})())
+    assert Transport.read_timeout(request) == 5.0
 
 
 def test_transport_read_timeout_extracts_mapping_value() -> None:
     from cedrus.deploy import Transport
 
-    request = type("R", (), {"extensions": {"timeout": {"connect": 7.5}}})()
-    assert Transport.read_timeout(request) == 7.5  # type: ignore[arg-type]
+    request = cast(httpx.Request, type("R", (), {"extensions": {"timeout": {"connect": 7.5}}})())
+    assert Transport.read_timeout(request) == 7.5
 
 
 def test_transport_read_timeout_raises_on_invalid_mapping() -> None:
-    from cedrus.deploy import Deploy as DeployError, Transport
+    from cedrus.deploy import Transport
+    from cedrus.error import Deploy as DeployError
 
     request = type("R", (), {"extensions": {"timeout": {"connect": "not a number"}}})()
     with pytest.raises(DeployError):
-        Transport.read_timeout(request)  # type: ignore[arg-type]
+        Transport.read_timeout(request)
 
 
 def test_transport_read_timeout_defaults_for_timeout_with_no_connect() -> None:
@@ -489,7 +490,7 @@ def test_transport_read_timeout_defaults_for_timeout_with_no_connect() -> None:
 
     timeout = httpx.Timeout(connect=2.0, read=2.0, write=2.0, pool=2.0)
     request = type("R", (), {"extensions": {"timeout": timeout}})()
-    assert Transport.read_timeout(request) == 2.0  # type: ignore[arg-type]
+    assert Transport.read_timeout(request) == 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -500,7 +501,8 @@ def test_transport_read_timeout_defaults_for_timeout_with_no_connect() -> None:
 def test_bundler_build_rejects_policies_with_only_blank_cedar() -> None:
     """All policies have empty cedar → raises Deploy."""
     from cedrus import Compiled, Need
-    from cedrus.deploy import Bundler, Deploy as DeployError
+    from cedrus.deploy import Bundler
+    from cedrus.error import Deploy as DeployError
 
     need = Need(
         id="HR-001", text="x", domain="hr",
@@ -524,7 +526,8 @@ def test_bundler_write_directory_rejects_symlink_target(tmp_path: Path) -> None:
 
 def test_bundler_read_directory_raises_for_incomplete_files(tmp_path: Path) -> None:
     """read_directory raises when bundle.cedar is missing or manifest is empty."""
-    from cedrus.deploy import Bundler, Deploy as DeployError
+    from cedrus.deploy import Bundler
+    from cedrus.error import Deploy as DeployError
 
     target = tmp_path / "incomplete"
     target.mkdir()
@@ -542,7 +545,8 @@ def test_bundler_read_directory_raises_for_incomplete_files(tmp_path: Path) -> N
 
 def test_bundler_read_directory_raises_on_missing_metadata_field(tmp_path: Path) -> None:
     """A manifest without a metadata field is rejected."""
-    from cedrus.deploy import Bundler, Deploy as DeployError
+    from cedrus.deploy import Bundler
+    from cedrus.error import Deploy as DeployError
 
     target = tmp_path / "incomplete"
     target.mkdir()
