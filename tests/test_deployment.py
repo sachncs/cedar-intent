@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 import pytest
 
 from cedrus.deploy import (
@@ -447,6 +448,68 @@ def test_http_constants_are_positive() -> None:
 def test_deployment_kind_constants() -> None:
     assert DEPLOYMENT_KIND_LOCAL == "local"
     assert DEPLOYMENT_KIND_HTTP == "http"
+
+
+# ---------------------------------------------------------------------------
+# Transport.read_timeout — direct unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_transport_read_timeout_defaults_when_extension_missing() -> None:
+    from cedrus.deploy import Transport
+
+    request = type("R", (), {"extensions": {}})()
+    assert Transport.read_timeout(request) == 30.0  # type: ignore[arg-type]
+
+
+def test_transport_read_timeout_extracts_httpx_timeout_connect() -> None:
+    from cedrus.deploy import Transport
+
+    request = type("R", (), {"extensions": {"timeout": httpx.Timeout(5.0)}})()
+    assert Transport.read_timeout(request) == 5.0  # type: ignore[arg-type]
+
+
+def test_transport_read_timeout_extracts_mapping_value() -> None:
+    from cedrus.deploy import Transport
+
+    request = type("R", (), {"extensions": {"timeout": {"connect": 7.5}}})()
+    assert Transport.read_timeout(request) == 7.5  # type: ignore[arg-type]
+
+
+def test_transport_read_timeout_raises_on_invalid_mapping() -> None:
+    from cedrus.deploy import Deploy as DeployError, Transport
+
+    request = type("R", (), {"extensions": {"timeout": {"connect": "not a number"}}})()
+    with pytest.raises(DeployError):
+        Transport.read_timeout(request)  # type: ignore[arg-type]
+
+
+def test_transport_read_timeout_defaults_for_timeout_with_no_connect() -> None:
+    from cedrus.deploy import Transport
+
+    timeout = httpx.Timeout(connect=2.0, read=2.0, write=2.0, pool=2.0)
+    request = type("R", (), {"extensions": {"timeout": timeout}})()
+    assert Transport.read_timeout(request) == 2.0  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Bundler edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_bundler_build_rejects_policies_with_only_blank_cedar() -> None:
+    """All policies have empty cedar → raises Deploy."""
+    from cedrus import Compiled, Need
+    from cedrus.deploy import Bundler, Deploy as DeployError
+
+    need = Need(
+        id="HR-001", text="x", domain="hr",
+        source_path=Path("/tmp/x"), created_at=datetime.now(UTC),
+    )
+    blank = Compiled(id="blank", requirement=need, cedar="")
+    blank2 = Compiled(id="blank2", requirement=need, cedar="   ")
+    with pytest.raises(DeployError):
+        Bundler().build("hr", [blank, blank2], metadata={})
 
 
 __all__ = []
