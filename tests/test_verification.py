@@ -733,4 +733,77 @@ def test_verifier_emits_uncovered_action_finding() -> None:
     assert "uncovered-action" in uncovered_kinds
 
 
+# ---------------------------------------------------------------------------
+# Module-level helpers (no Verifier instance needed)
+# ---------------------------------------------------------------------------
+
+
+def test_extract_type_names_returns_list_for_string_token() -> None:
+    from cedrus.verify import extract_type_names
+
+    assert extract_type_names("User") == ["User"]
+    assert extract_type_names("any") == []
+    assert extract_type_names("") == []
+
+
+def test_extract_type_names_handles_tuple_token() -> None:
+    from cedrus.verify import extract_type_names
+
+    # tuple token recurses into items, skipping named/group markers
+    result = extract_type_names(("User", "Photo"))
+    assert "User" in result
+    assert "Photo" in result
+
+
+def test_extract_type_names_handles_nested_tuple() -> None:
+    from cedrus.verify import extract_type_names
+
+    result = extract_type_names(("Group", ("User", "Photo")))
+    assert "Group" in result
+    assert "User" in result
+
+
+def test_action_kind_returns_named_for_3tuple() -> None:
+    from cedrus.verify import action_kind
+
+    assert action_kind(("", "viewPhoto", "named")) == "named"
+
+
+def test_action_kind_returns_group_for_3tuple() -> None:
+    from cedrus.verify import action_kind
+
+    assert action_kind(("PhotoFlash", "readers", "in_group")) == "group"
+
+
+def test_action_kind_returns_named_for_unknown_kind_token() -> None:
+    """action_kind returns "named" for any signature that isn't any/in_group."""
+    from cedrus.verify import action_kind
+
+    assert action_kind(("a::x", "a::y", "weird")) == "named"
+
+
+def test_action_named_extracts_namespace_and_name() -> None:
+    from cedrus.verify import action_named
+
+    ns, name = action_named(("PhotoFlash", "view", "named"))
+    assert ns == "PhotoFlash"
+    assert name == "view"
+
+
+def test_module_collect_entity_types_handles_extraction_pairs() -> None:
+    """The module-level collect_entity_types takes (policy, extraction) pairs."""
+    from cedrus.verify import collect_entity_types
+
+    schema = _schema()
+    intent = _intent(
+        "HR-001",
+        principal=Principal(
+            kind="in_group", group_type="Group", group_id="admins"
+        ),
+    )
+    extraction = Verifier(schema).extract_one(intent)
+    types = collect_entity_types([(intent, extraction)])
+    assert "Group" in types
+
+
 __all__ = []
