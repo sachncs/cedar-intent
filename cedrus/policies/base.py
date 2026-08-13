@@ -164,7 +164,8 @@ class Kind(ABC):
         Returns:
             A :class:`Suite` summarizing the results.
         """
-        return Run(scenarios).evaluate(schema, [self.cedar]).result or Suite(
+        evaluated = Run(scenarios).evaluate(schema, [self.cedar])
+        return evaluated if evaluated is not None else Suite(
             passed=True, results=()
         )
 

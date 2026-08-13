@@ -263,7 +263,7 @@ class Run:
         elif actual_str == "Deny":
             actual = "Deny"
         else:
-            raise Validate(f"unknown Cedar decision: {actual_str!r}")
+            raise Validate((f"unknown Cedar decision: {actual_str!r}",), "")
         diagnostics: dict[str, Any] = {}
         reasons = getattr(
             getattr(auth_result, "diagnostics", None), "reasons", None

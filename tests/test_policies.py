@@ -318,6 +318,57 @@ def test_draft_status_is_string() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Kind base class
+# ---------------------------------------------------------------------------
+
+
+def test_kind_base_to_intent_raises_fault() -> None:
+    """The base Kind.to_intent() raises Fault to signal contract enforcement.
+
+    Kind is abstract, so we instantiate via Existing which inherits the
+    base behaviour, then call to_intent() with no parsed_intent.
+    """
+    base = Existing(id="x", requirement=_need(), cedar="permit (...);")
+    with pytest.raises(Exception):
+        base.to_intent()
+
+
+def test_existing_to_dict_includes_parsed_intent_when_present() -> None:
+    intent = _intent()
+    existing = Existing(
+        id="hr",
+        requirement=_need(),
+        cedar="permit (...);",
+        parsed_intent=intent,
+    )
+    d = existing.to_dict()
+    assert d["parsed_intent"] == intent.id
+
+
+def test_existing_to_dict_includes_null_parsed_intent_when_missing() -> None:
+    existing = Existing(id="hr", requirement=_need(), cedar="permit (...);")
+    d = existing.to_dict()
+    assert d["parsed_intent"] is None
+
+
+def test_kind_test_returns_suite_even_without_results() -> None:
+    """test() constructs an empty Suite when no scenarios run."""
+    from cedrus.case import Suite
+
+    policy = Draft(
+        id="hr",
+        requirement=_need(),
+        principal=Principal(kind="any"),
+        action=Action(kind="any"),
+        resource=Resource(kind="any"),
+    )
+    object.__setattr__(policy, "cedar", "permit (principal, action, resource);")
+    suite = policy.test(_schema(), [])
+    assert isinstance(suite, Suite)
+    assert suite.results == ()
+
+
+# ---------------------------------------------------------------------------
 # Draft.generate / Draft.apply_result
 # ---------------------------------------------------------------------------
 
