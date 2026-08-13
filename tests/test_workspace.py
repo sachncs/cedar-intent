@@ -811,4 +811,65 @@ def test_space_test_domain_uses_default_schema_when_none(tmp_path: Path) -> None
         ws.close()
 
 
+def test_space_deploy_raises_when_verifier_rejects(tmp_path: Path) -> None:
+    """deploy() with a non-passing verifier raises SpaceError unless skip_verify."""
+    from cedrus.need import Need
+
+    ws = _workspace_photosflash(tmp_path)
+    try:
+        ws.repository.execute(
+            "INSERT INTO requirements (id, domain, text, source_path, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("HR-001", "hr", "body", "/tmp/x.md", datetime.now(UTC).isoformat()),
+        )
+        # Insert a policy that doesn't satisfy the schema (no schema match).
+        ws.repository.execute(
+            "INSERT INTO policies "
+            "(id, domain, requirement_id, cedar, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "HR-001", "hr", "HR-001",
+                'permit (principal == User::"alice", action == Action::"view", resource);',
+                "compiled",
+                datetime.now(UTC).isoformat(),
+                datetime.now(UTC).isoformat(),
+            ),
+        )
+        schema = ws.load_schema("hr")
+        with pytest.raises(Exception):
+            ws.deploy("hr", str(tmp_path / "out"), schema=schema)
+    finally:
+        ws.close()
+
+
+def test_space_list_compiled_policies_handles_orphan_fk(tmp_path: Path) -> None:
+    """list_compiled_policies skips rows where requirement_id is null (FK cascade)."""
+    ws = _workspace_photosflash(tmp_path)
+    try:
+        ws.repository.execute(
+            "INSERT INTO requirements (id, domain, text, source_path, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("HR-001", "hr", "body", "/tmp/x.md", datetime.now(UTC).isoformat()),
+        )
+        ws.repository.execute(
+            "INSERT INTO policies "
+            "(id, domain, requirement_id, cedar, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "HR-001", "hr", "HR-001",
+                'permit (principal, action, resource);',
+                "compiled",
+                datetime.now(UTC).isoformat(),
+                datetime.now(UTC).isoformat(),
+            ),
+        )
+        # Delete the requirement; FK ON DELETE SET NULL leaves requirement_id NULL.
+        ws.remove_requirement("HR-001")
+        compiled = ws.list_compiled_policies("hr")
+        # The orphaned policy is skipped.
+        assert compiled == []
+    finally:
+        ws.close()
+
+
 __all__ = []

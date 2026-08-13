@@ -568,4 +568,55 @@ def test_draft_stored_update_with_no_fields_is_noop() -> None:
     assert before.principal.kind == after.principal.kind
 
 
+def test_stored_list_drafts_returns_empty_for_no_drafts() -> None:
+    """Stored.list_drafts returns [] when no draft rows exist."""
+    repo = Memory()
+    make_requirement("hr-001").save(repo)
+    from cedrus.store import Stored
+
+    stored = Stored(
+        id="hr-001", domain="hr", requirement_id="hr-001",
+        intent=make_intent("hr-001"), cedar="permit (...);",
+        status="compiled",
+        created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
+        action=Action(kind="any"),
+    )
+    stored.upsert(repo)
+    assert stored.list_drafts(repo) == []
+
+
+def test_stored_list_drafts_returns_chronological_drafts() -> None:
+    """Stored.list_drafts returns drafts in created_at order."""
+    repo = Memory()
+    make_requirement("hr-001").save(repo)
+    intent = make_intent("hr-001")
+    for i in range(2):
+        DraftStored(
+            id=f"d{i}",
+            policy_id="hr-001",
+            model="offline",
+            request_id=None,
+            unresolved=(),
+            cedar="permit (principal, action, resource);",
+            created_at=datetime.now(UTC),
+            intent=intent,
+            principal=Principal(kind="any"),
+            action=Action(kind="any"),
+            resource=Resource(kind="any"),
+        ).save(repo)
+    from cedrus.store import Stored
+
+    stored = Stored(
+        id="hr-001", domain="hr", requirement_id="hr-001",
+        intent=make_intent("hr-001"), cedar="permit (...);",
+        status="compiled",
+        created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
+        action=Action(kind="any"),
+    )
+    stored.upsert(repo)
+    drafts = stored.list_drafts(repo)
+    assert len(drafts) == 2
+    assert [d.id for d in drafts] == ["d0", "d1"]
+
+
 __all__ = []

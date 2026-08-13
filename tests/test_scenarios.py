@@ -165,6 +165,14 @@ def test_run_evaluate_with_empty_cases_returns_passed_suite() -> None:
     assert suite.results == ()
 
 
+def test_case_load_rejects_entry_with_invalid_expected() -> None:
+    with pytest.raises(ValueError):
+        Case.load([
+            {"name": "x", "principal": "p", "action": "a",
+             "resource": "r", "context": {}, "expected": "Maybe"}
+        ])
+
+
 def _schema() -> "Schema":
     from cedrus import Schema
 
