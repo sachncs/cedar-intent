@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from cedrus.error import ScopeFault
+from cedrus.error import Compile, ScopeFault
 from cedrus.scope import (
     Action,
     Clause,
@@ -168,13 +168,21 @@ def test_scope_parse_dispatches_on_discriminator() -> None:
     assert isinstance(Scope.parse({"name": "view"}), Action)
 
 
-def test_scope_parse_returns_none_for_ambiguous() -> None:
-    assert Scope.parse({}) is None
-    assert Scope.parse("not a dict") is None  # type: ignore[arg-type]
+def test_scope_parse_raises_on_ambiguous() -> None:
+    with pytest.raises(Compile):
+        Scope.parse({})
 
 
-def test_scope_parse_returns_none_on_invalid_scope() -> None:
-    assert Scope.parse({"name": ""}) is None
+def test_scope_parse_raises_on_non_dict() -> None:
+    from typing import cast
+
+    with pytest.raises(Compile):
+        Scope.parse(cast(dict, "not a dict"))
+
+
+def test_scope_parse_raises_on_invalid_scope() -> None:
+    with pytest.raises(Compile):
+        Scope.parse({"name": ""})
 
 
 def test_principal_to_dict_round_trip_preserves_fields() -> None:

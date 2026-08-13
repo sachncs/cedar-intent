@@ -12,7 +12,7 @@ VALID_POLICY = (
 )
 
 
-def _schema() -> Schema:
+def build_schema() -> Schema:
     return Schema.from_mapping(
         {
             "PhotoFlash": {
@@ -63,9 +63,11 @@ def test_vreport_from_cedar_raises_on_malformed_cedar() -> None:
 
 def test_vreport_from_cedar_raises_typeerror_on_non_string_input() -> None:
     """Validate enforces string input; raises Validate via the TypeError branch."""
+    from typing import cast
+
     schema = _schema()
     with pytest.raises(Validate):
-        Vreport.from_cedar([42], schema)  # type: ignore[list-item]
+        Vreport.from_cedar(cast(list, [42]), schema)
 
 
 def test_vreport_to_dict_carries_passed_and_formatted() -> None:
@@ -85,9 +87,13 @@ def test_vreport_default_constructor_carries_empty_collections() -> None:
 
 
 def test_vreport_is_frozen() -> None:
+    from dataclasses import replace
+
     report = Vreport(passed=True, errors=(), formatted=())
     with pytest.raises(Exception):
-        report.passed = False  # type: ignore[misc]
+        # Frozen dataclass rejects setattr; replace() goes through
+        # __init__ which is what the type system expects.
+        replace(report, passed=False)
 
 
 def test_validator_validate_delegates_to_from_cedar() -> None:
@@ -103,7 +109,7 @@ def test_vreport_from_cedar_wraps_typeerror() -> None:
     """Non-string policy input raises Validate via the TypeError branch."""
     schema = _schema()
     with pytest.raises(Validate) as exc:
-        Vreport.from_cedar([42], schema)  # type: ignore[list-item]
+        Vreport.from_cedar(cast(list, [42]), schema)
     assert "not a string" in str(exc.value.errors)
 
 

@@ -106,6 +106,17 @@ strict = true
 module = ["cedarpy", "litellm"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# Tests are not type-checked strictly. Test code is allowed to use
+# untyped fixtures, dynamic stubs, and SimpleNamespace / cast()
+# shims. Type-correctness for tests is enforced at the import
+# boundary (the production code), not at every fixture call.
+directory = "tests"
+disallow_untyped_calls = false
+disallow_untyped_defs = false
+disable_error_code = ["no-untyped-def", "no-untyped-call"]
+warn_unused_ignores = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"

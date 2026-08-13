@@ -12,7 +12,7 @@ from cedrus.generate import Context, Offline, Proposal, Result
 from cedrus.scope import Clause
 
 
-def _need() -> Need:
+def make_need() -> Need:
     return Need(
         id="HR-001",
         text="Only admins can delete photos.",
@@ -22,10 +22,10 @@ def _need() -> Need:
     )
 
 
-def _context() -> Context:
+def make_context() -> Context:
     return Context(
         need=_need(),
-        schema=None,  # type: ignore[arg-type]
+        schema=None,
         principal=Principal(kind="is_type", type_name="User"),
         action=Action(kind="named", name="delete"),
         resource=Resource(kind="is_type", type_name="Photo"),
@@ -56,7 +56,7 @@ def test_offline_returns_forbid_for_prohibit_keyword() -> None:
     )
     ctx = BaseContext(
         need=need,
-        schema=None,  # type: ignore[arg-type]
+        schema=None,
         principal=Principal(kind="is_type", type_name="User"),
         action=Action(kind="named", name="delete"),
         resource=Resource(kind="is_type", type_name="Photo"),
@@ -78,7 +78,7 @@ def test_offline_returns_forbid_for_deny_keyword() -> None:
     )
     ctx = BaseContext(
         need=need,
-        schema=None,  # type: ignore[arg-type]
+        schema=None,
         principal=Principal(kind="any"),
         action=Action(kind="named", name="view"),
         resource=Resource(kind="any"),
@@ -105,7 +105,7 @@ def test_offline_extracts_single_when_clause() -> None:
     )
     ctx = BaseContext(
         need=need,
-        schema=None,  # type: ignore[arg-type]
+        schema=None,
         principal=Principal(kind="is_type", type_name="User"),
         action=Action(kind="named", name="view"),
         resource=Resource(kind="is_type", type_name="Photo"),
@@ -129,7 +129,7 @@ def test_offline_emits_unresolved_when_principal_action_resource_are_all_any_and
     )
     ctx = BaseContext(
         need=need,
-        schema=None,  # type: ignore[arg-type]
+        schema=None,
         principal=Principal(kind="any"),
         action=Action(kind="any"),
         resource=Resource(kind="any"),
@@ -161,9 +161,9 @@ def test_offline_records_generator_name_in_notes() -> None:
 def test_proposal_data_modelling() -> None:
     intent = None
     proposal = Proposal(
-        intent=intent,  # type: ignore[arg-type]
+        intent=intent,
         unresolved=("a", "b"),
-        notes=None,  # type: ignore[arg-type]
+        notes=None,
     )
     assert proposal.intent is None
     assert proposal.unresolved == ("a", "b")
@@ -174,9 +174,9 @@ def test_result_data_modelling() -> None:
 
     intent = None
     proposal = Proposal(
-        intent=intent,  # type: ignore[arg-type]
+        intent=intent,
         unresolved=(),
-        notes=None,  # type: ignore[arg-type]
+        notes=None,
     )
     result = Result(proposal=proposal, model="m", request_id="r", usage=Notes())
     assert result.model == "m"
@@ -372,7 +372,7 @@ def test_llm_format_rejects_unsupported_type() -> None:
 
     llm = Llm(model="openai/gpt-4", timeout=60)
     with pytest.raises(Exception):
-        llm.format("not a scope")  # type: ignore[arg-type]
+        llm.format("not a scope")
 
 
 # ---------------------------------------------------------------------------
@@ -453,7 +453,7 @@ def test_llm_build_non_dict_non_list_returns_none() -> None:
     from cedrus.generate.litellm import Llm
 
     llm = Llm(model="openai/gpt-4", timeout=60)
-    assert llm.build(42) is None  # type: ignore[arg-type]
+    assert llm.build(42) is None
 
 
 # ---------------------------------------------------------------------------

@@ -40,7 +40,7 @@ class Context:
     """
 
     need: Any  # Need type (forward ref to avoid circular import)
-    schema: Schema
+    schema: Schema | None = None
     principal: Principal
     action: Action
     resource: Resource
