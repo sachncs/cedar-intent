@@ -637,3 +637,72 @@ def test_positive_int_rejects_zero() -> None:
 def test_positive_int_accepts_one() -> None:
     from cedrus.cli import positive_int
     assert positive_int("1") == 1
+
+
+# ---------------------------------------------------------------------------
+# __main__ entrypoint
+# ---------------------------------------------------------------------------
+
+
+def test_main_module_routes_to_cli_main() -> None:
+    """cedrus.__main__ re-exports cli.main; test that the symbol is bound."""
+    import cedrus.__main__
+
+    assert callable(cedrus.__main__.main)
+
+
+# ---------------------------------------------------------------------------
+# report_error / report_unexpected_error
+# ---------------------------------------------------------------------------
+
+
+def test_report_error_returns_one() -> None:
+    from cedrus.cli import report_error
+
+    args = SimpleNamespace(json=False, workspace=None, command="init", path=".")
+    result = report_error(args, RuntimeError("boom"))
+    assert result == 1
+
+
+def test_report_error_emits_json_envelope_when_json_flag_set(capsys) -> None:
+    from cedrus.cli import report_error
+
+    args = SimpleNamespace(json=True, workspace=None, command="init", path=".")
+    result = report_error(args, RuntimeError("boom"))
+    captured = capsys.readouterr()
+    assert result == 1
+    assert "boom" in captured.err
+
+
+def test_report_unexpected_error_returns_one(capsys) -> None:
+    from cedrus.cli import report_unexpected_error
+
+    args = SimpleNamespace(json=False, workspace=None, command="init", path=".")
+    result = report_unexpected_error(args, ValueError("kaboom"))
+    assert result == 1
+    captured = capsys.readouterr()
+    assert "kaboom" in captured.err
+
+
+def test_main_returns_two_for_argparse_usage_error(capsys) -> None:
+    """main returns exit code 2 for argparse usage errors."""
+    from cedrus.cli import main
+
+    code = main(["--not-a-real-flag"])
+    assert code == 2
+
+
+def test_main_returns_one_for_handler_error(capsys) -> None:
+    """main returns 1 when a handler raises cedrus.error.Error."""
+    from cedrus.cli import main
+
+    code = main(["--workspace", "/nonexistent-workspace-path-xyz", "domain", "list"])
+    assert code == 1
+
+
+def test_main_returns_zero_for_successful_init(tmp_path: Path) -> None:
+    from cedrus.cli import main
+
+    code = main(["init", "--path", str(tmp_path / "ws")])
+    assert code == 0
+    assert (tmp_path / "ws" / ".cedrus").exists()
