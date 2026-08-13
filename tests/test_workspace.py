@@ -1036,4 +1036,45 @@ def test_space_init_domain_writes_seed_schema_atomically(tmp_path: Path) -> None
         ws_disk.close()
 
 
+def test_space_apply_for_requirement_with_valid_draft(tmp_path: Path) -> None:
+    """apply_for_requirement with a valid draft compiles and persists."""
+    from cedrus import Compiled, Need
+    from cedrus.compile import Intent
+    from cedrus.store import DraftStored
+
+    ws = _workspace_photosflash(tmp_path)
+    try:
+        ws.repository.execute(
+            "INSERT INTO requirements (id, domain, text, source_path, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("HR-001", "hr", "body", "/tmp/x.md", datetime.now(UTC).isoformat()),
+        )
+        need = Need.get(ws.repository, "HR-001")
+        intent = Intent(
+            id="hr-hr-001", requirement_id="HR-001", effect="permit",
+            principal=Principal(kind="any"),
+            action=Action(kind="any"),
+            resource=Resource(kind="any"),
+        )
+        DraftStored(
+            id="d1",
+            policy_id="draft-HR-001",
+            model="offline",
+            request_id=None,
+            unresolved=(),
+            cedar="permit (principal, action, resource);",
+            created_at=datetime.now(UTC),
+            intent=intent,
+            principal=Principal(kind="any"),
+            action=Action(kind="any"),
+            resource=Resource(kind="any"),
+        ).save(ws.repository)
+        schema = ws.load_schema("hr")
+        compiled = ws.apply_for_requirement("HR-001", schema, scenarios=())
+        assert isinstance(compiled, Compiled)
+        assert compiled.id == "draft-HR-001"
+    finally:
+        ws.close()
+
+
 __all__ = []
