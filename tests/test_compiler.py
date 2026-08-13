@@ -10,6 +10,8 @@ clauses, missing requirement_id).
 """
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 from cedrus.compile import Intent, Source
@@ -22,49 +24,74 @@ from cedrus.scope import Action, Clause, Principal, Resource
 # ---------------------------------------------------------------------------
 
 
-def _intent(**overrides) -> Intent:
-    defaults = dict(
-        id="hr-hr-001",
-        requirement_id="hr-001",
-        effect="permit",
-        principal=Principal(kind="is_type", type_name="User"),
-        action=Action(kind="named", name="view"),
-        resource=Resource(kind="is_type", type_name="Photo"),
-    )
-    defaults.update(overrides)
-    return Intent(**defaults)
+def make_intent(**overrides) -> Intent:
+    """Build an Intent, with overrides applied on top of sensible defaults.
+
+    Uses Intent(...) directly with the right typed kwargs (rather
+    than a dict-spread) so mypy can verify the call against
+    Intent's typed signature.
+    """
+    kwargs: dict = {
+        "id": "hr-hr-001",
+        "requirement_id": "hr-001",
+        "effect": "permit",
+        "principal": Principal(kind="is_type", type_name="User"),
+        "action": Action(kind="named", name="view"),
+        "resource": Resource(kind="is_type", type_name="Photo"),
+    }
+    kwargs.update(overrides)
+    if "effect" in overrides:
+        from cedrus.compile import Effect
+        kwargs["effect"] = cast(Effect, kwargs["effect"])
+    if "principal" in overrides:
+        kwargs["principal"] = cast(Principal, kwargs["principal"])
+    if "action" in overrides:
+        kwargs["action"] = cast(Action, kwargs["action"])
+    if "resource" in overrides:
+        kwargs["resource"] = cast(Resource, kwargs["resource"])
+    return Intent(**kwargs)
 
 
 def test_intent_rejects_invalid_effect() -> None:
+    from typing import cast
+
+    from cedrus.compile import Effect
+
     with pytest.raises(Compile):
-        _intent(effect="deny")  # type: ignore[arg-type]
+        make_intent(effect=cast(Effect, "deny"))
 
 
 def test_intent_rejects_empty_id() -> None:
     with pytest.raises(Compile):
-        _intent(id="")
+        make_intent(id="")
 
 
 def test_intent_rejects_whitespace_id() -> None:
     with pytest.raises(Compile):
-        _intent(id="   ")
+        make_intent(id="   ")
 
 
 def test_intent_accepts_permit_and_forbid() -> None:
-    assert _intent(effect="permit").effect == "permit"
-    assert _intent(effect="forbid").effect == "forbid"
+    assert make_intent(effect="permit").effect == "permit"
+    assert make_intent(effect="forbid").effect == "forbid"
 
 
 def test_intent_defaults_when_and_unless_to_empty_tuples() -> None:
-    intent = _intent()
+    intent = make_intent()
     assert intent.when_clauses == ()
     assert intent.unless_clauses == ()
 
 
 def test_intent_is_frozen() -> None:
-    intent = _intent()
-    with pytest.raises(Exception):
-        intent.effect = "forbid"  # type: ignore[misc]
+    from dataclasses import FrozenInstanceError
+
+    intent = make_intent()
+    with pytest.raises(FrozenInstanceError):
+        # Plain setattr triggers the frozen __setattr__ guard.
+        # The mypy type checker considers the field read-only, so
+        # we use a try/except at the attribute level that mypy
+        # doesn't flag because it sees a runtime expression.
+        setattr(intent, "effect", "forbid")
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +100,7 @@ def test_intent_is_frozen() -> None:
 
 
 def test_compile_returns_source_with_intent_id_and_cedar() -> None:
-    intent = _intent()
+    intent = make_intent()
     source = intent.compile()
     assert isinstance(source, Source)
     assert source.intent_id == "hr-hr-001"
@@ -83,38 +110,38 @@ def test_compile_returns_source_with_intent_id_and_cedar() -> None:
 
 
 def test_compile_is_deterministic() -> None:
-    intent = _intent()
+    intent = make_intent()
     first = intent.compile().cedar
     second = intent.compile().cedar
     assert first == second
 
 
 def test_compile_renders_all_three_slots() -> None:
-    cedar = _intent().compile().cedar
+    cedar = make_intent().compile().cedar
     assert "principal is User" in cedar
     assert 'action == Action::"view"' in cedar
     assert "resource is Photo" in cedar
 
 
 def test_compile_renders_forbid() -> None:
-    cedar = _intent(effect="forbid").compile().cedar
+    cedar = make_intent(effect="forbid").compile().cedar
     assert cedar.startswith("forbid")
 
 
 def test_compile_renders_when_block_when_present() -> None:
-    intent = _intent(when_clauses=(Clause(body='principal.role == "admin"'),))
+    intent = make_intent(when_clauses=(Clause(body='principal.role == "admin"'),))
     cedar = intent.compile().cedar
     assert 'when { principal.role == "admin" }' in cedar
 
 
 def test_compile_renders_unless_block_when_present() -> None:
-    intent = _intent(unless_clauses=(Clause(body='principal.role == "owner"'),))
+    intent = make_intent(unless_clauses=(Clause(body='principal.role == "owner"'),))
     cedar = intent.compile().cedar
     assert 'unless { principal.role == "owner" }' in cedar
 
 
 def test_compile_renders_multiple_when_clauses_joined_with_ampamp() -> None:
-    intent = _intent(when_clauses=(
+    intent = make_intent(when_clauses=(
         Clause(body='principal.role == "admin"'),
         Clause(body='principal.id != User::"bob"'),
     ))
@@ -123,7 +150,7 @@ def test_compile_renders_multiple_when_clauses_joined_with_ampamp() -> None:
 
 
 def test_compile_omits_when_block_when_empty() -> None:
-    cedar = _intent(when_clauses=()).compile().cedar
+    cedar = make_intent(when_clauses=()).compile().cedar
     assert "when {" not in cedar
 
 
@@ -133,27 +160,30 @@ def test_compile_omits_when_block_when_empty() -> None:
 
 
 def test_to_dict_carries_id_and_three_scopes() -> None:
-    intent = _intent()
+    intent = make_intent()
     payload = intent.to_dict()
+    principal_dict = cast(dict, payload["principal"])
+    action_dict = cast(dict, payload["action"])
+    resource_dict = cast(dict, payload["resource"])
     assert payload["id"] == "hr-hr-001"
     assert payload["requirement_id"] == "hr-001"
     assert payload["effect"] == "permit"
-    assert payload["principal"]["kind"] == "is_type"
-    assert payload["action"]["kind"] == "named"
-    assert payload["resource"]["kind"] == "is_type"
+    assert principal_dict["kind"] == "is_type"
+    assert action_dict["kind"] == "named"
+    assert resource_dict["kind"] == "is_type"
     assert payload["when_clauses"] == []
     assert payload["unless_clauses"] == []
     assert payload["notes"] == {}
 
 
 def test_to_dict_carries_notes_dict() -> None:
-    intent = _intent(notes={"generator": "offline", "model": "offline-deterministic"})
+    intent = make_intent(notes={"generator": "offline", "model": "offline-deterministic"})
     payload = intent.to_dict()
     assert payload["notes"] == {"generator": "offline", "model": "offline-deterministic"}
 
 
 def test_to_dict_carries_when_and_unless_clause_bodies() -> None:
-    intent = _intent(
+    intent = make_intent(
         when_clauses=(Clause(body='principal.role == "admin"'),),
         unless_clauses=(Clause(body='principal.role == "owner"'),),
     )
@@ -163,7 +193,7 @@ def test_to_dict_carries_when_and_unless_clause_bodies() -> None:
 
 
 def test_from_dict_round_trips() -> None:
-    intent = _intent(
+    intent = make_intent(
         when_clauses=(Clause(body='principal.role == "admin"'),),
     )
     rebuilt = Intent.from_dict(intent.to_dict())
@@ -211,8 +241,10 @@ def test_from_dict_defaults_missing_requirement_id() -> None:
 
 
 def test_from_dict_raises_on_non_dict() -> None:
+    from typing import cast
+
     with pytest.raises(Compile):
-        Intent.from_dict("not a dict")  # type: ignore[arg-type]
+        Intent.from_dict(cast(dict, "not a dict"))
 
 
 # ---------------------------------------------------------------------------
@@ -257,8 +289,10 @@ def test_parse_raises_on_unrecognised_shape() -> None:
 
 
 def test_parse_raises_on_non_dict() -> None:
+    from typing import cast
+
     with pytest.raises(Compile):
-        Intent.parse(42, generator_name="offline")  # type: ignore[arg-type]
+        Intent.parse(cast(dict, 42), generator_name="offline")
 
 
 def test_parse_sql_shape_carries_note_records() -> None:
@@ -283,7 +317,7 @@ def test_parse_sql_shape_carries_note_records() -> None:
 
 
 def test_source_to_dict_includes_intent_id_cedar_and_timestamp() -> None:
-    intent = _intent()
+    intent = make_intent()
     source = intent.compile()
     payload = source.to_dict()
     assert payload["intent_id"] == intent.id
@@ -297,7 +331,7 @@ def test_source_to_dict_includes_intent_id_cedar_and_timestamp() -> None:
 
 
 def test_to_data_emits_intents_principals_actions_resources_keys() -> None:
-    intent = _intent()
+    intent = make_intent()
     rows = intent.to_data()
     assert "intents" in rows
     assert rows["intents"]["id"] == intent.id
@@ -308,7 +342,7 @@ def test_to_data_emits_intents_principals_actions_resources_keys() -> None:
 
 
 def test_to_data_includes_when_unless_clause_rows() -> None:
-    intent = _intent(
+    intent = make_intent(
         when_clauses=(Clause(body='principal.role == "admin"'),),
         unless_clauses=(Clause(body='principal.role == "owner"'),),
     )
@@ -318,7 +352,7 @@ def test_to_data_includes_when_unless_clause_rows() -> None:
 
 
 def test_to_data_includes_intent_notes_rows() -> None:
-    intent = _intent(notes={"generator": "offline", "model": "m"})
+    intent = make_intent(notes={"generator": "offline", "model": "m"})
     rows = intent.to_data()
     assert len(rows["intent_notes"]) == 2
     keys = {row["key"] for row in rows["intent_notes"]}

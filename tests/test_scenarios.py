@@ -1,10 +1,15 @@
 """Tests for :mod:`cedrus.case` — Case / Outcome / Suite / Run."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
-from cedrus import Case, Outcome, Suite
+from cedrus import Case, Outcome, Schema, Suite
 from cedrus.case import Run, Decision
+
+if TYPE_CHECKING:
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -104,9 +109,19 @@ def test_case_load_accepts_single_dict_as_one_case_list() -> None:
 
 
 def test_case_load_rejects_non_dict_entry() -> None:
+    from typing import Any, cast
+
     with pytest.raises(ValueError):
-        Case.load([{"name": "x", "principal": "p", "action": "a",
-                    "resource": "r", "context": {}, "expected": "Allow"}, 42])
+        Case.load(
+            cast(
+                list[Any],
+                [
+                    {"name": "x", "principal": "p", "action": "a",
+                     "resource": "r", "context": {}, "expected": "Allow"},
+                    42,
+                ],
+            )
+        )
 
 
 def test_case_load_assigns_default_name_when_missing() -> None:
@@ -160,7 +175,7 @@ def test_run_default_attributes() -> None:
 
 def test_run_evaluate_with_empty_cases_returns_passed_suite() -> None:
     run = Run(())
-    suite = run.evaluate(_schema(), [])
+    suite = run.evaluate(build_schema(), [])
     assert suite.passed
     assert suite.results == ()
 
@@ -173,7 +188,7 @@ def test_case_load_rejects_entry_with_invalid_expected() -> None:
         ])
 
 
-def _schema() -> "Schema":
+def build_schema() -> "Schema":
     from cedrus import Schema
 
     return Schema.from_mapping(

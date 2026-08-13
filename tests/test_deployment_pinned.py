@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Tests for the pinned HTTP transport.
 
 These tests cover:
@@ -13,13 +15,10 @@ These tests cover:
   max_retries; a 500 is not retried.
 """
 
-import hashlib
-from datetime import UTC, datetime
-
-from __future__ import annotations
 
 import hashlib
 import threading
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
