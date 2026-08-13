@@ -1011,4 +1011,29 @@ def test_space_build_stored_report_round_trip(tmp_path: Path) -> None:
     assert "formatted" in dict(stored.payload.data)
 
 
+def test_space_init_domain_writes_seed_schema_atomically(tmp_path: Path) -> None:
+    """init_domain creates a real schema.json when the file is absent."""
+    from cedrus import Space
+
+    ws = Space.in_memory()
+    target = tmp_path / "fresh" / "hr"
+    target.mkdir(parents=True)
+    # The test exercises the os.replace atomic-write path; the
+    # production code uses Space(in_memory()) which doesn't write
+    # to disk, so we go through Space(tmp_path) for the disk case.
+    Space.create(tmp_path / "ws")
+    ws_disk = Space.open(tmp_path / "ws")
+    try:
+        schema_path = ws_disk.init_domain("hr")
+        assert schema_path.exists()
+        import json
+
+        payload = json.loads(schema_path.read_text())
+        assert "hr" in payload
+        assert payload["hr"]["entityTypes"] == {}
+        assert payload["hr"]["actions"] == {}
+    finally:
+        ws_disk.close()
+
+
 __all__ = []
