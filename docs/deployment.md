@@ -1,7 +1,7 @@
 # Deployment guide
 
-`cedrus` produces a self-contained deployment bundle and pushes
-it to either a local directory or an HTTP endpoint. This page explains
+`cedrus` produces a self-contained deployment bundle and pushes it
+to either a local directory or an HTTP endpoint. This page explains
 the bundle format, the integrity model, and the operator workflow.
 
 ## Bundle format
@@ -32,23 +32,31 @@ The `bundle_hash` is the SHA-256 digest of `bundle.cedar`. The
 manifest is committed alongside the bundle so consumers can verify
 integrity after transport.
 
+A `Record` row is also written to `deployments` capturing the
+deployment id (a fresh `cedrus.utils.id()`), target path or URL,
+target kind (`local` or `http`), bundle hash, and a bounded subset
+of the HTTP response (status code, body SHA-256, idempotency key,
+retry count). The HTTP response body is never persisted in clear.
+
 ## Integrity verification
 
-Every `Client` deployment records a `Record` with
-the `bundle_hash`. After a deployment, you can re-read the on-disk
-bundle and confirm the hash matches:
+Every `Client` deployment records a `Record` with the `bundle_hash`.
+After a deployment, you can re-read the on-disk bundle and confirm
+the hash matches:
 
 ```python
 from pathlib import Path
 from cedrus import Bundler
 
-exporter = Bundler()
-manifest = exporter.read_directory(Path("/opt/policies/hr"))
+manifest = Bundler().read_directory(Path("/opt/policies/hr"))
 print(manifest.bundle_hash == "<expected hash>")
 ```
 
-If the hash does not match, the read fails with `Deploy` and
-a clear message identifying the expected and actual digests.
+If the hash does not match, `Bundler.read_directory` raises `Deploy`
+with a clear message identifying the expected and actual digests.
+This catches transport corruption but **not** a malicious replacement
+of the bundle with a recomputed hash — see "Bundle integrity" below
+for authenticated options.
 
 ## Local deployment
 
@@ -60,14 +68,21 @@ cedrus deploy push --domain hr --target /opt/policies/hr
 ```
 
 The CLI creates the directory if it does not exist. Existing files in
-the directory are not removed; the deployment only writes `bundle.cedar`
-and `manifest.json`.
+the directory are not removed; the deployment only writes
+`bundle.cedar` and `manifest.json`. `Bundler.write_directory` uses an
+atomic temp-file + `os.replace` pattern so a partial write never
+leaves a torn bundle on disk.
+
+The `Bundler` will refuse to write through a symlinked target
+directory (so an operator does not accidentally replace a file they
+did not intend to), and the staging directory rejects in-place
+contents.
 
 ## HTTP deployment
 
-Use an HTTP target when the embedded Cedar engine pulls policies from a
-service. The HTTP request is a `POST` with the full manifest as a JSON
-body:
+Use an HTTP target when the embedded Cedar engine pulls policies
+from a service. The HTTP request is a `POST` with the full manifest
+as a JSON body:
 
 ```http
 POST /deploy HTTP/1.1
@@ -81,8 +96,8 @@ Idempotency-Key: 7c4e…
 ```
 
 The service should respond with `2xx` for accepted deployments and a
-non-2xx for rejected ones. cedrus treats `2xx` as success and
-any other status as a `Deploy`.
+non-2xx for rejected ones. `Client` treats `2xx` as success and any
+other status as a `Deploy`.
 
 Custom headers can be added per deployment:
 
@@ -95,17 +110,17 @@ cedrus deploy push \
 ```
 
 > **WARNING — header validation.** Every header name and value is
-> validated. Names may not be empty, contain CR/LF, or be one of
-> the reserved names (`Host`, `Authorization`, `Cookie`,
-> `Content-Length`, `Transfer-Encoding`). Values may not contain
-> CR/LF and are capped at 8192 bytes. Names are capped at 256 bytes.
+> validated by `Client.validate_headers`. Names may not be empty,
+> contain CR/LF, or be one of the reserved names (`Host`,
+> `Authorization`, `Cookie`, `Content-Length`,
+> `Transfer-Encoding`). Values may not contain CR/LF and are capped at
+> 8192 bytes. Names are capped at 256 bytes.
 
 > **WARNING — redirect handling.** HTTP redirects are **disabled**
 > by default. A `3xx` response is treated as a deployment failure.
-> Pass `--follow-redirects` to the deployment client (via the Python
-> API) to opt in. The SSRF guard is re-applied on every hop when
-> redirects are enabled, but operators should prefer a single direct
-> endpoint.
+> The SSRF guard is re-applied on every hop when redirects are
+> enabled (via the `Client(follow_redirects=True)` Python option);
+> operators should prefer a single direct endpoint.
 
 > **WARNING — body capture.** The HTTP response body is never
 > embedded in error messages or persisted verbatim in the deployment
@@ -125,9 +140,16 @@ cedrus deploy push \
 > redirect the deployment into a private network.
 
 The HTTP timeout defaults to 30 seconds and is configurable with
-`--timeout`. The connection is closed after `--timeout` seconds; a
-network error on the remote side raises `Deploy` without
-retrying unless `--retries` is non-zero.
+`--timeout` (or the Python `Client(timeout=...)` constructor). On
+timeout or network error, the deployment raises `Deploy` with the
+underlying `TimeoutError` chained.
+
+## Retries
+
+`Client(max_retries=N, retry_backoff=...)` retries on `429 Too Many
+Requests` and `503 Service Unavailable`. Each retry re-sends the
+same `Idempotency-Key` so the server can dedupe. The default
+backoff is 0.5 s, doubling per attempt, capped at 8 s.
 
 ## Deployment history
 
@@ -139,8 +161,7 @@ cedrus --json deploy history --domain hr
 ```
 
 ```python
-records = workspace.list_deployments("hr")
-for record in records:
+for record in workspace.list_deployments("hr"):
     print(record.id, record.bundle_hash, record.target_kind, record.status)
 ```
 
@@ -161,10 +182,14 @@ deployed bundle and redeploy an earlier bundle from your backup.
 
 | Failure                                  | Behavior                                        |
 | ---------------------------------------- | ----------------------------------------------- |
-| Local directory unwritable               | `Deploy` raised before any write.     |
-| HTTP endpoint returns non-2xx            | `Deploy` raised; response body captured. |
+| Local directory unwritable               | `Deploy` raised before any write.              |
+| Symlinked target directory               | `Deploy` raised (refuse to traverse symlinks).  |
+| HTTP endpoint returns non-2xx            | `Deploy` raised; response body captured.       |
 | HTTP timeout                             | `Deploy` raised; underlying `TimeoutError` chained. |
+| Header injection (CR/LF / reserved name) | `Deploy` raised at validate_headers.           |
 | Cedar schema mismatch (downstream)       | Surfaced by the consuming service; cedrus does not catch this. |
 
 Always inspect the captured response body in `Record.response`
-when investigating HTTP deployment failures.
+when investigating HTTP deployment failures. The body is only the
+HTTP status code, a SHA-256 of the body, the idempotency key, and
+the retry count — not the full body.
