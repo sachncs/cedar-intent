@@ -903,4 +903,39 @@ def test_space_apply_for_requirement_with_no_draft_raises(tmp_path: Path) -> Non
         ws.close()
 
 
+def test_space_find_action_namespace_returns_matching_namespace() -> None:
+    """find_action_namespace returns the single matching namespace."""
+    from cedrus import Action
+    from cedrus.space import Space
+
+    schema = _schema_only()  # build a small schema
+    action = Action(kind="named", name="viewPhoto")
+    namespace = Space.find_action_namespace(action, schema)
+    assert namespace == "PhotoFlash"
+
+
+def test_space_find_action_namespace_falls_back_to_action_namespace() -> None:
+    """find_action_namespace returns the explicit action.namespace if no match."""
+    from cedrus import Action
+    from cedrus.space import Space
+
+    schema = _schema_only()
+    action = Action(kind="named", name="unknown", namespace="Custom")
+    namespace = Space.find_action_namespace(action, schema)
+    assert namespace == "Custom"
+
+
+def _schema_only():
+    """Build a minimal Cedar schema with one namespace and one action."""
+    from cedrus import Schema
+    return Schema.from_mapping(
+        {
+            "PhotoFlash": {
+                "entityTypes": {},
+                "actions": {"viewPhoto": {}},
+            }
+        }
+    )
+
+
 __all__ = []

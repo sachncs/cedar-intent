@@ -701,4 +701,36 @@ def test_verifier_redundant_skips_distinct_policies() -> None:
     assert findings == []
 
 
+def test_verifier_missing_coverage_finding_formats_items() -> None:
+    """missing_coverage_finding formats the items list in the message."""
+    schema = _schema()
+    findings = Verifier(schema).uncovered(
+        ["a", "b", "c"],
+        kind="uncovered-entity-type",
+        template="No policy covers {items}.",
+    )
+    assert len(findings) == 1
+    assert "a" in findings[0].message
+    assert "b" in findings[0].message
+    assert "c" in findings[0].message
+
+
+def test_verifier_emits_uncovered_action_finding() -> None:
+    """verify emits an uncovered-action finding for actions not in policies."""
+    schema = _schema()
+    intent = _intent(
+        "HR-001",
+        action=Action(kind="named", name="viewPhoto"),
+    )
+    report = Verifier(schema).verify(
+        [intent],
+        requirement_ids=["HR-001"],
+        action_names=[("PhotoFlash", "viewPhoto"), ("PhotoFlash", "viewAlbum")],
+        entity_type_names=["PhotoFlash::User", "PhotoFlash::Photo"],
+        domain="hr",
+    )
+    uncovered_kinds = {f.kind for f in report.findings}
+    assert "uncovered-action" in uncovered_kinds
+
+
 __all__ = []
