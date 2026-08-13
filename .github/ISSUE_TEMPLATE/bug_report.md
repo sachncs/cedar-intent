@@ -16,7 +16,7 @@ assignees: ''
 
 ```bash
 # Commands to reproduce
-cedar-intent ...
+cedrus ...
 ```
 
 ## Expected behavior
@@ -33,7 +33,7 @@ cedar-intent ...
 
 ## Environment
 
-- cedar-intent version: <!-- run `python -c "import cedar_intent; print(cedar_intent.__version__)"` -->
+- cedrus version: <!-- run `python -c "import cedrus; print(cedrus.__version__)"` -->
 - Python version: <!-- run `python --version` -->
 - Operating system:
 - LLM provider and model (if applicable):

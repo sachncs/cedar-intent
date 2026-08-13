@@ -1,4 +1,4 @@
-# cedar-intent
+# cedrus
 
 Use this template for new feature proposals that warrant design
 discussion before implementation.

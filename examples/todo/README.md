@@ -36,7 +36,7 @@ todo/
 
 ```bash
 cd todo
-cedar-intent init --path .
-cedar-intent domain add tasks
+cedrus init --path .
+cedrus domain add tasks
 bash run.sh
 ```

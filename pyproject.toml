@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cedar-intent"
+name = "cedrus"
 dynamic = ["version"]
 description = "Compile organizational authorization intent into validated Cedar policies."
 readme = "README.md"
@@ -40,44 +40,82 @@ test = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/sachin/cedar-intent"
-Source = "https://github.com/sachin/cedar-intent"
-Issues = "https://github.com/sachin/cedar-intent/issues"
-Changelog = "https://github.com/sachin/cedar-intent/blob/main/CHANGELOG.md"
-Security = "https://github.com/sachin/cedar-intent/blob/main/SECURITY.md"
+Homepage = "https://github.com/sachin/cedrus"
+Source = "https://github.com/sachin/cedrus"
+Issues = "https://github.com/sachin/cedrus/issues"
+Changelog = "https://github.com/sachin/cedrus/blob/main/CHANGELOG.md"
+Security = "https://github.com/sachin/cedrus/blob/main/SECURITY.md"
 
 [project.scripts]
-cedar-intent = "cedar_intent.cli:main"
+cedrus = "cedrus.cli:main"
 
 [tool.setuptools]
 packages = [
-    "cedar_intent",
-    "cedar_intent.policies",
-    "cedar_intent.generator",
-    "cedar_intent.storage",
+    "cedrus",
+    "cedrus.policies",
+    "cedrus.generate",
+    "cedrus.store",
+    "cedrus.data",
 ]
 
 [tool.setuptools.package-data]
-cedar_intent = ["py.typed"]
+cedrus = ["py.typed"]
 
 [tool.setuptools.dynamic]
-version = {attr = "cedar_intent.__version__"}
+version = {attr = "cedrus.__version__"}
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["B", "E", "F", "I", "UP", "W"]
+select = ["ALL"]
+ignore = [
+    "COM812",   # missing-trailing-comma (conflict with formatter)
+    "ISC001",   # single-line-implicit-string-concatenation (conflict with formatter)
+    "D203",     # one-blank-line-before-class (incompatible with D211)
+    "D213",     # multi-line-summary-second-line (incompatible with D212)
+    "EM101",    # exception-message-inherit (false positives on dataclass)
+    "EM102",    # exception-message-inherit (false positives on dataclass)
+    "TRY003",   # raise-vanilla-args (we use exceptions with explicit messages)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "ANN",      # tests don't need annotations
+    "D",        # tests don't need docstrings
+    "PLR2004",  # magic values in tests are fine
+    "S",        # security in tests is not enforced
+    "ARG",      # unused arguments in fixtures
+    "FBT",      # boolean defaults in fixtures
+]
+"examples/*" = [
+    "ANN",
+    "D",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.mypy]
-files = ["cedar_intent"]
+files = ["cedrus"]
 python_version = "3.11"
 strict = true
 
 [[tool.mypy.overrides]]
 module = ["cedarpy", "litellm"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Tests are not type-checked strictly. Test code is allowed to use
+# untyped fixtures, dynamic stubs, and SimpleNamespace / cast()
+# shims. Type-correctness for tests is enforced at the import
+# boundary (the production code), not at every fixture call.
+directory = "tests"
+disallow_untyped_calls = false
+disallow_untyped_defs = false
+disable_error_code = ["no-untyped-def", "no-untyped-call"]
+warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

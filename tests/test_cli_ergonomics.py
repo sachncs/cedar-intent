@@ -2,7 +2,7 @@
 
 Covers the production-readiness improvements to the CLI surface:
 
-- Top-level catch wraps unexpected exceptions; only CedarIntentError
+- Top-level catch wraps unexpected exceptions; only Error
   produces the structured one-line error message.
 - --json mode emits a structured JSON envelope for errors.
 - parse_headers rejects empty names, CRLF, and oversize names/values.
@@ -19,12 +19,12 @@ import sys
 
 import pytest
 
-from cedar_intent.cli import (
+from cedrus.cli import (
     main,
     parse_headers,
     validate_identifier,
 )
-from cedar_intent.errors import ConfigError
+from cedrus.error import Config
 
 
 def test_validate_identifier_accepts_safe_input() -> None:
@@ -37,22 +37,22 @@ def test_validate_identifier_accepts_safe_input() -> None:
     ["", " ", "../etc", "/abs", "x" * 65, "hr\0", "with space", "with/slash"],
 )
 def test_validate_identifier_rejects_unsafe(bad: str) -> None:
-    with pytest.raises(ConfigError):
+    with pytest.raises(Config):
         validate_identifier(bad, "domain")
 
 
 def test_parse_headers_rejects_crlf() -> None:
-    with pytest.raises(ConfigError):
+    with pytest.raises(Config):
         parse_headers(["X-Foo: bar\r\nX-Admin: true"])
 
 
 def test_parse_headers_rejects_empty_name() -> None:
-    with pytest.raises(ConfigError):
+    with pytest.raises(Config):
         parse_headers([": value"])
 
 
 def test_parse_headers_rejects_oversize_name() -> None:
-    with pytest.raises(ConfigError):
+    with pytest.raises(Config):
         parse_headers(["X" * 300 + ": value"])
 
 
@@ -76,9 +76,9 @@ def test_cli_rejects_invalid_domain(tmp_path) -> None:
 
 def test_cli_rejects_negative_timeout(tmp_path) -> None:
     """--timeout -1 is rejected by argparse before any handler runs."""
-    from cedar_intent import Workspace
+    from cedrus import Space
 
-    workspace = Workspace.create(tmp_path / "acme")
+    workspace = Space.create(tmp_path / "acme")
     exit_code = main(
         [
             "--workspace",
@@ -97,9 +97,9 @@ def test_cli_rejects_negative_timeout(tmp_path) -> None:
 
 
 def test_cli_rejects_infinite_timeout(tmp_path) -> None:
-    from cedar_intent import Workspace
+    from cedrus import Space
 
-    workspace = Workspace.create(tmp_path / "acme")
+    workspace = Space.create(tmp_path / "acme")
     exit_code = main(
         [
             "--workspace",
@@ -124,7 +124,7 @@ def test_cli_json_emits_structured_error_envelope(tmp_path) -> None:
         [
             sys.executable,
             "-m",
-            "cedar_intent",
+            "cedrus",
             "--json",
             "--workspace",
             str(workspace_path),

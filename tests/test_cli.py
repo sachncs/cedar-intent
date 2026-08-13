@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
+
+from argparse import Namespace
 
 import pytest
 
-from cedar_intent import cli
-from cedar_intent.cli import (
+import cedrus.error
+from cedrus import cli
+from cedrus.cli import (
     MODEL_ENV_VAR,
     ONLINE_ENV_VAR,
     build_action,
@@ -103,7 +108,7 @@ def test_main_init_returns_zero(tmp_path: Path) -> None:
     target = tmp_path / "ws"
     exit_code = main(["--workspace", str(tmp_path), "init", "--path", str(target)])
     assert exit_code == 0
-    assert (target / ".cedar-intent" / "store.db").exists()
+    assert (target / ".cedrus" / "store.db").exists()
 
 
 def test_main_init_serializes_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -122,7 +127,7 @@ def test_main_init_missing_target_returns_one(
     exit_code = main(["--workspace", str(tmp_path), "init", "--path", ""])
     assert exit_code == 1
     captured = capsys.readouterr()
-    assert "cedar-intent: error" in captured.err
+    assert "cedrus: error" in captured.err
 
 
 def test_main_domain_add(tmp_path: Path) -> None:
@@ -280,7 +285,7 @@ def test_main_policy_generate_online_with_model(
         usage={"total_tokens": 5},
         choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(response_payload)))],
     )
-    with patch("cedar_intent.generator.litellm.litellm.completion", return_value=fake_response):
+    with patch("cedrus.generate.litellm.litellm.completion", return_value=fake_response):
         exit_code = main(
             [
                 "--workspace",
@@ -439,13 +444,13 @@ def test_main_unknown_command(tmp_path: Path) -> None:
 
 
 def test_run_command_unknown_command_raises(tmp_path: Path) -> None:
-    from cedar_intent import ConfigError
+    from cedrus import Config
 
     args = cli.build_parser().parse_args(
         ["--workspace", str(tmp_path), "init", "--path", str(tmp_path)]
     )
     args.command = "garbage"
-    with pytest.raises(ConfigError):
+    with pytest.raises(Config):
         run_command(args)
 
 
@@ -562,3 +567,169 @@ def test_build_generator_online_missing_model_raises(
     monkeypatch.delenv(MODEL_ENV_VAR, raising=False)
     generator = build_generator(args)
     assert generator.model == "provider/test-model"
+
+
+# ---------------------------------------------------------------------------
+# argparse type helpers
+# ---------------------------------------------------------------------------
+
+
+def test_positive_finite_float_accepts_positive_number() -> None:
+    from cedrus.cli import positive_finite_float
+    assert positive_finite_float("3.14") == 3.14
+
+
+def test_positive_finite_float_rejects_infinity() -> None:
+    from cedrus.cli import positive_finite_float
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_finite_float("inf")
+
+
+def test_positive_finite_float_rejects_nan() -> None:
+    from cedrus.cli import positive_finite_float
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_finite_float("nan")
+
+
+def test_positive_finite_float_rejects_zero() -> None:
+    from cedrus.cli import positive_finite_float
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_finite_float("0")
+
+
+def test_positive_finite_float_rejects_negative() -> None:
+    from cedrus.cli import positive_finite_float
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_finite_float("-1.0")
+
+
+def test_positive_finite_float_rejects_non_number() -> None:
+    from cedrus.cli import positive_finite_float
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_finite_float("not a number")
+
+
+def test_non_negative_int_accepts_zero() -> None:
+    from cedrus.cli import non_negative_int
+    assert non_negative_int("0") == 0
+
+
+def test_non_negative_int_accepts_positive() -> None:
+    from cedrus.cli import non_negative_int
+    assert non_negative_int("42") == 42
+
+
+def test_non_negative_int_rejects_negative() -> None:
+    from cedrus.cli import non_negative_int
+    with pytest.raises(argparse.ArgumentTypeError):
+        non_negative_int("-1")
+
+
+def test_non_negative_int_rejects_non_integer() -> None:
+    from cedrus.cli import non_negative_int
+    import argparse
+    with pytest.raises(argparse.ArgumentTypeError):
+        non_negative_int("3.14")
+
+
+def test_positive_int_rejects_zero() -> None:
+    from cedrus.cli import positive_int
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_int("0")
+
+
+def test_positive_int_accepts_one() -> None:
+    from cedrus.cli import positive_int
+    assert positive_int("1") == 1
+
+
+# ---------------------------------------------------------------------------
+# __main__ entrypoint
+# ---------------------------------------------------------------------------
+
+
+def test_main_module_routes_to_cli_main() -> None:
+    """cedrus.__main__ re-exports cli.main; test that the symbol is bound."""
+    import cedrus.__main__
+
+    assert callable(cedrus.__main__.main)
+
+
+# ---------------------------------------------------------------------------
+# report_error / report_unexpected_error
+# ---------------------------------------------------------------------------
+
+
+def test_report_error_returns_one() -> None:
+    from cedrus.cli import report_error
+
+    args = cast(Namespace, SimpleNamespace(json=False, workspace=None, command="init", path="."))
+    result = report_error(args, cast(cedrus.error.Error, RuntimeError("boom")))
+    assert result == 1
+
+
+def test_report_error_emits_json_envelope_when_json_flag_set(capsys) -> None:
+    from cedrus.cli import report_error
+
+    args = cast(Namespace, SimpleNamespace(json=True, workspace=None, command="init", path="."))
+    result = report_error(args, cast(cedrus.error.Error, RuntimeError("boom")))
+    captured = capsys.readouterr()
+    assert result == 1
+    assert "boom" in captured.err
+
+
+def test_report_unexpected_error_returns_one(capsys) -> None:
+    from cedrus.cli import report_unexpected_error
+
+    args = cast(Namespace, SimpleNamespace(json=False, workspace=None, command="init", path="."))
+    result = report_unexpected_error(args, cast(cedrus.error.Error, ValueError("kaboom")))
+    assert result == 1
+    captured = capsys.readouterr()
+    assert "kaboom" in captured.err
+
+
+def test_main_returns_two_for_argparse_usage_error(capsys) -> None:
+    """main returns exit code 2 for argparse usage errors."""
+    from cedrus.cli import main
+
+    code = main(["--not-a-real-flag"])
+    assert code == 2
+
+
+def test_main_returns_one_for_handler_error(capsys) -> None:
+    """main returns 1 when a handler raises cedrus.error.Error."""
+    from cedrus.cli import main
+
+    code = main(["--workspace", "/nonexistent-workspace-path-xyz", "domain", "list"])
+    assert code == 1
+
+
+def test_main_returns_zero_for_successful_init(tmp_path: Path) -> None:
+    from cedrus.cli import main
+
+    code = main(["init", "--path", str(tmp_path / "ws")])
+    assert code == 0
+    assert (tmp_path / "ws" / ".cedrus").exists()
+
+
+def test_main_returns_one_for_unexpected_handler_error(capsys) -> None:
+    """Unexpected (non-cedrus) exceptions inside a handler return 1."""
+    from cedrus.cli import main
+
+    # 'export' expects an existing workspace; an empty tmp_path won't
+    # be a workspace and the handler raises a generic exception.
+    code = main(["--workspace", str(Path("/no/such/workspace-xyz-9876")), "domain", "list"])
+    assert code == 1
+
+
+def test_main_emits_json_output_when_json_flag_set(tmp_path: Path, capsys) -> None:
+    """With --json, the result dict is JSON-serialized to stdout."""
+    import json
+
+    from cedrus.cli import main
+
+    code = main(["--json", "init", "--path", str(tmp_path / "ws")])
+    assert code == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["initialized"] == str((tmp_path / "ws").resolve())
