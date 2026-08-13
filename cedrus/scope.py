@@ -36,7 +36,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from cedrus.error import ScopeFault
+from cedrus.error import Compile, ScopeFault
 from cedrus.utils import id
 
 Expression = str | bool | int | float | dict[str, Any] | list[Any]
@@ -101,7 +101,7 @@ class Scope(ABC):
         """Reconstruct a scope from its JSON-friendly representation."""
 
     @classmethod
-    def parse(cls, data: Any) -> Scope | None:
+    def parse(cls, data: Any) -> "Scope":
         """Parse JSON-like data into the right :class:`Scope` subclass.
 
         Polymorphic entry point that dispatches on the discriminator
@@ -111,20 +111,31 @@ class Scope(ABC):
         * ``group_type`` or ``group_id`` → :class:`Principal`
         * ``name`` → :class:`Action`
 
+        When the dict contains a recognised ``kind`` value (one of
+        :attr:`Principal.ANY`, :attr:`Action.ANY`, :attr:`Resource.ANY`
+        plus the kind-specific variants), the matching ``from_dict``
+        is invoked. Empty input also falls through to the
+        :meth:`from_dict` default.
+
         :class:`Clause` is not constructed here — callers normalize
-        clauses through :meth:`Clause.normalize`. Returns ``None`` for
-        ambiguous or invalid data; :class:`Scope` validation failures
-        inside :meth:`from_dict` are also swallowed and reported as
-        ``None`` so callers can fall back to their own defaults.
+        clauses through :meth:`Clause.normalize`. The fallback path
+        raises :class:`Compile` on ambiguous or invalid data so
+        the typed call site gets a properly-typed ``Scope`` instance
+        without a ``Scope | None`` union.
 
         Args:
             data: Raw JSON-like value.
 
         Returns:
-            A typed :class:`Scope` instance, or ``None``.
+            A typed :class:`Scope` instance.
+
+        Raises:
+            Compile: When ``data`` is not a dict, no discriminator
+                key is present, or the underlying ``from_dict`` raises
+                :class:`ScopeFault`.
         """
         if not isinstance(data, dict):
-            return None
+            raise Compile(f"scope payload must be a dict, got {type(data).__name__}")
         try:
             if "parent_type" in data or "parent_id" in data:
                 return Resource.from_dict(data)
@@ -132,8 +143,30 @@ class Scope(ABC):
                 return Principal.from_dict(data)
             if "name" in data:
                 return Action.from_dict(data)
-        except ScopeFault:
-            return None
+            if "kind" in data:
+                # Discriminator-by-kind: route to the matching
+                # subclass based on the kind value. This keeps the
+                # round-trip parse(to_dict(...)) == ... contract.
+                # VARIETIES is a class-level frozenset on the
+                # non-slots classes; with slots=True the class-level
+                # access is a member_descriptor, so instantiate first.
+                kind = data["kind"]
+                if kind in Principal().VARIETIES:
+                    return Principal.from_dict(data)
+                if kind in Action().VARIETIES:
+                    return Action.from_dict(data)
+                if kind in Resource().VARIETIES:
+                    return Resource.from_dict(data)
+        except ScopeFault as error:
+            raise Compile(f"scope payload is invalid: {error}") from error
+        raise Compile(
+            f"scope payload missing discriminator; "
+            "need one of parent_type / parent_id / group_type / group_id / name"
+        )
+        raise Compile(
+            f"scope payload missing discriminator; "
+            "need one of parent_type / parent_id / group_type / group_id / name"
+        )
         return None
 
 
