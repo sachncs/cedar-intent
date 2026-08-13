@@ -33,7 +33,7 @@ from cedrus.space import (
 )
 
 
-def _workspace_photosflash(tmp_path: Path) -> Space:
+def build_workspace_photosflash(tmp_path: Path) -> Space:
     schema_payload = {
         "PhotoFlash": {
             "entityTypes": {
@@ -58,7 +58,7 @@ def _workspace_photosflash(tmp_path: Path) -> Space:
     return Space.open(tmp_path)
 
 
-def _need() -> Need:
+def make_need() -> Need:
     return Need(
         id="HR-001",
         text="body",
@@ -109,7 +109,7 @@ def test_space_close_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_space_storage_path_is_under_dot_cedrus(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         assert str(ws.storage_path).endswith("store.db")
         assert ".cedrus" in str(ws.storage_path)
@@ -123,7 +123,7 @@ def test_space_storage_path_is_under_dot_cedrus(tmp_path: Path) -> None:
 
 
 def test_space_requirements_directory_for_domain(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         assert ws.requirements_directory("hr") == tmp_path / "hr" / "requirements"
     finally:
@@ -131,7 +131,7 @@ def test_space_requirements_directory_for_domain(tmp_path: Path) -> None:
 
 
 def test_space_schema_path_for_domain(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         assert ws.schema_path("hr") == tmp_path / "hr" / "schema.json"
     finally:
@@ -139,7 +139,7 @@ def test_space_schema_path_for_domain(tmp_path: Path) -> None:
 
 
 def test_space_scenarios_path_for_domain(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         assert ws.scenarios_path("hr") == tmp_path / "hr" / "scenarios.json"
     finally:
@@ -147,7 +147,7 @@ def test_space_scenarios_path_for_domain(tmp_path: Path) -> None:
 
 
 def test_space_policies_directory_for_domain(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         assert ws.policies_directory("hr") == tmp_path / "hr" / "policies"
     finally:
@@ -173,7 +173,7 @@ def test_space_init_domain_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_space_load_schema_returns_parsed_schema(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         schema = ws.load_schema("hr")
         assert isinstance(schema, Schema)
@@ -190,7 +190,7 @@ def test_space_load_scenarios_returns_empty_when_file_missing(tmp_path: Path) ->
 
 
 def test_space_load_scenarios_raises_when_payload_not_a_list(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         (tmp_path / "hr" / "scenarios.json").write_text("{}", encoding="utf-8")
         with pytest.raises(Exception):
@@ -205,7 +205,7 @@ def test_space_load_scenarios_raises_when_payload_not_a_list(tmp_path: Path) -> 
 
 
 def test_space_add_requirement_file_persists(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         md = tmp_path / "hr-001.md"
         md.write_text(
@@ -219,7 +219,7 @@ def test_space_add_requirement_file_persists(tmp_path: Path) -> None:
 
 
 def test_space_add_requirement_directory_loads_every_md(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         (tmp_path / "hr" / "requirements" / "HR-001.md").write_text(
             "---\nid: HR-001\ndomain: hr\n---\n\nA\n", encoding="utf-8"
@@ -234,7 +234,7 @@ def test_space_add_requirement_directory_loads_every_md(tmp_path: Path) -> None:
 
 
 def test_space_get_requirement_returns_need(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -250,7 +250,7 @@ def test_space_get_requirement_returns_need(tmp_path: Path) -> None:
 def test_space_get_requirement_raises_when_missing(tmp_path: Path) -> None:
     from cedrus.error import Require
 
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         with pytest.raises(Require):
             ws.get_requirement("ghost")
@@ -259,7 +259,7 @@ def test_space_get_requirement_raises_when_missing(tmp_path: Path) -> None:
 
 
 def test_space_list_requirements_returns_domain_filter(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -278,7 +278,7 @@ def test_space_list_requirements_returns_domain_filter(tmp_path: Path) -> None:
 
 
 def test_space_remove_requirement_removes_row(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -300,7 +300,7 @@ def test_space_remove_requirement_removes_row(tmp_path: Path) -> None:
 
 
 def test_space_create_draft_uses_default_policy_id(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -320,7 +320,7 @@ def test_space_create_draft_uses_default_policy_id(tmp_path: Path) -> None:
 
 
 def test_space_build_bundle_returns_manifest(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -347,7 +347,7 @@ def test_space_build_bundle_returns_manifest(tmp_path: Path) -> None:
 
 
 def test_space_write_bundle_writes_directory(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -377,7 +377,7 @@ def test_space_write_bundle_writes_directory(tmp_path: Path) -> None:
 
 
 def test_space_export_domain_writes_concatenated_cedar(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -407,7 +407,7 @@ def test_space_export_domain_writes_concatenated_cedar(tmp_path: Path) -> None:
 def test_space_export_domain_raises_when_no_policies(tmp_path: Path) -> None:
     from cedrus.error import Space
 
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         with pytest.raises(Space):
             ws.export_domain("hr", tmp_path / "x.cedar")
@@ -421,7 +421,7 @@ def test_space_export_domain_raises_when_no_policies(tmp_path: Path) -> None:
 
 
 def test_space_validate_policies_returns_vreport(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -451,7 +451,7 @@ def test_space_validate_policies_returns_vreport(tmp_path: Path) -> None:
 def test_space_validate_policies_raises_when_no_policies(tmp_path: Path) -> None:
     from cedrus.error import Space
 
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         schema = ws.load_schema("hr")
         with pytest.raises(Space):
@@ -461,7 +461,7 @@ def test_space_validate_policies_raises_when_no_policies(tmp_path: Path) -> None
 
 
 def test_space_verify_domain_returns_report(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -493,7 +493,7 @@ def test_space_verify_domain_returns_report(tmp_path: Path) -> None:
 
 
 def test_space_list_deployments_returns_empty_initially(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         assert ws.list_deployments() == []
         assert ws.list_deployments("hr") == []
@@ -507,7 +507,7 @@ def test_space_list_deployments_returns_empty_initially(tmp_path: Path) -> None:
 
 
 def test_space_import_existing_policies_returns_empty_when_dir_missing(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         assert ws.import_existing_policies("ghost") == []
     finally:
@@ -515,7 +515,7 @@ def test_space_import_existing_policies_returns_empty_when_dir_missing(tmp_path:
 
 
 def test_space_import_existing_policies_loads_cedar_files(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         cedar = 'permit (principal, action == Action::"view", resource);'
         (tmp_path / "hr" / "policies" / "imported.cedar").write_text(cedar, encoding="utf-8")
@@ -537,7 +537,7 @@ def test_space_import_existing_policies_raises_on_duplicate_stems(tmp_path: Path
 
 
 def test_space_list_existing_policies_returns_compiled_policies(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -563,7 +563,7 @@ def test_space_list_existing_policies_returns_compiled_policies(tmp_path: Path) 
 
 
 def test_space_list_compiled_policies_returns_compiled(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -590,7 +590,7 @@ def test_space_list_compiled_policies_returns_compiled(tmp_path: Path) -> None:
 
 def test_space_list_compiled_policies_skips_orphans(tmp_path: Path) -> None:
     """list_compiled_policies catches the Store raised by Need.get."""
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         # No need to insert an orphan row — the FK rejects it. Instead
         # exercise the path by inserting a policy that points at a
@@ -627,7 +627,7 @@ def test_space_list_compiled_policies_skips_orphans(tmp_path: Path) -> None:
 def test_space_apply_raises_when_draft_cedar_empty(tmp_path: Path) -> None:
     from cedrus.error import Space
 
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -644,7 +644,7 @@ def test_space_apply_raises_when_draft_cedar_empty(tmp_path: Path) -> None:
 
 
 def test_space_apply_raises_when_draft_has_unresolved_items(tmp_path: Path) -> None:
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -679,7 +679,7 @@ def test_space_generate_draft_persists_stored_draft(tmp_path: Path) -> None:
     """The persisted DraftStored carries the qualified intent and scopes."""
     from cedrus.generate import Offline
 
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -707,7 +707,7 @@ def test_space_generate_draft_persists_stored_draft(tmp_path: Path) -> None:
 
 def test_space_apply_with_no_scenarios_skips_scenario_run(tmp_path: Path) -> None:
     """apply() with empty scenarios skips the test-report path entirely."""
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -743,7 +743,7 @@ def test_space_apply_with_no_scenarios_skips_scenario_run(tmp_path: Path) -> Non
 
 def test_space_test_domain_raises_when_no_scenarios(tmp_path: Path) -> None:
     """test_domain rejects an empty scenario list."""
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -761,7 +761,7 @@ def test_space_test_domain_raises_when_no_compiled_policies(tmp_path: Path) -> N
     """test_domain requires at least one compiled policy with cedar."""
     from cedrus import Case
 
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         (tmp_path / "hr" / "scenarios.json").write_text(
             json.dumps([
@@ -784,7 +784,7 @@ def test_space_test_domain_uses_default_schema_when_none(tmp_path: Path) -> None
     from cedrus import Compiled
     from cedrus.need import Need
 
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -815,7 +815,7 @@ def test_space_deploy_raises_when_verifier_rejects(tmp_path: Path) -> None:
     """deploy() with a non-passing verifier raises SpaceError unless skip_verify."""
     from cedrus.need import Need
 
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -844,7 +844,7 @@ def test_space_deploy_raises_when_verifier_rejects(tmp_path: Path) -> None:
 
 def test_space_list_compiled_policies_handles_orphan_fk(tmp_path: Path) -> None:
     """list_compiled_policies skips rows where requirement_id is null (FK cascade)."""
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -878,7 +878,7 @@ def test_space_resolve_test_entities_returns_dicts(tmp_path: Path) -> None:
 
     from cedrus.space import Space
 
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         entities = ws.resolve_test_entities([{"id": "u1"}, {"id": "u2"}])
         assert isinstance(entities, list)
@@ -889,7 +889,7 @@ def test_space_resolve_test_entities_returns_dicts(tmp_path: Path) -> None:
 
 def test_space_apply_for_requirement_with_no_draft_raises(tmp_path: Path) -> None:
     """apply_for_requirement raises SpaceError when no draft exists for a requirement."""
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "
@@ -925,7 +925,7 @@ def test_space_find_action_namespace_falls_back_to_action_namespace() -> None:
     assert namespace == "Custom"
 
 
-def _schema_only():
+def schema_only():
     """Build a minimal Cedar schema with one namespace and one action."""
     from cedrus import Schema
     return Schema.from_mapping(
@@ -1001,7 +1001,7 @@ def test_space_build_stored_report_round_trip(tmp_path: Path) -> None:
     from cedrus import Vreport
     from cedrus.space import Space
 
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     schema = ws.load_schema("hr")
     report = Vreport.from_cedar(['permit (principal, action, resource);'], schema)
     stored = Space.build_stored_report("draft-HR-001", "validation", report)
@@ -1042,7 +1042,7 @@ def test_space_apply_for_requirement_with_valid_draft(tmp_path: Path) -> None:
     from cedrus.compile import Intent
     from cedrus.store import DraftStored
 
-    ws = _workspace_photosflash(tmp_path)
+    ws = build_workspace_photosflash(tmp_path)
     try:
         ws.repository.execute(
             "INSERT INTO requirements (id, domain, text, source_path, created_at) "

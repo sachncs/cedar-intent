@@ -52,13 +52,13 @@ def fake_addrinfo_returning(ip: str) -> Any:
     ],
 )
 def test_ssrf_guard_rejects_blocked_addresses(ip: str) -> None:
-    guard = Guard(resolver=_fake_addrinfo_returning(ip))
+    guard = Guard(resolver=fake_addrinfo_returning(ip))
     with pytest.raises(Deploy):
         guard.check("http://example.com/cedar")
 
 
 def test_ssrf_guard_allows_public_ip_by_default() -> None:
-    guard = Guard(resolver=_fake_addrinfo_returning("93.184.216.34"))
+    guard = Guard(resolver=fake_addrinfo_returning("93.184.216.34"))
     pinned = guard.check("http://example.com/cedar")
     assert pinned.ip == "93.184.216.34"
 
@@ -66,7 +66,7 @@ def test_ssrf_guard_allows_public_ip_by_default() -> None:
 def test_ssrf_guard_allow_loopback_permits_127() -> None:
     guard = Guard(
         allow_loopback=True,
-        resolver=_fake_addrinfo_returning("127.0.0.1"),
+        resolver=fake_addrinfo_returning("127.0.0.1"),
     )
     pinned = guard.check("http://example.com/cedar")
     assert pinned.ip == "127.0.0.1"
@@ -75,7 +75,7 @@ def test_ssrf_guard_allow_loopback_permits_127() -> None:
 def test_ssrf_guard_allow_private_permits_rfc1918() -> None:
     guard = Guard(
         allow_private_targets=True,
-        resolver=_fake_addrinfo_returning("10.0.0.5"),
+        resolver=fake_addrinfo_returning("10.0.0.5"),
     )
     pinned = guard.check("http://example.com/cedar")
     assert pinned.ip == "10.0.0.5"
@@ -118,13 +118,13 @@ def test_ssrf_guard_rejects_when_only_private_addresses_resolve() -> None:
 
 
 def test_ssrf_guard_rejects_unsupported_scheme() -> None:
-    guard = Guard(resolver=_fake_addrinfo_returning("93.184.216.34"))
+    guard = Guard(resolver=fake_addrinfo_returning("93.184.216.34"))
     with pytest.raises(Deploy):
         guard.check("ftp://example.com/cedar")
 
 
 def test_ssrf_guard_rejects_missing_host() -> None:
-    guard = Guard(resolver=_fake_addrinfo_returning("93.184.216.34"))
+    guard = Guard(resolver=fake_addrinfo_returning("93.184.216.34"))
     with pytest.raises(Deploy):
         guard.check("http:///cedar")
 

@@ -40,10 +40,10 @@ class Context:
     """
 
     need: Any  # Need type (forward ref to avoid circular import)
+    principal: Principal = field(kw_only=True)  # type: ignore[assignment]
+    action: Action = field(kw_only=True)  # type: ignore[assignment]
+    resource: Resource = field(kw_only=True)  # type: ignore[assignment]
     schema: Schema | None = None
-    principal: Principal
-    action: Action
-    resource: Resource
     existing: tuple[Intent, ...] = field(default_factory=tuple)
 
 

@@ -21,7 +21,7 @@ from cedrus import (
 )
 
 
-def _schema() -> Schema:
+def build_schema() -> Schema:
     return Schema.from_mapping(
         {
             "PhotoFlash": {
@@ -49,7 +49,7 @@ def _schema() -> Schema:
     )
 
 
-def _intent(
+def make_intent(
     identifier: str = "HR-001",
     effect: str = "permit",
     principal: Principal | None = None,
@@ -177,15 +177,15 @@ def test_finding_to_dict_includes_optional_related_policy() -> None:
 
 
 def test_verify_passes_when_clean() -> None:
-    schema = _schema()
+    schema = build_schema()
     policies = [
-        _intent(
+        make_intent(
             "HR-001",
             principal=Principal(kind="is_type", type_name="User"),
             action=Action(kind="named", name="viewPhoto"),
             resource=Resource(kind="is_type", type_name="Photo"),
         ),
-        _intent(
+        make_intent(
             "HR-002",
             principal=Principal(kind="is_type", type_name="User"),
             action=Action(kind="named", name="viewAlbum"),
@@ -208,8 +208,8 @@ def test_verify_passes_when_clean() -> None:
 
 
 def test_verify_reports_missing_requirement() -> None:
-    schema = _schema()
-    policies = [_intent("HR-001", action=Action(kind="named", name="viewPhoto"))]
+    schema = build_schema()
+    policies = [make_intent("HR-001", action=Action(kind="named", name="viewPhoto"))]
     report = Verifier(schema).verify(
         policies,
         requirement_ids=["HR-001", "HR-002"],
@@ -223,8 +223,8 @@ def test_verify_reports_missing_requirement() -> None:
 
 
 def test_verify_reports_missing_action() -> None:
-    schema = _schema()
-    policies = [_intent("HR-001", action=Action(kind="named", name="viewPhoto"))]
+    schema = build_schema()
+    policies = [make_intent("HR-001", action=Action(kind="named", name="viewPhoto"))]
     report = Verifier(schema).verify(
         policies,
         requirement_ids=["HR-001"],
@@ -237,9 +237,9 @@ def test_verify_reports_missing_action() -> None:
 
 
 def test_verify_reports_missing_entity_type() -> None:
-    schema = _schema()
+    schema = build_schema()
     policies = [
-        _intent(
+        make_intent(
             "HR-001",
             principal=Principal(kind="is_type", type_name="User"),
             action=Action(kind="named", name="viewPhoto"),
@@ -284,15 +284,15 @@ def test_verify_reports_missing_entity_type() -> None:
 
 
 def test_verify_detects_shadowing() -> None:
-    schema = _schema()
-    forbid = _intent(
+    schema = build_schema()
+    forbid = make_intent(
         "HR-002",
         effect="forbid",
         principal=Principal(kind="any"),
         action=Action(kind="named", name="viewPhoto"),
         resource=Resource(kind="any"),
     )
-    permit = _intent(
+    permit = make_intent(
         "HR-001",
         principal=Principal(kind="any"),
         action=Action(kind="named", name="viewPhoto"),
@@ -313,8 +313,8 @@ def test_verify_detects_shadowing() -> None:
 
 def test_verify_specific_forbid_does_not_shadow_any_permit() -> None:
     """A forbid on Alice must not shadow a permit on any principal."""
-    schema = _schema()
-    forbid = _intent(
+    schema = build_schema()
+    forbid = make_intent(
         "HR-002",
         effect="forbid",
         principal=Principal(
@@ -323,7 +323,7 @@ def test_verify_specific_forbid_does_not_shadow_any_permit() -> None:
         action=Action(kind="named", name="viewPhoto"),
         resource=Resource(kind="is_type", type_name="Photo"),
     )
-    permit = _intent(
+    permit = make_intent(
         "HR-001",
         principal=Principal(kind="any"),
         action=Action(kind="named", name="viewPhoto"),
@@ -340,9 +340,9 @@ def test_verify_specific_forbid_does_not_shadow_any_permit() -> None:
 
 
 def test_verify_detects_redundancy() -> None:
-    schema = _schema()
-    permit_a = _intent("HR-001", action=Action(kind="named", name="viewPhoto"))
-    permit_b = _intent("HR-002", action=Action(kind="named", name="viewPhoto"))
+    schema = build_schema()
+    permit_a = make_intent("HR-001", action=Action(kind="named", name="viewPhoto"))
+    permit_b = make_intent("HR-002", action=Action(kind="named", name="viewPhoto"))
     report = Verifier(schema).verify(
         [permit_a, permit_b],
         requirement_ids=["HR-001", "HR-002"],
@@ -355,7 +355,7 @@ def test_verify_detects_redundancy() -> None:
 
 
 def test_verify_does_not_flag_different_conditions_as_redundant() -> None:
-    schema = _schema()
+    schema = build_schema()
 
     class PermitWithText:
         def __init__(self, identifier: str, cedar: str) -> None:
@@ -384,14 +384,14 @@ def test_verify_does_not_flag_different_conditions_as_redundant() -> None:
 
 
 def test_verify_distinguishes_distinct_scopes() -> None:
-    schema = _schema()
-    permit_a = _intent(
+    schema = build_schema()
+    permit_a = make_intent(
         "HR-001",
         principal=Principal(kind="any"),
         action=Action(kind="named", name="viewPhoto"),
         resource=Resource(kind="is_type", type_name="Photo"),
     )
-    permit_b = _intent(
+    permit_b = make_intent(
         "HR-002",
         principal=Principal(kind="is_type", type_name="User"),
         action=Action(kind="named", name="viewPhoto"),
@@ -413,8 +413,8 @@ def test_verify_distinguishes_distinct_scopes() -> None:
 
 
 def test_verifier_extract_one_parses_intent_cedar() -> None:
-    schema = _schema()
-    intent = _intent(
+    schema = build_schema()
+    intent = make_intent(
         "HR-001",
         principal=Principal(kind="is_type", type_name="User"),
         action=Action(kind="named", name="viewPhoto"),
@@ -425,8 +425,8 @@ def test_verifier_extract_one_parses_intent_cedar() -> None:
 
 
 def test_verifier_extract_returns_extraction() -> None:
-    schema = _schema()
-    intent = _intent("HR-001")
+    schema = build_schema()
+    intent = make_intent("HR-001")
     extraction = Verifier(schema).extract(intent)
     assert extraction is not None
 
@@ -435,7 +435,7 @@ def test_verifier_extract_raises_for_malformed_cedar() -> None:
     """extract propagates Parse; verify catches it as a malformed-policy finding."""
     from cedrus.verify import Parse
 
-    schema = _schema()
+    schema = build_schema()
 
     class MalformedPolicy:
         cedar = "not valid cedar at all"
@@ -446,7 +446,7 @@ def test_verifier_extract_raises_for_malformed_cedar() -> None:
 
 
 def test_verifier_extract_returns_extraction_for_valid_cedar() -> None:
-    schema = _schema()
+    schema = build_schema()
 
     class GoodPolicy:
         cedar = 'permit (principal, action, resource);'
@@ -457,28 +457,28 @@ def test_verifier_extract_returns_extraction_for_valid_cedar() -> None:
 
 
 def test_verifier_shadow_returns_list_of_findings() -> None:
-    schema = _schema()
+    schema = build_schema()
     policies = [
-        _intent("HR-001", action=Action(kind="named", name="viewPhoto")),
-        _intent("HR-002", action=Action(kind="named", name="viewPhoto")),
+        make_intent("HR-001", action=Action(kind="named", name="viewPhoto")),
+        make_intent("HR-002", action=Action(kind="named", name="viewPhoto")),
     ]
     findings = Verifier(schema).shadow(policies)
     assert isinstance(findings, list)
 
 
 def test_verifier_redundant_returns_list_of_findings() -> None:
-    schema = _schema()
+    schema = build_schema()
     policies = [
-        _intent("HR-001", action=Action(kind="named", name="viewPhoto")),
-        _intent("HR-002", action=Action(kind="named", name="viewPhoto")),
+        make_intent("HR-001", action=Action(kind="named", name="viewPhoto")),
+        make_intent("HR-002", action=Action(kind="named", name="viewPhoto")),
     ]
     findings = Verifier(schema).redundant(policies)
     assert isinstance(findings, list)
 
 
 def test_verifier_types_collects_referenced_entity_names() -> None:
-    schema = _schema()
-    intent = _intent(
+    schema = build_schema()
+    intent = make_intent(
         "HR-001",
         principal=Principal(
             kind="in_group", group_type="Group", group_id="admins"
@@ -498,9 +498,9 @@ def test_verifier_types_collects_referenced_entity_names() -> None:
 
 
 def test_verifier_coverage_action_returns_covered_and_uncovered() -> None:
-    schema = _schema()
+    schema = build_schema()
     policies = [
-        _intent("HR-001", action=Action(kind="named", name="viewPhoto"))
+        make_intent("HR-001", action=Action(kind="named", name="viewPhoto"))
     ]
     covered, uncovered = Verifier(schema).coverage_action(
         policies,
@@ -514,8 +514,8 @@ def test_verifier_coverage_action_returns_covered_and_uncovered() -> None:
 
 
 def test_verifier_coverage_need_returns_covered_and_uncovered() -> None:
-    schema = _schema()
-    policies = [_intent("HR-001")]
+    schema = build_schema()
+    policies = [make_intent("HR-001")]
     covered, uncovered = Verifier(schema).coverage_need(
         policies,
         ids=["HR-001", "HR-002"],
@@ -525,7 +525,7 @@ def test_verifier_coverage_need_returns_covered_and_uncovered() -> None:
 
 
 def test_verifier_uncovered_emits_finding_for_uncovered_items() -> None:
-    schema = _schema()
+    schema = build_schema()
     findings = Verifier(schema).uncovered(
         ["missing1", "missing2"],
         kind="uncovered-requirement",
@@ -537,13 +537,13 @@ def test_verifier_uncovered_emits_finding_for_uncovered_items() -> None:
 
 
 def test_verifier_uncovered_emits_nothing_when_items_empty() -> None:
-    schema = _schema()
+    schema = build_schema()
     findings = Verifier(schema).uncovered([], kind="uncovered-requirement", template="m")
     assert findings == []
 
 
 def test_verifier_malformed_policy_emits_warning_finding() -> None:
-    schema = _schema()
+    schema = build_schema()
 
     class MalformedPolicy:
         cedar = "not valid cedar at all"
@@ -563,7 +563,7 @@ def test_verifier_malformed_policy_emits_warning_finding() -> None:
 
 
 def test_verify_handles_empty_policy_list() -> None:
-    schema = _schema()
+    schema = build_schema()
     report = Verifier(schema).verify(
         [],
         requirement_ids=[],
@@ -576,7 +576,7 @@ def test_verify_handles_empty_policy_list() -> None:
 
 
 def test_verify_all_malformed_policies_yield_malformed_findings() -> None:
-    schema = _schema()
+    schema = build_schema()
 
     class BadPolicy:
         def __init__(self, identifier: str) -> None:
@@ -600,7 +600,7 @@ def test_verify_all_malformed_policies_yield_malformed_findings() -> None:
 
 
 def test_extract_signature_includes_all_slots() -> None:
-    schema = _schema()
+    schema = build_schema()
     intent = Intent(
         id="HR-001",
         requirement_id="HR-001",
@@ -621,8 +621,8 @@ def test_extract_signature_includes_all_slots() -> None:
 
 
 def test_extraction_dataclass_exposes_all_fields() -> None:
-    schema = _schema()
-    intent = _intent(
+    schema = build_schema()
+    intent = make_intent(
         "HR-001",
         principal=Principal(kind="any"),
         action=Action(kind="any"),
@@ -644,7 +644,7 @@ def test_extraction_dataclass_exposes_all_fields() -> None:
 
 def test_verify_action_in_group_expands_members() -> None:
     """``action in Action::"readers"`` covers the group's member actions."""
-    schema = _schema()
+    schema = build_schema()
     policies = [
         Intent(
             id="HR-001",
@@ -668,9 +668,9 @@ def test_verify_action_in_group_expands_members() -> None:
 
 def test_verifier_shadow_skips_non_comparable_policies() -> None:
     """shadow() returns empty when no policy has shadow semantics."""
-    schema = _schema()
+    schema = build_schema()
     policies = [
-        _intent(
+        make_intent(
             "HR-001",
             principal=Principal(kind="is_type", type_name="User"),
             action=Action(kind="named", name="viewPhoto"),
@@ -682,15 +682,15 @@ def test_verifier_shadow_skips_non_comparable_policies() -> None:
 
 
 def test_verifier_redundant_skips_distinct_policies() -> None:
-    schema = _schema()
+    schema = build_schema()
     policies = [
-        _intent(
+        make_intent(
             "HR-001",
             principal=Principal(kind="any"),
             action=Action(kind="any"),
             resource=Resource(kind="any"),
         ),
-        _intent(
+        make_intent(
             "HR-002",
             principal=Principal(kind="is_type", type_name="User"),
             action=Action(kind="named", name="viewPhoto"),
@@ -703,7 +703,7 @@ def test_verifier_redundant_skips_distinct_policies() -> None:
 
 def test_verifier_missing_coverage_finding_formats_items() -> None:
     """missing_coverage_finding formats the items list in the message."""
-    schema = _schema()
+    schema = build_schema()
     findings = Verifier(schema).uncovered(
         ["a", "b", "c"],
         kind="uncovered-entity-type",
@@ -717,8 +717,8 @@ def test_verifier_missing_coverage_finding_formats_items() -> None:
 
 def test_verifier_emits_uncovered_action_finding() -> None:
     """verify emits an uncovered-action finding for actions not in policies."""
-    schema = _schema()
-    intent = _intent(
+    schema = build_schema()
+    intent = make_intent(
         "HR-001",
         action=Action(kind="named", name="viewPhoto"),
     )
@@ -794,8 +794,8 @@ def test_module_collect_entity_types_handles_extraction_pairs() -> None:
     """The module-level collect_entity_types takes (policy, extraction) pairs."""
     from cedrus.verify import collect_entity_types
 
-    schema = _schema()
-    intent = _intent(
+    schema = build_schema()
+    intent = make_intent(
         "HR-001",
         principal=Principal(
             kind="in_group", group_type="Group", group_id="admins"
